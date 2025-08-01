@@ -1,0 +1,93 @@
+- [ ] != (not equals)
+- [ ] !between
+- [ ] !contains
+- [ ] !contains_cs
+- [ ] !endswith
+- [ ] !endswith_cs
+- [ ] !has
+- [ ] !has_cs
+- [ ] !hasprefix
+- [ ] !hasprefix_cs
+- [ ] !hassuffix
+- [ ] !hassuffix_cs
+- [ ] !in
+- [ ] !in~
+- [ ] !startswith
+- [ ] !startswith_cs
+- [ ] !~ (not equals)
+- [ ] == (equals)
+- [ ] =~ (equals)
+- [x] in~
+- [ ] Bitwise binary
+- [ ] Graph
+- [ ] Logical or binary
+- [ ] Numerical
+- [ ] Query
+- [ ] Scalar
+- [ ] String
+- [ ] Tabular
+- [ ] as
+- [ ] between
+- [x] bin()
+- [ ] consume
+- [ ] contains
+- [ ] contains_cs
+- [x] count
+- [ ] datatable
+- [x] distinct
+- [ ] endswith
+- [ ] endswith_cs
+- [ ] evaluate
+- [x] extend
+- [ ] externaldata
+- [ ] facet
+- [ ] find
+- [ ] fork
+- [ ] getschema
+- [x] has
+- [ ] has_all
+- [ ] has_any
+- [ ] has_cs
+- [ ] hasprefix
+- [ ] hasprefix_cs
+- [ ] hassuffix
+- [ ] hassuffix_cs
+- [x] in
+- [ ] invoke
+- [x] in~
+- [x] join
+- [ ] lookup
+- [ ] macro-expand
+- [ ] make-series
+- [ ] matches regex
+- [ ] mv-apply
+- [ ] mv-expand
+- [ ] parse
+- [ ] parse-kv
+- [ ] parse-where
+- [ ] partition
+- [ ] print
+- [x] project
+- [x] project-away
+- [ ] project-by-names
+- [ ] project-keep
+- [x] project-rename
+- [ ] project-reorder
+- [ ] range
+- [ ] reduce
+- [ ] render
+- [ ] sample
+- [ ] sample-distinct
+- [ ] scan
+- [ ] search
+- [ ] serialize
+- [x] sort
+- [ ] startswith
+- [ ] startswith_cs
+- [x] summarize
+- [x] take
+- [x] top
+- [ ] top-hitters
+- [ ] top-nested
+- [ ] union
+- [x] where
