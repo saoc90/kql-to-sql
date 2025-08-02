@@ -54,7 +54,15 @@ internal class OperatorSqlTranslator
 
     private string ApplyProject(string leftSql, ProjectOperator project)
     {
-        var columns = project.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
+        var columns = project.Expressions.Select(se =>
+        {
+            if (se.Element is SimpleNamedExpression sne)
+            {
+                return $"{ExpressionSqlBuilder.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
+            }
+            return ExpressionSqlBuilder.ConvertExpression(se.Element);
+        }).ToArray();
+
         if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
         {
             var rest = leftSql.Substring("SELECT * FROM ".Length);

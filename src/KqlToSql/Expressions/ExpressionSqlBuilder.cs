@@ -8,6 +8,31 @@ namespace KqlToSql.Expressions;
 
 internal static class ExpressionSqlBuilder
 {
+    private static readonly Dictionary<string, string> CastFunctionMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["tobool"] = "BOOLEAN",
+        ["toboolean"] = "BOOLEAN",
+        ["bool"] = "BOOLEAN",
+        ["boolean"] = "BOOLEAN",
+        ["toint"] = "INTEGER",
+        ["int"] = "INTEGER",
+        ["tolong"] = "BIGINT",
+        ["long"] = "BIGINT",
+        ["tostring"] = "TEXT",
+        ["string"] = "TEXT",
+        ["todouble"] = "DOUBLE",
+        ["toreal"] = "DOUBLE",
+        ["tofloat"] = "DOUBLE",
+        ["double"] = "DOUBLE",
+        ["real"] = "DOUBLE",
+        ["float"] = "DOUBLE",
+        ["todecimal"] = "DECIMAL",
+        ["decimal"] = "DECIMAL",
+        ["todatetime"] = "TIMESTAMP",
+        ["datetime"] = "TIMESTAMP",
+        ["totimespan"] = "INTERVAL",
+        ["timespan"] = "INTERVAL"
+    };
     internal static string ConvertExpression(Expression expr, string? leftAlias = null, string? rightAlias = null)
     {
         if (TryConvertDynamicAccess(expr, leftAlias, rightAlias, out var dynamicSql))
@@ -88,14 +113,31 @@ internal static class ExpressionSqlBuilder
                 ConvertDateTimeLiteral(lit),
             LiteralExpression lit => lit.ToString().Trim(),
             FunctionCallExpression fce =>
-                fce.Name.ToString().Trim().ToLowerInvariant() switch
-                {
-                    "bin" => ConvertBin(fce, leftAlias, rightAlias),
-                    "bag_pack" => $"json_object({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
-                    _ => $"{fce.Name}({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})"
-                },
+                ConvertFunctionCall(fce, leftAlias, rightAlias),
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
             _ => throw new NotSupportedException($"Unsupported expression {expr.Kind}")
+        };
+    }
+
+    private static string ConvertFunctionCall(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    {
+        var name = fce.Name.ToString().Trim();
+        var lower = name.ToLowerInvariant();
+        if (CastFunctionMap.TryGetValue(lower, out var sqlType))
+        {
+            if (fce.ArgumentList.Expressions.Count != 1)
+            {
+                throw new NotSupportedException($"{name} expects exactly one argument");
+            }
+            var arg = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
+            return $"CAST({arg} AS {sqlType})";
+        }
+
+        return lower switch
+        {
+            "bin" => ConvertBin(fce, leftAlias, rightAlias),
+            "bag_pack" => $"json_object({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
+            _ => $"{name}({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})"
         };
     }
 
