@@ -63,4 +63,34 @@ public class ScalarFunctionTests
         var diff = DateTime.UtcNow - result;
         Assert.InRange(diff.TotalHours, 24 - 0.5, 24 + 0.5);
     }
+
+    [Fact]
+    public void Iif_Function()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = "StormEvents | project r=iif(1==1, 'yes', 'no') | take 1";
+        var sql = converter.Convert(kql);
+        Assert.Contains("CASE", sql, StringComparison.OrdinalIgnoreCase);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        var result = (string)cmd.ExecuteScalar();
+        Assert.Equal("yes", result);
+    }
+
+    [Fact]
+    public void Switch_Function()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = "StormEvents | project r=switch(2, 1, 'a', 2, 'b', 'c') | take 1";
+        var sql = converter.Convert(kql);
+        Assert.Contains("CASE", sql, StringComparison.OrdinalIgnoreCase);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        var result = (string)cmd.ExecuteScalar();
+        Assert.Equal("b", result);
+    }
 }
