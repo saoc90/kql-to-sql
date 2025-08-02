@@ -11,7 +11,7 @@ public class SummarizeOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize cnt=count() by STATE | sort by cnt desc";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT STATE, COUNT(*) AS cnt FROM (SELECT * FROM StormEvents) GROUP BY STATE ORDER BY cnt DESC", sql);
+        Assert.Equal("SELECT STATE, COUNT(*) AS cnt FROM StormEvents GROUP BY STATE ORDER BY cnt DESC", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -28,7 +28,7 @@ public class SummarizeOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize MaxInj=max(INJURIES_DIRECT), MinInj=min(INJURIES_DIRECT)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT MAX(INJURIES_DIRECT) AS MaxInj, MIN(INJURIES_DIRECT) AS MinInj FROM (SELECT * FROM StormEvents)", sql);
+        Assert.Equal("SELECT MAX(INJURIES_DIRECT) AS MaxInj, MIN(INJURIES_DIRECT) AS MinInj FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

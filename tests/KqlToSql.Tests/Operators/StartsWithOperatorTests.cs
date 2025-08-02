@@ -16,7 +16,7 @@ public class StartsWithOperatorTests
 | where event_count > 10
 | project State, event_count";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM (SELECT * FROM StormEvents) GROUP BY State) WHERE State ILIKE 'Lo%' AND event_count > 10", sql);
+        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State ILIKE 'Lo%' AND event_count > 10", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -38,7 +38,7 @@ public class StartsWithOperatorTests
 | where event_count > 3
 | project State, event_count";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM (SELECT * FROM StormEvents) GROUP BY State) WHERE State LIKE 'I%' AND event_count > 3", sql);
+        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State LIKE 'I%' AND event_count > 3", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

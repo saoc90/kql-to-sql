@@ -16,7 +16,7 @@ public class HasOperatorTests
 | where event_count > 1
 | project State, event_count";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM (SELECT * FROM StormEvents) GROUP BY State) WHERE State ILIKE '%New%' AND event_count > 1", sql);
+        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State ILIKE '%New%' AND event_count > 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
