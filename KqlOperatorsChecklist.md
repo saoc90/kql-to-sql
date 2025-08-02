@@ -90,5 +90,6 @@
 - [ ] top-nested
 - [ ] union
 - [x] where
-- [ ] materialize()
-- [x] view
+- [x] materialize()
+- [x] view (command)
+- [x] view() (function declaration)
