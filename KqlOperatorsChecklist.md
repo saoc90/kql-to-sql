@@ -1,23 +1,22 @@
-- [ ] != (not equals)
+- [x] != (not equals)
 - [ ] !between
-- [ ] !contains
-- [ ] !contains_cs
-- [ ] !endswith
-- [ ] !endswith_cs
-- [ ] !has
-- [ ] !has_cs
+- [x] !contains
+- [x] !contains_cs
+- [x] !endswith
+- [x] !endswith_cs
+- [x] !has
+- [x] !has_cs
 - [ ] !hasprefix
 - [ ] !hasprefix_cs
 - [ ] !hassuffix
 - [ ] !hassuffix_cs
-- [ ] !in
-- [ ] !in~
-- [ ] !startswith
-- [ ] !startswith_cs
-- [ ] !~ (not equals)
-- [ ] == (equals)
-- [ ] =~ (equals)
-- [x] in~
+- [x] !in
+- [x] !in~
+- [x] !startswith
+- [x] !startswith_cs
+- [x] !~ (not equals)
+- [x] == (equals)
+- [x] =~ (equals)
 - [ ] Bitwise binary
 - [ ] Graph
 - [ ] Logical or binary

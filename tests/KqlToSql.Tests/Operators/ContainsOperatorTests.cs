@@ -48,4 +48,48 @@ public class ContainsOperatorTests
         var result = cmd.ExecuteScalar();
         Assert.Equal(4L, (long)result!);
     }
+
+    [Fact]
+    public void Converts_NotContains()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = @"StormEvents
+| summarize event_count=count() by State
+| where State !contains ""ALABAMA""
+| project State";
+        var sql = converter.Convert(kql);
+        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State NOT ILIKE '%ALABAMA%'", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var states = new List<string>();
+        while (reader.Read())
+        {
+            states.Add(reader.GetString(0));
+        }
+        Assert.DoesNotContain("ALABAMA", states);
+    }
+
+    [Fact]
+    public void Converts_NotContains_CaseSensitive()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = @"StormEvents
+| summarize event_count=count() by State
+| where State !contains_cs ""AS""
+| project State";
+        var sql = converter.Convert(kql);
+        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State NOT LIKE '%AS%'", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            Assert.DoesNotContain("AS", reader.GetString(0));
+        }
+    }
 }

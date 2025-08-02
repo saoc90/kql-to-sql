@@ -44,4 +44,50 @@ public class HasOperatorTests
         var result = cmd.ExecuteScalar();
         Assert.Null(result);
     }
+
+    [Fact]
+    public void Converts_NotHas()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = @"StormEvents
+| summarize event_count=count() by State
+| where State !has ""New""
+| project State";
+        var sql = converter.Convert(kql);
+        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State NOT ILIKE '%New%'", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var states = new List<string>();
+        while (reader.Read())
+        {
+            states.Add(reader.GetString(0));
+        }
+        Assert.DoesNotContain("NEW MEXICO", states);
+    }
+
+    [Fact]
+    public void Converts_NotHas_CaseSensitive()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = @"StormEvents
+| summarize event_count=count() by State
+| where State !has_cs ""New""
+| project State";
+        var sql = converter.Convert(kql);
+        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State NOT LIKE '%New%'", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var states = new List<string>();
+        while (reader.Read())
+        {
+            states.Add(reader.GetString(0));
+        }
+        Assert.Contains("NEW MEXICO", states);
+    }
 }

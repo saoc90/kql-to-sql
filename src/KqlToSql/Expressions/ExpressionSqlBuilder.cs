@@ -41,14 +41,30 @@ internal static class ExpressionSqlBuilder
                 ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
             BinaryExpression bin when bin.Kind == SyntaxKind.ContainsCsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "%", true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotHasExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false, true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotHasCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true, true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotContainsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false, true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotContainsCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.StartsWithExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "", "%", false),
             BinaryExpression bin when bin.Kind == SyntaxKind.StartsWithCsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "", "%", true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotStartsWithExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "", "%", false, true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotStartsWithCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "", "%", true, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.EndsWithExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", false),
             BinaryExpression bin when bin.Kind == SyntaxKind.EndsWithCsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotEndsWithExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "", false, true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotEndsWithCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "", true, true),
             InExpression inExpr => ConvertInExpression(inExpr, leftAlias, rightAlias),
             NameReference nr => nr.Name.ToString().Trim() switch
             {
@@ -80,7 +96,8 @@ internal static class ExpressionSqlBuilder
 
         var items = list.Expressions.Select(e => ConvertExpression(e.Element, leftAlias, rightAlias)).ToArray();
 
-        if (inExpr.Kind == SyntaxKind.InCsExpression)
+        var caseInsensitive = inExpr.Kind == SyntaxKind.InCsExpression || inExpr.Kind == SyntaxKind.NotInCsExpression;
+        if (caseInsensitive)
         {
             left = $"UPPER({left})";
             for (var i = 0; i < items.Length; i++)
@@ -93,10 +110,11 @@ internal static class ExpressionSqlBuilder
             }
         }
 
-        return $"{left} IN ({string.Join(", ", items)})";
+        var op = (inExpr.Kind == SyntaxKind.NotInExpression || inExpr.Kind == SyntaxKind.NotInCsExpression) ? "NOT IN" : "IN";
+        return $"{left} {op} ({string.Join(", ", items)})";
     }
 
-    private static string ConvertLike(BinaryExpression bin, string? leftAlias, string? rightAlias, string prefix, string suffix, bool caseSensitive)
+    private static string ConvertLike(BinaryExpression bin, string? leftAlias, string? rightAlias, string prefix, string suffix, bool caseSensitive, bool negated = false)
     {
         var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
         string pattern;
@@ -122,6 +140,10 @@ internal static class ExpressionSqlBuilder
         }
 
         var like = caseSensitive ? "LIKE" : "ILIKE";
+        if (negated)
+        {
+            return $"{left} NOT {like} {pattern}";
+        }
         return $"{left} {like} {pattern}";
     }
 
