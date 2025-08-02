@@ -1,5 +1,5 @@
 - [x] != (not equals)
-- [ ] !between
+- [x] !between
 - [x] !contains
 - [x] !contains_cs
 - [x] !endswith
@@ -26,7 +26,7 @@
 - [ ] String
 - [ ] Tabular
 - [ ] as
-- [ ] between
+- [x] between
 - [x] bin()
 - [ ] consume
 - [x] contains
