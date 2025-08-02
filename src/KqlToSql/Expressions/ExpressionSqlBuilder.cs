@@ -137,8 +137,54 @@ internal static class ExpressionSqlBuilder
         {
             "bin" => ConvertBin(fce, leftAlias, rightAlias),
             "bag_pack" => $"json_object({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
+            "tolower" => $"LOWER({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
+            "toupper" => $"UPPER({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
+            "strlen" => $"LENGTH({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
+            "substring" => ConvertSubstring(fce, leftAlias, rightAlias),
+            "now" => "NOW()",
+            "ago" => ConvertAgo(fce, leftAlias, rightAlias),
             _ => $"{name}({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})"
         };
+    }
+
+    private static string ConvertSubstring(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    {
+        if (fce.ArgumentList.Expressions.Count is < 2 or > 3)
+        {
+            throw new NotSupportedException("substring() expects two or three arguments");
+        }
+
+        var text = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
+        var start = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
+        var startExpr = $"({start}) + 1";
+        if (fce.ArgumentList.Expressions.Count == 3)
+        {
+            var length = ConvertExpression(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
+            return $"SUBSTR({text}, {startExpr}, {length})";
+        }
+
+        return $"SUBSTR({text}, {startExpr})";
+    }
+
+    private static string ConvertAgo(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    {
+        if (fce.ArgumentList.Expressions.Count != 1)
+        {
+            throw new NotSupportedException("ago() expects one argument");
+        }
+
+        var argExpr = fce.ArgumentList.Expressions[0].Element;
+        if (argExpr is LiteralExpression lit)
+        {
+            var text = lit.ToString().Trim().Trim('\'', '\"');
+            if (TryParseTimespan(text, out var ms))
+            {
+                return $"NOW() - {ms} * INTERVAL '1 millisecond'";
+            }
+        }
+
+        var arg = ConvertExpression(argExpr, leftAlias, rightAlias);
+        return $"NOW() - ({arg}) * INTERVAL '1 millisecond'";
     }
 
     internal static string ConvertInExpression(InExpression inExpr, string? leftAlias, string? rightAlias)
