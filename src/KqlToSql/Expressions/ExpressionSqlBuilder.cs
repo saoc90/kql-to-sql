@@ -145,6 +145,7 @@ internal static class ExpressionSqlBuilder
             "ago" => ConvertAgo(fce, leftAlias, rightAlias),
             "iif" => ConvertIif(fce, leftAlias, rightAlias),
             "switch" => ConvertSwitch(fce, leftAlias, rightAlias),
+            "pack_array" => $"LIST_VALUE({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
             _ => $"{name}({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})"
         };
     }

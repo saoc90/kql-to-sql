@@ -60,7 +60,7 @@
 - [ ] make-series
 - [ ] matches regex
 - [ ] mv-apply
-- [ ] mv-expand
+- [x] mv-expand
 - [ ] parse
 - [ ] parse-kv
 - [ ] parse-where
@@ -101,6 +101,7 @@
 - [x] toupper()
 - [x] now()
 - [x] ago()
+- [x] pack_array()
 - [ ] abs()
 - [ ] acos()
 - [ ] asin()
