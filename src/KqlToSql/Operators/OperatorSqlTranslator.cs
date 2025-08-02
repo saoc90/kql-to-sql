@@ -31,6 +31,7 @@ internal class OperatorSqlTranslator
             CountOperator count => ApplyCount(leftSql, count),
             DistinctOperator distinct => ApplyDistinct(leftSql, distinct),
             JoinOperator join => ApplyJoin(leftSql, join),
+            MvExpandOperator mvExpand => ApplyMvExpand(leftSql, mvExpand),
             _ => throw new NotSupportedException($"Unsupported operator {op.Kind}")
         };
     }
@@ -42,6 +43,36 @@ internal class OperatorSqlTranslator
         var end = ExpressionSqlBuilder.ConvertExpression(range.To);
         var step = ExpressionSqlBuilder.ConvertExpression(range.Step);
         return $"SELECT generate_series AS {name} FROM generate_series({start}, {end}, {step})";
+    }
+
+    private string ApplyMvExpand(string leftSql, MvExpandOperator mvExpand)
+    {
+        if (mvExpand.Expressions.Count != 1)
+        {
+            throw new NotSupportedException("mv-expand with multiple expressions is not supported");
+        }
+
+        if (mvExpand.Expressions[0].Element is not MvExpandExpression mve)
+        {
+            throw new NotSupportedException("Unexpected mv-expand expression type");
+        }
+
+        var column = mve.Expression.ToString().Trim();
+
+        string sourceAlias = "t";
+        string fromSql;
+        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = leftSql.Substring("SELECT * FROM ".Length);
+            fromSql = $"{rest} AS {sourceAlias}";
+        }
+        else
+        {
+            fromSql = $"({leftSql}) AS {sourceAlias}";
+        }
+
+        var unnestAlias = "u";
+        return $"SELECT {sourceAlias}.* EXCLUDE ({column}), {unnestAlias}.value AS {column} FROM {fromSql} CROSS JOIN UNNEST({sourceAlias}.{column}) AS {unnestAlias}(value)";
     }
 
     private string ApplyFilter(string leftSql, FilterOperator filter)
