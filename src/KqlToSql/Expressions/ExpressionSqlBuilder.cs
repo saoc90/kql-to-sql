@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Kusto.Language.Syntax;
 
@@ -33,9 +34,21 @@ internal static class ExpressionSqlBuilder
             BinaryExpression bin when bin.Kind == SyntaxKind.OrExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} OR {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.HasExpression =>
-                ConvertHas(bin, leftAlias, rightAlias, false),
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
             BinaryExpression bin when bin.Kind == SyntaxKind.HasCsExpression =>
-                ConvertHas(bin, leftAlias, rightAlias, true),
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.ContainsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
+            BinaryExpression bin when bin.Kind == SyntaxKind.ContainsCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.StartsWithExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "", "%", false),
+            BinaryExpression bin when bin.Kind == SyntaxKind.StartsWithCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "", "%", true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.EndsWithExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "", false),
+            BinaryExpression bin when bin.Kind == SyntaxKind.EndsWithCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "", true),
             InExpression inExpr => ConvertInExpression(inExpr, leftAlias, rightAlias),
             NameReference nr => nr.Name.ToString().Trim() switch
             {
@@ -83,19 +96,29 @@ internal static class ExpressionSqlBuilder
         return $"{left} IN ({string.Join(", ", items)})";
     }
 
-    private static string ConvertHas(BinaryExpression bin, string? leftAlias, string? rightAlias, bool caseSensitive)
+    private static string ConvertLike(BinaryExpression bin, string? leftAlias, string? rightAlias, string prefix, string suffix, bool caseSensitive)
     {
         var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
         string pattern;
         if (bin.Right is LiteralExpression lit)
         {
             var text = lit.ToString().Trim().Trim('\'', '\"');
-            pattern = $"'%{text}%'";
+            pattern = $"'{prefix}{text}{suffix}'";
         }
         else
         {
             var right = ConvertExpression(bin.Right, leftAlias, rightAlias);
-            pattern = $"'%' || {right} || '%'";
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(prefix))
+            {
+                parts.Add($"'{prefix}'");
+            }
+            parts.Add(right);
+            if (!string.IsNullOrEmpty(suffix))
+            {
+                parts.Add($"'{suffix}'");
+            }
+            pattern = string.Join(" || ", parts);
         }
 
         var like = caseSensitive ? "LIKE" : "ILIKE";
