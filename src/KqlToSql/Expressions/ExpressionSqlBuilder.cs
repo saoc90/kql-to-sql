@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Kusto.Language.Syntax;
 
@@ -70,6 +71,10 @@ internal static class ExpressionSqlBuilder
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", false, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotEndsWithCsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", true, true),
+            BetweenExpression be when be.Kind == SyntaxKind.BetweenExpression =>
+                ConvertBetween(be, leftAlias, rightAlias, false),
+            BetweenExpression be when be.Kind == SyntaxKind.NotBetweenExpression =>
+                ConvertBetween(be, leftAlias, rightAlias, true),
             InExpression inExpr => ConvertInExpression(inExpr, leftAlias, rightAlias),
             NameReference nr => nr.Name.ToString().Trim() switch
             {
@@ -79,6 +84,8 @@ internal static class ExpressionSqlBuilder
             },
             PathExpression pe =>
                 $"{ConvertExpression(pe.Expression, leftAlias, rightAlias)}.{pe.Selector}",
+            LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression =>
+                ConvertDateTimeLiteral(lit),
             LiteralExpression lit => lit.ToString().Trim(),
             FunctionCallExpression fce =>
                 fce.Name.ToString().Trim().ToLowerInvariant() switch
@@ -120,6 +127,16 @@ internal static class ExpressionSqlBuilder
         return $"{left} {op} ({string.Join(", ", items)})";
     }
 
+    internal static string ConvertBetween(BetweenExpression bin, string? leftAlias, string? rightAlias, bool negated)
+    {
+        var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
+        var couple = bin.Right;
+        var lower = ConvertExpression(couple.First, leftAlias, rightAlias);
+        var upper = ConvertExpression(couple.Second, leftAlias, rightAlias);
+        var expr = $"{left} BETWEEN {lower} AND {upper}";
+        return negated ? $"NOT ({expr})" : expr;
+    }
+
     private static string ConvertLike(BinaryExpression bin, string? leftAlias, string? rightAlias, string prefix, string suffix, bool caseSensitive, bool negated = false)
     {
         var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
@@ -151,6 +168,21 @@ internal static class ExpressionSqlBuilder
             return $"{left} NOT {like} {pattern}";
         }
         return $"{left} {like} {pattern}";
+    }
+
+    internal static string ConvertDateTimeLiteral(LiteralExpression lit)
+    {
+        var text = lit.ToString().Trim();
+        if (text.StartsWith("datetime(", StringComparison.OrdinalIgnoreCase) && text.EndsWith(")"))
+        {
+            text = text[9..^1];
+        }
+        text = text.Trim('"', '\'');
+        if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dt))
+        {
+            return $"TIMESTAMP '{dt:yyyy-MM-dd HH:mm:ss}'";
+        }
+        return $"TIMESTAMP '{text}'";
     }
 
     private static bool TryConvertDynamicAccess(Expression expr, string? leftAlias, string? rightAlias, out string sql)
