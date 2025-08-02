@@ -9,10 +9,10 @@ The implementation currently supports translating pipelines that include
 `Metadata['key']` or `Metadata.key`, and the `bin()`, `datetime()`, and
 type-casting functions such as `tostring()`, `toint()`, `tolong()`, `todouble()`,
 `tobool()`, and `todatetime()`. Control commands are supported for
-`.ingest inline` and `.ingest` from CSV files, which map to DuckDB `INSERT`
-and `COPY` statements respectively. Generated SQL is
-validated against DuckDB in the unit tests using StormEvents data downloaded
-from NOAA.
+`.ingest inline`, `.ingest` from CSV files, `.view`, and `.materialize`, which
+map to DuckDB `INSERT`, `COPY`, `CREATE VIEW`, and `CREATE TABLE` statements,
+respectively. Generated SQL is validated against DuckDB in the unit tests using
+StormEvents data downloaded from NOAA.
 
 ## Run tests
 

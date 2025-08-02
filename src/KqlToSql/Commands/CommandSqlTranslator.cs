@@ -6,11 +6,22 @@ namespace KqlToSql.Commands;
 
 public class CommandSqlTranslator
 {
+    private readonly KqlToSqlConverter _converter;
+
+    public CommandSqlTranslator(KqlToSqlConverter converter)
+    {
+        _converter = converter;
+    }
+
     public string Translate(string kqlText)
     {
         var text = kqlText.Trim();
         if (text.StartsWith(".ingest", StringComparison.OrdinalIgnoreCase))
             return TranslateIngest(text);
+        if (text.StartsWith(".view", StringComparison.OrdinalIgnoreCase))
+            return TranslateView(text);
+        if (text.StartsWith(".materialize", StringComparison.OrdinalIgnoreCase))
+            return TranslateMaterialize(text);
         throw new NotSupportedException("Unsupported command");
     }
 
@@ -41,5 +52,27 @@ public class CommandSqlTranslator
             var path = match.Groups[2].Value;
             return $"COPY {table} FROM '{path}' (HEADER, AUTO_DETECT TRUE)";
         }
+    }
+
+    private string TranslateView(string text)
+    {
+        var match = Regex.Match(text, @"\.view\s+(\w+)\s+<\|\s*(.*)", RegexOptions.Singleline);
+        if (!match.Success)
+            throw new NotSupportedException("Malformed view command");
+        var name = match.Groups[1].Value;
+        var query = match.Groups[2].Value;
+        var sql = _converter.Convert(query);
+        return $"CREATE VIEW {name} AS {sql}";
+    }
+
+    private string TranslateMaterialize(string text)
+    {
+        var match = Regex.Match(text, @"\.materialize\s+(\w+)\s+<\|\s*(.*)", RegexOptions.Singleline);
+        if (!match.Success)
+            throw new NotSupportedException("Malformed materialize command");
+        var name = match.Groups[1].Value;
+        var query = match.Groups[2].Value;
+        var sql = _converter.Convert(query);
+        return $"CREATE TABLE {name} AS {sql}";
     }
 }

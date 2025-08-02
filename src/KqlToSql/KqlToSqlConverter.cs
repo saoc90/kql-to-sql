@@ -14,7 +14,7 @@ public class KqlToSqlConverter
     public KqlToSqlConverter()
     {
         _operators = new OperatorSqlTranslator(this);
-        _commands = new CommandSqlTranslator();
+        _commands = new CommandSqlTranslator(this);
     }
 
     public string Convert(string kql)

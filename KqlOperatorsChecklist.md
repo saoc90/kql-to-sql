@@ -90,3 +90,5 @@
 - [ ] top-nested
 - [ ] union
 - [x] where
+- [x] materialize()
+- [x] view
