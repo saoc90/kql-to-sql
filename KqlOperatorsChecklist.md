@@ -1,0 +1,95 @@
+- [x] != (not equals)
+- [x] !between
+- [x] !contains
+- [x] !contains_cs
+- [x] !endswith
+- [x] !endswith_cs
+- [x] !has
+- [x] !has_cs
+- [ ] !hasprefix
+- [ ] !hasprefix_cs
+- [ ] !hassuffix
+- [ ] !hassuffix_cs
+- [x] !in
+- [x] !in~
+- [x] !startswith
+- [x] !startswith_cs
+- [x] !~ (not equals)
+- [x] == (equals)
+- [x] =~ (equals)
+- [ ] Bitwise binary
+- [ ] Graph
+- [ ] Logical or binary
+- [ ] Numerical
+- [ ] Query
+- [ ] Scalar
+- [ ] String
+- [ ] Tabular
+- [ ] as
+- [x] between
+- [x] bin()
+- [ ] consume
+- [x] contains
+- [x] contains_cs
+- [x] count
+- [ ] datatable
+- [x] distinct
+- [x] endswith
+- [x] endswith_cs
+- [ ] evaluate
+- [x] extend
+- [ ] externaldata
+- [ ] facet
+- [ ] find
+- [ ] fork
+- [ ] getschema
+- [x] has
+- [ ] has_all
+- [ ] has_any
+- [ ] has_cs
+- [ ] hasprefix
+- [ ] hasprefix_cs
+- [ ] hassuffix
+- [ ] hassuffix_cs
+- [x] in
+- [ ] invoke
+- [x] in~
+- [x] join
+- [ ] lookup
+- [ ] macro-expand
+- [ ] make-series
+- [ ] matches regex
+- [ ] mv-apply
+- [ ] mv-expand
+- [ ] parse
+- [ ] parse-kv
+- [ ] parse-where
+- [ ] partition
+- [ ] print
+- [x] project
+- [x] project-away
+- [ ] project-by-names
+- [ ] project-keep
+- [x] project-rename
+- [ ] project-reorder
+- [ ] range
+- [ ] reduce
+- [ ] render
+- [ ] sample
+- [ ] sample-distinct
+- [ ] scan
+- [ ] search
+- [ ] serialize
+- [x] sort
+- [x] startswith
+- [x] startswith_cs
+- [x] summarize
+- [x] take
+- [x] top
+- [ ] top-hitters
+- [ ] top-nested
+- [ ] union
+- [x] where
+- [x] materialize()
+- [x] view (command)
+- [x] view() (function declaration)
