@@ -88,7 +88,7 @@
 - [x] top
 - [ ] top-hitters
 - [ ] top-nested
-- [ ] union
+- [x] union
 - [x] where
 - [x] materialize()
 - [x] view (command)
