@@ -30,13 +30,13 @@
 - [ ] between
 - [x] bin()
 - [ ] consume
-- [ ] contains
-- [ ] contains_cs
+- [x] contains
+- [x] contains_cs
 - [x] count
 - [ ] datatable
 - [x] distinct
-- [ ] endswith
-- [ ] endswith_cs
+- [x] endswith
+- [x] endswith_cs
 - [ ] evaluate
 - [x] extend
 - [ ] externaldata
@@ -82,8 +82,8 @@
 - [ ] search
 - [ ] serialize
 - [x] sort
-- [ ] startswith
-- [ ] startswith_cs
+- [x] startswith
+- [x] startswith_cs
 - [x] summarize
 - [x] take
 - [x] top
