@@ -117,7 +117,18 @@ internal class OperatorSqlTranslator
         }
 
         var selectList = string.Join(", ", byColumns.Select(b => b.Select).Concat(aggregates));
-        var sql = $"SELECT {selectList} FROM ({leftSql})";
+
+        string fromSql;
+        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
+        {
+            fromSql = leftSql.Substring("SELECT * FROM ".Length);
+        }
+        else
+        {
+            fromSql = $"({leftSql})";
+        }
+
+        var sql = $"SELECT {selectList} FROM {fromSql}";
         if (byColumns.Length > 0)
         {
             sql += $" GROUP BY {string.Join(", ", byColumns.Select(b => b.Group))}";
@@ -169,6 +180,11 @@ internal class OperatorSqlTranslator
 
     private string ApplyCount(string leftSql, CountOperator count)
     {
+        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = leftSql.Substring("SELECT * FROM ".Length);
+            return $"SELECT COUNT(*) AS Count FROM {rest}";
+        }
         return $"SELECT COUNT(*) AS Count FROM ({leftSql})";
     }
 
@@ -198,6 +214,11 @@ internal class OperatorSqlTranslator
             throw new NotSupportedException("Unsupported extend expression");
         }).ToArray();
 
+        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = leftSql.Substring("SELECT * FROM ".Length);
+            return $"SELECT *, {string.Join(", ", extras)} FROM {rest}";
+        }
         return $"SELECT *, {string.Join(", ", extras)} FROM ({leftSql})";
     }
 

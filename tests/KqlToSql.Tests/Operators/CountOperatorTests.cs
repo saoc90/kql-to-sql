@@ -11,7 +11,7 @@ public class CountOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | where STATE == 'TEXAS' | count";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COUNT(*) AS Count FROM (SELECT * FROM StormEvents WHERE STATE = 'TEXAS')", sql);
+        Assert.Equal("SELECT COUNT(*) AS Count FROM StormEvents WHERE STATE = 'TEXAS'", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -26,7 +26,7 @@ public class CountOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | where STATE == 'NOTASTATE' | count";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COUNT(*) AS Count FROM (SELECT * FROM StormEvents WHERE STATE = 'NOTASTATE')", sql);
+        Assert.Equal("SELECT COUNT(*) AS Count FROM StormEvents WHERE STATE = 'NOTASTATE'", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

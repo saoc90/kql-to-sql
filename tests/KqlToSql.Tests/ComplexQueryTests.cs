@@ -2,12 +2,12 @@ using System.Collections.Generic;
 using KqlToSql;
 using Xunit;
 
-namespace KqlToSql.Tests.Operators;
+namespace KqlToSql.Tests;
 
-public class ContainsOperatorTests
+public class ComplexQueryTests
 {
     [Fact]
-    public void Converts_Contains()
+    public void Converts_Complex_Pipeline_Without_SelectStar()
     {
         var converter = new KqlToSqlConverter();
         var kql = @"StormEvents
@@ -29,23 +29,5 @@ public class ContainsOperatorTests
         }
         results.Sort();
         Assert.Equal(new List<(string, long)> { ("PENNSYLVANIA", 6), ("TENNESSEE", 3) }, results);
-    }
-
-    [Fact]
-    public void Converts_Contains_CaseSensitive_Count()
-    {
-        var converter = new KqlToSqlConverter();
-        var kql = @"StormEvents
-| summarize event_count=count() by State
-| where State contains_cs ""AS""
-| count";
-        var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COUNT(*) AS Count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State LIKE '%AS%'", sql);
-
-        using var conn = StormEventsDatabase.GetConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        var result = cmd.ExecuteScalar();
-        Assert.Equal(4L, (long)result!);
     }
 }

@@ -12,7 +12,7 @@ public class BinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize cnt=count() by bin(INJURIES_DIRECT, 10) | sort by INJURIES_DIRECT asc | take 5";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT FLOOR((INJURIES_DIRECT)/(10))*(10) AS INJURIES_DIRECT, COUNT(*) AS cnt FROM (SELECT * FROM StormEvents) GROUP BY FLOOR((INJURIES_DIRECT)/(10))*(10) ORDER BY INJURIES_DIRECT ASC LIMIT 5", sql);
+        Assert.Equal("SELECT FLOOR((INJURIES_DIRECT)/(10))*(10) AS INJURIES_DIRECT, COUNT(*) AS cnt FROM StormEvents GROUP BY FLOOR((INJURIES_DIRECT)/(10))*(10) ORDER BY INJURIES_DIRECT ASC LIMIT 5", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -32,7 +32,7 @@ public class BinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize cnt=count() by bin(INJURIES_DIRECT, 5) | sort by INJURIES_DIRECT asc | take 5";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT FLOOR((INJURIES_DIRECT)/(5))*(5) AS INJURIES_DIRECT, COUNT(*) AS cnt FROM (SELECT * FROM StormEvents) GROUP BY FLOOR((INJURIES_DIRECT)/(5))*(5) ORDER BY INJURIES_DIRECT ASC LIMIT 5", sql);
+        Assert.Equal("SELECT FLOOR((INJURIES_DIRECT)/(5))*(5) AS INJURIES_DIRECT, COUNT(*) AS cnt FROM StormEvents GROUP BY FLOOR((INJURIES_DIRECT)/(5))*(5) ORDER BY INJURIES_DIRECT ASC LIMIT 5", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
