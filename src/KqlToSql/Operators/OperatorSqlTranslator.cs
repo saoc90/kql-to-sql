@@ -35,6 +35,15 @@ internal class OperatorSqlTranslator
         };
     }
 
+    internal string ConvertRange(RangeOperator range)
+    {
+        var name = range.Name.Name.ToString().Trim();
+        var start = ExpressionSqlBuilder.ConvertExpression(range.From);
+        var end = ExpressionSqlBuilder.ConvertExpression(range.To);
+        var step = ExpressionSqlBuilder.ConvertExpression(range.Step);
+        return $"SELECT generate_series AS {name} FROM generate_series({start}, {end}, {step})";
+    }
+
     private string ApplyFilter(string leftSql, FilterOperator filter)
     {
         var condition = ExpressionSqlBuilder.ConvertExpression(filter.Condition);
