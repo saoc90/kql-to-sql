@@ -9,6 +9,11 @@ internal static class ExpressionSqlBuilder
 {
     internal static string ConvertExpression(Expression expr, string? leftAlias = null, string? rightAlias = null)
     {
+        if (TryConvertDynamicAccess(expr, leftAlias, rightAlias, out var dynamicSql))
+        {
+            return dynamicSql;
+        }
+
         return expr switch
         {
             BinaryExpression bin when bin.Kind == SyntaxKind.EqualExpression =>
@@ -79,6 +84,7 @@ internal static class ExpressionSqlBuilder
                 fce.Name.ToString().Trim().ToLowerInvariant() switch
                 {
                     "bin" => ConvertBin(fce, leftAlias, rightAlias),
+                    "bag_pack" => $"json_object({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
                     _ => $"{fce.Name}({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})"
                 },
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
@@ -145,6 +151,52 @@ internal static class ExpressionSqlBuilder
             return $"{left} NOT {like} {pattern}";
         }
         return $"{left} {like} {pattern}";
+    }
+
+    private static bool TryConvertDynamicAccess(Expression expr, string? leftAlias, string? rightAlias, out string sql)
+    {
+        sql = string.Empty;
+        var segments = new Stack<string>();
+        Expression current = expr;
+        while (true)
+        {
+            switch (current)
+            {
+                case PathExpression pe:
+                    if (pe.Expression is NameReference nr && (nr.Name.ToString().Trim() == "$left" || nr.Name.ToString().Trim() == "$right"))
+                    {
+                        return false;
+                    }
+                    segments.Push(pe.Selector.ToString().Trim());
+                    current = pe.Expression;
+                    continue;
+                case ElementExpression ee:
+                    if (ee.Selector is LiteralExpression litSel)
+                    {
+                        var key = litSel.ToString().Trim().Trim('\'', '"');
+                        segments.Push(key);
+                        current = ee.Expression;
+                        continue;
+                    }
+                    if (ee.Selector is BracketedExpression be && be.Expression is LiteralExpression lit)
+                    {
+                        var key = lit.ToString().Trim().Trim('\'', '"');
+                        segments.Push(key);
+                        current = ee.Expression;
+                        continue;
+                    }
+                    return false;
+                default:
+                    if (segments.Count == 0)
+                    {
+                        return false;
+                    }
+                    var baseSql = ConvertExpression(current, leftAlias, rightAlias);
+                    var path = string.Join('.', segments);
+                    sql = $"trim(both '\"' from json_extract({baseSql}, '$.{path}'))";
+                    return true;
+            }
+        }
     }
 
     internal static string ConvertBin(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
