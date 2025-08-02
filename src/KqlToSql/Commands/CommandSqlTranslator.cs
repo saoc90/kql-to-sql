@@ -20,8 +20,6 @@ public class CommandSqlTranslator
             return TranslateIngest(text);
         if (text.StartsWith(".view", StringComparison.OrdinalIgnoreCase))
             return TranslateView(text);
-        if (text.StartsWith(".materialize", StringComparison.OrdinalIgnoreCase))
-            return TranslateMaterialize(text);
         throw new NotSupportedException("Unsupported command");
     }
 
@@ -63,16 +61,5 @@ public class CommandSqlTranslator
         var query = match.Groups[2].Value;
         var sql = _converter.Convert(query);
         return $"CREATE VIEW {name} AS {sql}";
-    }
-
-    private string TranslateMaterialize(string text)
-    {
-        var match = Regex.Match(text, @"\.materialize\s+(\w+)\s+<\|\s*(.*)", RegexOptions.Singleline);
-        if (!match.Success)
-            throw new NotSupportedException("Malformed materialize command");
-        var name = match.Groups[1].Value;
-        var query = match.Groups[2].Value;
-        var sql = _converter.Convert(query);
-        return $"CREATE TABLE {name} AS {sql}";
     }
 }
