@@ -165,7 +165,9 @@ public class KqlToSqlConverter
             QueryBlock qb => ConvertQueryBlock(qb),
             PipeExpression pipe => ConvertPipe(pipe),
             RangeOperator range => _operators.ConvertRange(range),
+            UnionOperator union => _operators.ConvertUnion(union),
             NameReference nr => $"SELECT * FROM {nr.Name.ToString().Trim()}",
+            ParenthesizedExpression pe => ConvertNode(pe.Expression),
             FunctionCallExpression fce => ConvertFunctionCall(fce),
             MaterializeExpression matExpr => ConvertNode(matExpr.Expression),
             ExpressionStatement exprStmt => ConvertNode(exprStmt.Expression),
@@ -217,7 +219,7 @@ public class KqlToSqlConverter
     private string ConvertPipe(PipeExpression pipe)
     {
         var leftSql = ConvertNode(pipe.Expression);
-        return _operators.ApplyOperator(leftSql, pipe.Operator);
+        return _operators.ApplyOperator(leftSql, pipe.Operator, pipe.Expression);
     }
 }
 

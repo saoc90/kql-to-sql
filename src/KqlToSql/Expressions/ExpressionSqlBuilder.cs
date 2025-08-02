@@ -111,12 +111,21 @@ internal static class ExpressionSqlBuilder
                 $"{ConvertExpression(pe.Expression, leftAlias, rightAlias)}.{pe.Selector}",
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression =>
                 ConvertDateTimeLiteral(lit),
+            LiteralExpression lit when lit.Kind == SyntaxKind.StringLiteralExpression =>
+                ConvertStringLiteral(lit),
             LiteralExpression lit => lit.ToString().Trim(),
             FunctionCallExpression fce =>
                 ConvertFunctionCall(fce, leftAlias, rightAlias),
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
             _ => throw new NotSupportedException($"Unsupported expression {expr.Kind}")
         };
+    }
+
+    private static string ConvertStringLiteral(LiteralExpression lit)
+    {
+        var text = lit.ToString().Trim().Trim('"', '\'');
+        text = text.Replace("'", "''");
+        return $"'{text}'";
     }
 
     private static string ConvertFunctionCall(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
