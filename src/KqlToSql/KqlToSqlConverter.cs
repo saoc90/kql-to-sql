@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Kusto.Language;
 using Kusto.Language.Syntax;
 using KqlToSql.Operators;
@@ -10,6 +12,7 @@ public class KqlToSqlConverter
 {
     private readonly OperatorSqlTranslator _operators;
     private readonly CommandSqlTranslator _commands;
+    private readonly Dictionary<string, (string sql, bool materialized)> _ctes = new();
 
     public KqlToSqlConverter()
     {
@@ -21,9 +24,17 @@ public class KqlToSqlConverter
     {
         var code = KustoCode.Parse(kql);
         var root = code.Syntax;
+        
+        _ctes.Clear(); // Reset CTEs for each conversion
+        
         if (root is CommandBlock)
         {
             return _commands.Translate(kql);
+        }
+
+        if (root is QueryBlock queryBlock)
+        {
+            return ConvertQueryBlock(queryBlock);
         }
 
         var pipe = root.GetFirstDescendant<PipeExpression>();
@@ -41,14 +52,159 @@ public class KqlToSqlConverter
         throw new NotSupportedException("Unsupported KQL query");
     }
 
+    private string ConvertQueryBlock(QueryBlock queryBlock)
+    {
+        var statements = queryBlock.GetDescendants<Statement>().ToList();
+        
+        // Process let statements first to build CTEs
+        foreach (var statement in statements)
+        {
+            if (statement is LetStatement letStatement)
+            {
+                ProcessLetStatement(letStatement);
+            }
+        }
+        
+        // Find the main query (the last statement that's not a let statement)
+        var mainStatement = statements.LastOrDefault(s => s is not LetStatement);
+        if (mainStatement == null)
+        {
+            throw new NotSupportedException("No main query found in query block");
+        }
+        
+        string mainSql;
+        if (mainStatement is ExpressionStatement exprStatement)
+        {
+            mainSql = ConvertNode(exprStatement.Expression);
+        }
+        else
+        {
+            mainSql = ConvertNode(mainStatement);
+        }
+        
+        // If we have CTEs, wrap the main query
+        if (_ctes.Any())
+        {
+            var cteList = string.Join(", ", _ctes.Select(kvp => 
+                $"{kvp.Key} AS {(kvp.Value.materialized ? "MATERIALIZED" : "NOT MATERIALIZED")} ({kvp.Value.sql})"));
+            return $"WITH {cteList} {mainSql}";
+        }
+        
+        return mainSql;
+    }
+
+    private void ProcessLetStatement(LetStatement letStatement)
+    {
+        var name = letStatement.Name.ToString().Trim();
+        var expression = letStatement.Expression;
+        
+        bool materialized = false;
+        string sql;
+        
+        if (expression is MaterializeExpression matExpr)
+        {
+            materialized = true;
+            sql = ConvertNode(matExpr.Expression);
+        }
+        else if (expression is FunctionDeclaration funcDecl)
+        {
+            // This handles view () { ... } syntax
+            materialized = false;
+            
+            // Check if it's a view function declaration using ViewKeyword
+            var viewKeyword = funcDecl.ViewKeyword?.ToString().Trim().ToLowerInvariant();
+            if (viewKeyword == "view")
+            {
+                // Extract the body of the view function
+                sql = ConvertNode(funcDecl.Body);
+            }
+            else
+            {
+                throw new NotSupportedException($"Function declaration with keyword '{viewKeyword}' is not supported. Only 'view' function declarations are supported.");
+            }
+        }
+        else if (expression is FunctionCallExpression fce)
+        {
+            var functionName = fce.Name.ToString().Trim().ToLowerInvariant();
+            if (functionName == "view")
+            {
+                materialized = false;
+                if (fce.ArgumentList.Expressions.Count != 1)
+                {
+                    throw new NotSupportedException("view() expects exactly one argument");
+                }
+                sql = ConvertNode(fce.ArgumentList.Expressions[0].Element);
+            }
+            else
+            {
+                // Regular function call - treat as non-materialized
+                materialized = false;
+                sql = ConvertNode(expression);
+            }
+        }
+        else
+        {
+            // Regular expression - treat as non-materialized (view-like behavior)
+            materialized = false;
+            sql = ConvertNode(expression);
+        }
+        
+        _ctes[name] = (sql, materialized);
+    }
+
     internal string ConvertNode(SyntaxNode node)
     {
         return node switch
         {
+            QueryBlock qb => ConvertQueryBlock(qb),
             PipeExpression pipe => ConvertPipe(pipe),
             NameReference nr => $"SELECT * FROM {nr.Name.ToString().Trim()}",
+            FunctionCallExpression fce => ConvertFunctionCall(fce),
+            MaterializeExpression matExpr => ConvertNode(matExpr.Expression),
+            ExpressionStatement exprStmt => ConvertNode(exprStmt.Expression),
+            FunctionBody fb => ConvertFunctionBody(fb),
             _ => throw new NotSupportedException($"Unsupported node type {node.Kind}")
         };
+    }
+
+    private string ConvertFunctionCall(FunctionCallExpression fce)
+    {
+        var functionName = fce.Name.ToString().Trim().ToLowerInvariant();
+        
+        if (functionName == "view")
+        {
+            // Direct view function call without let statement
+            if (fce.ArgumentList.Expressions.Count != 1)
+            {
+                throw new NotSupportedException($"{functionName}() expects exactly one argument");
+            }
+            return ConvertNode(fce.ArgumentList.Expressions[0].Element);
+        }
+        
+        throw new NotSupportedException($"Unsupported function {functionName}");
+    }
+
+    private string ConvertFunctionBody(FunctionBody fb)
+    {
+        // FunctionBody doesn't use the Statements collection for view functions
+        // The actual query is stored as descendants. Look for PipeExpression or other query nodes
+        
+        // Try to find a PipeExpression first (most common case)
+        var pipeExpression = fb.GetDescendants<PipeExpression>().FirstOrDefault();
+        if (pipeExpression != null)
+        {
+            return ConvertNode(pipeExpression);
+        }
+        
+        // If no pipe expression, look for a NameReference (simple table reference)
+        var nameReference = fb.GetDescendants<NameReference>().FirstOrDefault();
+        if (nameReference != null)
+        {
+            return ConvertNode(nameReference);
+        }
+        
+        // If no recognizable query pattern found
+        throw new NotSupportedException($"Function body contains no recognizable query pattern. Content: '{fb}'");
     }
 
     private string ConvertPipe(PipeExpression pipe)
