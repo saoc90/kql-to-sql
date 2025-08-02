@@ -43,6 +43,12 @@ public class KqlToSqlConverter
             return ConvertNode(pipe);
         }
 
+        var range = root.GetFirstDescendant<RangeOperator>();
+        if (range != null)
+        {
+            return ConvertNode(range);
+        }
+
         var name = root.GetFirstDescendant<NameReference>();
         if (name != null)
         {
@@ -158,6 +164,7 @@ public class KqlToSqlConverter
         {
             QueryBlock qb => ConvertQueryBlock(qb),
             PipeExpression pipe => ConvertPipe(pipe),
+            RangeOperator range => _operators.ConvertRange(range),
             NameReference nr => $"SELECT * FROM {nr.Name.ToString().Trim()}",
             FunctionCallExpression fce => ConvertFunctionCall(fce),
             MaterializeExpression matExpr => ConvertNode(matExpr.Expression),

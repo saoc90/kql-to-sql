@@ -72,7 +72,7 @@
 - [ ] project-keep
 - [x] project-rename
 - [ ] project-reorder
-- [ ] range
+- [x] range
 - [ ] reduce
 - [ ] render
 - [ ] sample
