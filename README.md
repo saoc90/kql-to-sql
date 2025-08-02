@@ -3,8 +3,9 @@
 Simple KQL to SQL converter built on top of the official Kusto language parser.
 The implementation currently supports translating pipelines that include
 `where`, `project`, `summarize`, `sort`, `extend`, `take`, `count`, `distinct`,
-`project-away`, `project-rename`, `top`, `join`, the `in`, `has`, `contains`,
-`startswith`, and `endswith` scalar operators,
+`project-away`, `project-rename`, `top`, `join`, the `in`/`!in`, `has`/`!has`,
+`contains`/`!contains`, `startswith`/`!startswith`, and `endswith`/`!endswith`
+scalar operators,
 and the `bin()` function. Control commands are supported for
 `.ingest inline` and `.ingest` from CSV files, which map to DuckDB `INSERT`
 and `COPY` statements respectively. Generated SQL is
