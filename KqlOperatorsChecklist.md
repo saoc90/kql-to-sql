@@ -123,7 +123,7 @@
 - [ ] isnull()
 - [ ] isempty()
 - [ ] coalesce()
-- [x] switch()
+- [x] case()
 - [ ] datetime_add()
 - [ ] datetime_diff()
 - [ ] startofday()
