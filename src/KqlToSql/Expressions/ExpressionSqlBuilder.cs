@@ -155,7 +155,7 @@ internal static class ExpressionSqlBuilder
             "now" => "NOW()",
             "ago" => ConvertAgo(fce, leftAlias, rightAlias),
             "iif" => ConvertIif(fce, leftAlias, rightAlias),
-            "switch" => ConvertSwitch(fce, leftAlias, rightAlias),
+            "case" => ConvertCase(fce, leftAlias, rightAlias),
             "pack_array" => $"LIST_VALUE({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
             _ => $"{name}({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})"
         };
@@ -174,24 +174,23 @@ internal static class ExpressionSqlBuilder
         return $"CASE WHEN {condition} THEN {trueExpr} ELSE {falseExpr} END";
     }
 
-    private static string ConvertSwitch(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private static string ConvertCase(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         var args = fce.ArgumentList.Expressions;
-        if (args.Count < 4 || args.Count % 2 != 0)
+        if (args.Count < 3 || args.Count % 2 == 0)
         {
-            throw new NotSupportedException("switch() expects an expression, pairs of values and results, and a default result");
+            throw new NotSupportedException("case() expects pairs of conditions and results, and a default result");
         }
 
-        var expr = ConvertExpression(args[0].Element, leftAlias, rightAlias);
         var cases = new List<string>();
-        for (var i = 1; i < args.Count - 1; i += 2)
+        for (var i = 0; i < args.Count - 1; i += 2)
         {
-            var value = ConvertExpression(args[i].Element, leftAlias, rightAlias);
+            var condition = ConvertExpression(args[i].Element, leftAlias, rightAlias);
             var result = ConvertExpression(args[i + 1].Element, leftAlias, rightAlias);
-            cases.Add($"WHEN {value} THEN {result}");
+            cases.Add($"WHEN {condition} THEN {result}");
         }
         var defaultExpr = ConvertExpression(args[^1].Element, leftAlias, rightAlias);
-        return $"CASE {expr} {string.Join(" ", cases)} ELSE {defaultExpr} END";
+        return $"CASE {string.Join(" ", cases)} ELSE {defaultExpr} END";
     }
 
     private static string ConvertSubstring(FunctionCallExpression fce, string? leftAlias, string? rightAlias)

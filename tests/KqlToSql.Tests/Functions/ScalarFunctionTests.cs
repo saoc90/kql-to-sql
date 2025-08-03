@@ -80,10 +80,10 @@ public class ScalarFunctionTests
     }
 
     [Fact]
-    public void Switch_Function()
+    public void Case_Function()
     {
         var converter = new KqlToSqlConverter();
-        var kql = "StormEvents | project r=switch(2, 1, 'a', 2, 'b', 'c') | take 1";
+        var kql = "StormEvents | project r=case(2==1, 'a', 2==2, 'b', 'c') | take 1";
         var sql = converter.Convert(kql);
         Assert.Contains("CASE", sql, StringComparison.OrdinalIgnoreCase);
 
