@@ -96,6 +96,8 @@ internal static class ExpressionSqlBuilder
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", false, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotEndsWithCsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", true, true),
+            HasAnyExpression hae =>
+                ConvertHasAny(hae, leftAlias, rightAlias, false),
             BetweenExpression be when be.Kind == SyntaxKind.BetweenExpression =>
                 ConvertBetween(be, leftAlias, rightAlias, false),
             BetweenExpression be when be.Kind == SyntaxKind.NotBetweenExpression =>
@@ -268,6 +270,30 @@ internal static class ExpressionSqlBuilder
         var upper = ConvertExpression(couple.Second, leftAlias, rightAlias);
         var expr = $"{left} BETWEEN {lower} AND {upper}";
         return negated ? $"NOT ({expr})" : expr;
+    }
+
+    private static string ConvertHasAny(HasAnyExpression expr, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated = false)
+    {
+        var left = ConvertExpression(expr.Left, leftAlias, rightAlias);
+        var list = expr.Right;
+        var like = caseSensitive ? "LIKE" : "ILIKE";
+        var conditions = new List<string>();
+        foreach (var e in list.Expressions)
+        {
+            var term = ConvertExpression(e.Element, leftAlias, rightAlias);
+            string pattern;
+            if (term.StartsWith("'", StringComparison.Ordinal) && term.EndsWith("'", StringComparison.Ordinal))
+            {
+                pattern = $"'%{term[1..^1]}%'";
+            }
+            else
+            {
+                pattern = $"'%' || {term} || '%'";
+            }
+            conditions.Add(negated ? $"{left} NOT {like} {pattern}" : $"{left} {like} {pattern}");
+        }
+        var sep = negated ? " AND " : " OR ";
+        return string.Join(sep, conditions);
     }
 
     private static string ConvertLike(BinaryExpression bin, string? leftAlias, string? rightAlias, string prefix, string suffix, bool caseSensitive, bool negated = false)

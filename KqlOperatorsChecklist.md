@@ -45,7 +45,7 @@
 - [ ] getschema
 - [x] has
 - [ ] has_all
-- [ ] has_any
+- [x] has_any
 - [ ] has_cs
 - [ ] hasprefix
 - [ ] hasprefix_cs
