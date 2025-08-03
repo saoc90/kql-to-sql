@@ -45,7 +45,7 @@
 - [ ] getschema
 - [x] has
 - [ ] has_all
-- [ ] has_any
+- [x] has_any
 - [ ] has_cs
 - [ ] hasprefix
 - [ ] hasprefix_cs
@@ -60,7 +60,7 @@
 - [ ] make-series
 - [ ] matches regex
 - [ ] mv-apply
-- [ ] mv-expand
+- [x] mv-expand
 - [ ] parse
 - [ ] parse-kv
 - [ ] parse-where
@@ -72,7 +72,7 @@
 - [ ] project-keep
 - [x] project-rename
 - [ ] project-reorder
-- [ ] range
+- [x] range
 - [ ] reduce
 - [ ] render
 - [ ] sample
@@ -88,8 +88,47 @@
 - [x] top
 - [ ] top-hitters
 - [ ] top-nested
-- [ ] union
+- [x] union
 - [x] where
 - [x] materialize()
 - [x] view (command)
 - [x] view() (function declaration)
+
+## Scalar functions
+- [x] strlen()
+- [x] substring()
+- [x] tolower()
+- [x] toupper()
+- [x] now()
+- [x] ago()
+- [x] pack_array()
+- [ ] abs()
+- [ ] acos()
+- [ ] asin()
+- [ ] atan()
+- [ ] atan2()
+- [ ] ceiling()
+- [ ] floor()
+- [ ] round()
+- [ ] sqrt()
+- [ ] exp()
+- [ ] log()
+- [ ] log10()
+- [ ] pow()
+- [ ] rand()
+- [ ] format_datetime()
+- [ ] parse_json()
+- [ ] parse_url()
+- [x] iif()
+- [ ] isnull()
+- [ ] isempty()
+- [ ] coalesce()
+- [x] case()
+- [ ] datetime_add()
+- [ ] datetime_diff()
+- [ ] startofday()
+- [ ] startofweek()
+- [ ] startofmonth()
+- [ ] endofday()
+- [ ] endofweek()
+- [ ] endofmonth()
