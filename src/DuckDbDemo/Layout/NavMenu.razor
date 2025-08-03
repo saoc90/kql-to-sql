@@ -1,0 +1,36 @@
+﻿@using MudBlazor
+
+<MudDrawer @bind-Open="isOpen" Elevation="2" Variant="DrawerVariant.Mini" OpenMiniOnHover="true">
+    <MudDrawerHeader Class="d-flex align-center">
+        <MudIcon Icon="Icons.Material.Filled.Storage" Size="Size.Large" Class="mr-3" Color="Color.Primary" />
+        <MudText Typo="Typo.h6" Class="mud-text-secondary">KQL to SQL</MudText>
+    </MudDrawerHeader>
+    
+    <MudNavMenu>
+        <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Code">
+            Query Editor
+        </MudNavLink>
+        <MudNavLink Href="/files" Icon="@Icons.Material.Filled.Folder">
+            File Manager
+        </MudNavLink>
+        <MudDivider Class="my-2" />
+        <MudNavGroup Title="Resources" Icon="@Icons.Material.Filled.Help" Expanded="false">
+            <MudNavLink Href="https://learn.microsoft.com/en-us/azure/data-explorer/kusto/query/" Target="_blank" Icon="@Icons.Material.Filled.School">
+                KQL Documentation
+            </MudNavLink>
+            <MudNavLink Href="https://duckdb.org/docs/" Target="_blank" Icon="@Icons.Material.Filled.Description">
+                DuckDB Docs
+            </MudNavLink>
+        </MudNavGroup>
+    </MudNavMenu>
+</MudDrawer>
+
+@code {
+    private bool isOpen = true;
+
+    protected override void OnInitialized()
+    {
+        // Start with drawer closed on smaller screens
+        isOpen = false;
+    }
+}

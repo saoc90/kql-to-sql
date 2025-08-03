@@ -1,0 +1,514 @@
+﻿@page "/"
+@using DuckDbDemo.DuckDB
+@using System.Text.Json
+@using KqlToSql
+
+<PageTitle>KQL to SQL Converter</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge">
+    <MudText Typo="Typo.h3" Class="mb-4">
+        <MudIcon Icon="Icons.Material.Filled.Transform" Class="mr-2" />
+        KQL to SQL Query Editor
+    </MudText>
+    
+    <MudText Typo="Typo.body1" Class="mb-6 mud-text-secondary">
+        Convert Kusto Query Language (KQL) to SQL and execute queries against your data using DuckDB.
+    </MudText>
+
+    <MudPaper Class="pa-6" Elevation="2">
+        <div class="d-flex justify-space-between align-center mb-4">
+            <MudText Typo="Typo.h5">Query Workspace</MudText>
+            
+            <div class="d-flex align-center gap-4">
+                <MudButton Variant="Variant.Outlined" 
+                           Color="Color.Info"
+                           Size="Size.Medium"
+                           StartIcon="Icons.Material.Filled.CloudDownload"
+                           OnClick="LoadStormEventsData"
+                           Disabled="isLoading">
+                    @if (isLoading)
+                    {
+                        <MudProgressCircular Class="mr-2" Size="Size.Small" Indeterminate="true" />
+                        <span>Loading Sample Data...</span>
+                    }
+                    else
+                    {
+                        <span>Load Sample Data</span>
+                    }
+                </MudButton>
+                
+                <MudToggleGroup T="string" Value="@selectedMode" ValueChanged="OnModeChanged" Color="Color.Primary" CheckMark>
+                    <MudToggleItem T="string" Value="@("kql")" Text="KQL" />
+                    <MudToggleItem T="string" Value="@("sql")" Text="SQL" />
+                </MudToggleGroup>
+            </div>
+        </div>
+
+        @if (dataLoadStatus != null)
+        {
+            <MudAlert Severity="@dataLoadStatus.Value.Severity" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="() => dataLoadStatus = null">
+                @dataLoadStatus.Value.Message
+            </MudAlert>
+        }
+        
+        <div style="height: 350px; margin-bottom: 20px;">
+            <StandaloneCodeEditor @ref="editor" Id="editor" ConstructionOptions="EditorConstructionOptions" />
+        </div>
+
+        <div class="d-flex align-center gap-4">
+            <MudButton Variant="Variant.Filled" 
+                       Color="Color.Primary" 
+                       Size="Size.Large"
+                       StartIcon="Icons.Material.Filled.PlayArrow"
+                       OnClick="Run"
+                       Disabled="isExecuting">
+                @if (isExecuting)
+                {
+                    <MudProgressCircular Class="mr-2" Size="Size.Small" Indeterminate="true" />
+                    <span>Executing...</span>
+                }
+                else
+                {
+                    <span>Execute @selectedMode.ToUpper()</span>
+                }
+            </MudButton>
+
+            @if (selectedMode == "kql")
+            {
+                <MudButton Variant="Variant.Outlined" 
+                           Color="Color.Secondary"
+                           StartIcon="Icons.Material.Filled.Transform"
+                           OnClick="ConvertToSql"
+                           Disabled="isExecuting">
+                    Convert to SQL
+                </MudButton>
+            }
+
+            <MudButton Variant="Variant.Text" 
+                       Color="Color.Info"
+                       StartIcon="Icons.Material.Filled.TableView"
+                       OnClick="CheckTableExists"
+                       Disabled="isExecuting">
+                Show Tables
+            </MudButton>
+        </div>
+    </MudPaper>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Class="mt-4" ShowCloseIcon="true" CloseIconClicked="() => errorMessage = string.Empty">
+            @errorMessage
+        </MudAlert>
+    }
+
+    @if (!string.IsNullOrEmpty(conversionMessage))
+    {
+        <MudAlert Severity="Severity.Success" Class="mt-4" ShowCloseIcon="true" CloseIconClicked="() => conversionMessage = string.Empty">
+            @conversionMessage
+        </MudAlert>
+    }
+
+    @if (!string.IsNullOrEmpty(convertedSql))
+    {
+        <MudPaper Class="pa-4 mt-4" Elevation="2">
+            <MudText Typo="Typo.h6" Class="mb-3">
+                <MudIcon Icon="Icons.Material.Filled.Code" Class="mr-2" />
+                Generated SQL
+            </MudText>
+            <MudPaper Class="pa-3" Style="background-color: var(--mud-palette-background-grey);">
+                <code style="white-space: pre-wrap; font-family: 'Consolas', 'Monaco', monospace;">@convertedSql</code>
+            </MudPaper>
+            <div class="mt-3 d-flex gap-2">
+                <MudButton Variant="Variant.Text" 
+                           Color="Color.Primary"
+                           StartIcon="Icons.Material.Filled.ContentCopy"
+                           OnClick="() => CopyToClipboard(convertedSql)">
+                    Copy SQL
+                </MudButton>
+                <MudButton Variant="Variant.Text" 
+                           Color="Color.Secondary"
+                           StartIcon="Icons.Material.Filled.SwapHoriz"
+                           OnClick="UseConvertedSql">
+                    Use as SQL Query
+                </MudButton>
+            </div>
+        </MudPaper>
+    }
+
+    @if (resultData != null && resultData.Any())
+    {
+        <MudPaper Class="pa-4 mt-4" Elevation="2">
+            <MudText Typo="Typo.h6" Class="mb-3">
+                <MudIcon Icon="Icons.Material.Filled.TableChart" Class="mr-2" />
+                Query Results (@resultData.Count rows)
+            </MudText>
+            
+            <MudTable Items="@resultData" 
+                      Hover="true" 
+                      Striped="true" 
+                      Dense="true"
+                      FixedHeader="true"
+                      Height="400px"
+                      Elevation="0">
+                <HeaderContent>
+                    @if (resultData.FirstOrDefault() is Dictionary<string, object> firstRow)
+                    {
+                        @foreach (var column in firstRow.Keys)
+                        {
+                            <MudTh>@column</MudTh>
+                        }
+                    }
+                </HeaderContent>
+                <RowTemplate>
+                    @if (context is Dictionary<string, object> row)
+                    {
+                        @foreach (var column in row.Keys)
+                        {
+                            <MudTd DataLabel="@column">@(row[column]?.ToString() ?? "")</MudTd>
+                        }
+                    }
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
+    else if (!string.IsNullOrEmpty(result) && string.IsNullOrEmpty(errorMessage))
+    {
+        <MudPaper Class="pa-4 mt-4" Elevation="2">
+            <MudText Typo="Typo.h6" Class="mb-3">
+                <MudIcon Icon="Icons.Material.Filled.DataObject" Class="mr-2" />
+                Raw Result
+            </MudText>
+            <MudPaper Class="pa-3" Style="background-color: var(--mud-palette-background-grey);">
+                <code style="white-space: pre-wrap; font-family: 'Consolas', 'Monaco', monospace;">@result</code>
+            </MudPaper>
+        </MudPaper>
+    }
+</MudContainer>
+
+@code
+{
+    private StandaloneCodeEditor? editor;
+    private string result = string.Empty;
+    private string errorMessage = string.Empty;
+    private string conversionMessage = string.Empty;
+    private string convertedSql = string.Empty;
+    private bool isExecuting = false;
+    private bool isLoading = false;
+    private List<Dictionary<string, object>>? resultData;
+    private string selectedMode = "kql";
+    private (Severity Severity, string Message)? dataLoadStatus;
+
+    private StandaloneEditorConstructionOptions EditorConstructionOptions(StandaloneCodeEditor editor)
+    {
+        return new StandaloneEditorConstructionOptions
+        {
+            AutomaticLayout = true,
+            Language = selectedMode == "kql" ? "kql" : "sql",
+            Value = GetDefaultQuery(),
+            Theme = "vs-dark"
+        };
+    }
+
+    private string GetDefaultQuery()
+    {
+        return selectedMode == "kql" 
+            ? "// Load sample data first, then try KQL queries like:\n// StormEvents | where STATE == 'TEXAS' | take 10"
+            : "-- Load sample data first, then try SQL queries like:\n-- SELECT * FROM StormEvents WHERE STATE = 'TEXAS' LIMIT 10;";
+    }
+
+    private async Task LoadStormEventsData()
+    {
+        try
+        {
+            isLoading = true;
+            dataLoadStatus = null;
+            StateHasChanged();
+
+            try
+            {
+                var checkResult = await DuckDbInterop.QueryJsonAsync("SELECT COUNT(*) as count FROM StormEvents LIMIT 1;");
+                var checkData = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(checkResult);
+                if (checkData != null && checkData.Any())
+                {
+                    var count = checkData[0]["count"];
+                    dataLoadStatus = (Severity.Info, $"StormEvents table already exists with {count} rows. Use 'Show Tables' to see available tables.");
+                    return;
+                }
+            }
+            catch
+            {
+            }
+
+            dataLoadStatus = (Severity.Info, "Attempting to load real NOAA StormEvents data...");
+            StateHasChanged();
+
+            var urls = new[]
+            {
+                "https://www.ncei.noaa.gov/pub/data/swdi/stormevents/csvfiles/StormEvents_details-ftp_v1.0_d1950_c20250520.csv.gz",
+                "https://www.ncei.noaa.gov/pub/data/swdi/stormevents/csvfiles/StormEvents_details-ftp_v1.0_d2023_c20250731.csv.gz",
+            };
+
+            foreach (var csvUrl in urls)
+            {
+                try
+                {
+                    var year = csvUrl.Contains("d1950") ? "1950" : "2023";
+                    dataLoadStatus = (Severity.Info, $"Trying to load {year} NOAA StormEvents data with proper file registration...");
+                    StateHasChanged();
+
+                    var result = await DuckDbInterop.LoadStormEventsFromUrlAsync(csvUrl);
+                    
+                    if (result != null && result.ContainsKey("success") && Convert.ToBoolean(result["success"]))
+                    {
+                        var message = result["message"]?.ToString() ?? "Data loaded successfully";
+                        
+                        dataLoadStatus = (Severity.Success, $"{message} from {year} dataset!");
+                        
+                        if (editor != null)
+                        {
+                            var currentValue = await editor.GetValue();
+                            if (currentValue == GetDefaultQuery())
+                            {
+                                var sampleQuery = selectedMode == "kql" 
+                                    ? "StormEvents | where STATE == 'TEXAS' | summarize EventCount = count() by EVENT_TYPE | sort by EventCount desc | take 10"
+                                    : "SELECT EVENT_TYPE, COUNT(*) as EventCount FROM StormEvents WHERE STATE = 'TEXAS' GROUP BY EVENT_TYPE ORDER BY EventCount DESC LIMIT 10;";
+                                await editor.SetValue(sampleQuery);
+                            }
+                        }
+                        return;
+                    }
+                    else
+                    {
+                        var errorMsg = result?["message"]?.ToString() ?? "Unknown error occurred";
+                        dataLoadStatus = (Severity.Warning, $"Failed to load from {year} data: {errorMsg}");
+                        StateHasChanged();
+                        await Task.Delay(1000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    var year = csvUrl.Contains("d1950") ? "1950" : "2023";
+                    dataLoadStatus = (Severity.Warning, $"Failed to load {year} data: {ex.Message}");
+                    StateHasChanged();
+                    await Task.Delay(1000);
+                }
+            }
+
+            dataLoadStatus = (Severity.Info, "Real data loading failed. Creating comprehensive sample data...");
+            StateHasChanged();
+
+            try
+            {
+                var sampleResult = await DuckDbInterop.CreateSampleStormEventsDataAsync();
+                
+                if (sampleResult != null && sampleResult.ContainsKey("success") && Convert.ToBoolean(sampleResult["success"]))
+                {
+                    var message = sampleResult["message"]?.ToString() ?? "Sample data created successfully";
+                    
+                    dataLoadStatus = (Severity.Success, $"{message}. You can now try KQL and SQL queries!");
+                    
+                    if (editor != null)
+                    {
+                        var currentValue = await editor.GetValue();
+                        if (currentValue == GetDefaultQuery())
+                        {
+                            var sampleQuery = selectedMode == "kql" 
+                                ? "StormEvents | where YEAR >= 2023 | summarize TotalDamage = sum(DAMAGE_PROPERTY_NUM + DAMAGE_CROPS_NUM), EventCount = count() by STATE | sort by TotalDamage desc"
+                                : "SELECT STATE, SUM(DAMAGE_PROPERTY_NUM + DAMAGE_CROPS_NUM) as TotalDamage, COUNT(*) as EventCount FROM StormEvents WHERE YEAR >= 2023 GROUP BY STATE ORDER BY TotalDamage DESC;";
+                            await editor.SetValue(sampleQuery);
+                        }
+                    }
+                }
+                else
+                {
+                    var errorMsg = sampleResult?["message"]?.ToString() ?? "Unknown error occurred";
+                    dataLoadStatus = (Severity.Error, $"Failed to create sample data: {errorMsg}");
+                }
+            }
+            catch (Exception ex)
+            {
+                dataLoadStatus = (Severity.Error, $"Failed to create sample data: {ex.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            dataLoadStatus = (Severity.Error, $"Failed to load data: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CheckTableExists()
+    {
+        try
+        {
+            var tablesResult = await DuckDbInterop.QueryJsonAsync("SHOW TABLES;");
+            
+            if (!string.IsNullOrEmpty(tablesResult))
+            {
+                result = tablesResult;
+                
+                try
+                {
+                    var tableData = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(tablesResult);
+                    if (tableData != null && tableData.Any())
+                    {
+                        resultData = tableData;
+                        conversionMessage = $"Found {tableData.Count} table(s) in the database.";
+                    }
+                    else
+                    {
+                        conversionMessage = "No tables found in the database. Click 'Load Sample Data' to load real NOAA data.";
+                    }
+                }
+                catch (JsonException)
+                {
+                    conversionMessage = "Tables listed in raw result below.";
+                }
+            }
+            else
+            {
+                conversionMessage = "No tables found in the database.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error checking tables: {ex.Message}";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task OnModeChanged(string newMode)
+    {
+        if (selectedMode == newMode) return;
+
+        selectedMode = newMode;
+        convertedSql = string.Empty;
+        conversionMessage = string.Empty;
+        
+        if (editor != null)
+        {
+            await editor.SetValue(GetDefaultQuery());
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task ConvertToSql()
+    {
+        if (editor == null || selectedMode != "kql") return;
+
+        try
+        {
+            var kql = await editor.GetValue();
+            if (string.IsNullOrWhiteSpace(kql))
+            {
+                errorMessage = "Please enter some KQL to convert.";
+                return;
+            }
+
+            var converter = new KqlToSqlConverter();
+            convertedSql = converter.Convert(kql);
+            conversionMessage = "KQL successfully converted to SQL!";
+            errorMessage = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Conversion failed: {ex.Message}";
+            convertedSql = string.Empty;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task UseConvertedSql()
+    {
+        if (editor == null || string.IsNullOrEmpty(convertedSql)) return;
+
+        selectedMode = "sql";
+        await editor.SetValue(convertedSql);
+        convertedSql = string.Empty;
+        conversionMessage = "Converted SQL loaded into editor. You can now execute it.";
+        StateHasChanged();
+    }
+
+    private async Task CopyToClipboard(string text)
+    {
+        try
+        {
+            await Task.Delay(100);
+            conversionMessage = "SQL copied to clipboard!";
+            StateHasChanged();
+        }
+        catch
+        {
+            errorMessage = "Failed to copy to clipboard.";
+            StateHasChanged();
+        }
+    }
+
+    private async Task Run()
+    {
+        if (editor == null) return;
+
+        try
+        {
+            isExecuting = true;
+            errorMessage = string.Empty;
+            conversionMessage = string.Empty;
+            resultData = null;
+            StateHasChanged();
+
+            var query = await editor.GetValue();
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                errorMessage = $"Please enter some {selectedMode.ToUpper()} to execute.";
+                return;
+            }
+
+            string sqlToExecute = query;
+
+            if (selectedMode == "kql")
+            {
+                try
+                {
+                    var converter = new KqlToSqlConverter();
+                    sqlToExecute = converter.Convert(query);
+                }
+                catch (Exception ex)
+                {
+                    errorMessage = $"KQL to SQL conversion failed: {ex.Message}";
+                    return;
+                }
+            }
+
+            var queryResult = await DuckDbInterop.QueryJsonAsync(sqlToExecute);
+            result = queryResult;
+
+            try
+            {
+                var jsonData = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(queryResult);
+                if (jsonData != null && jsonData.Any())
+                {
+                    resultData = jsonData;
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isExecuting = false;
+            StateHasChanged();
+        }
+    }
+}

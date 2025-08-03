@@ -1,0 +1,596 @@
+@page "/files"
+@using DuckDbDemo.DuckDB
+@using DuckDbDemo.Services
+@using System.Text.Json
+@inject IJSRuntime JSRuntime
+@inject IFileManagerService FileManagerService
+@implements IDisposable
+
+<PageTitle>File Manager</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge">
+    <MudText Typo="Typo.h3" Class="mb-4">
+        <MudIcon Icon="Icons.Material.Filled.Folder" Class="mr-2" />
+        Data File Manager
+    </MudText>
+    
+    <MudText Typo="Typo.body1" Class="mb-6 mud-text-secondary">
+        Upload and manage your data files. Supported formats include CSV, JSON, Parquet, and TXT files.
+    </MudText>
+
+    <!-- File Upload Section -->
+    <MudPaper Class="pa-6 mb-4" Elevation="2">
+        <MudText Typo="Typo.h5" Class="mb-4">Upload Files</MudText>
+        
+        <div @ondrop="HandleDrop"
+             @ondragover="HandleDragOver"
+             @ondragenter="HandleDragEnter"
+             @ondragleave="HandleDragLeave"
+             @ondragover:preventDefault="true"
+             @ondrop:preventDefault="true"
+             style="border: 2px dashed #ccc; background-color: #fafafa; min-height: 200px; @GetDropZoneStyle()"
+             class="d-flex flex-column align-center justify-center rounded-lg">
+
+            <MudIcon Icon="Icons.Material.Filled.CloudUpload" Size="Size.Large" Class="mb-2" Color="Color.Primary" />
+            <MudText Typo="Typo.h6" Class="mb-2">Drag and drop files here</MudText>
+            <MudText Typo="Typo.body1" Class="mb-3">or</MudText>
+
+            <MudFileUpload T="IBrowserFile"
+                           OnFilesChanged="HandleFileSelection"
+                           MaximumFileCount="10"
+                           Accept=".csv,.json,.parquet,.txt">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="Icons.Material.Filled.Folder"
+                               Size="Size.Large">
+                        Browse Files
+                    </MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+
+            <MudText Typo="Typo.caption" Class="mt-3 mud-text-secondary">
+                Supported formats: CSV, JSON, Parquet, TXT (Max 500MB per file)
+            </MudText>
+        </div>
+    </MudPaper>
+
+    <!-- Upload Progress -->
+    @if (isUploading)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="1">
+            <div class="d-flex align-center gap-4">
+                <MudProgressCircular Indeterminate="true" Size="Size.Medium" Color="Color.Primary" />
+                <div class="flex-grow-1">
+                    <MudText Typo="Typo.body1">Uploading files...</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@uploadStatusMessage</MudText>
+                </div>
+            </div>
+        </MudPaper>
+    }
+
+    <!-- Status Messages -->
+    @if (!string.IsNullOrEmpty(statusMessage))
+    {
+        <MudAlert Severity="@statusSeverity" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="() => statusMessage = string.Empty">
+            @statusMessage
+        </MudAlert>
+    }
+
+    <!-- Clear All Files Button -->
+    @if (FileManagerService.UploadedFiles.Any())
+    {
+        <div class="d-flex justify-end mb-3">
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Secondary"
+                       StartIcon="Icons.Material.Filled.Clear"
+                       OnClick="ClearAllFiles"
+                       Disabled="isProcessing">
+                Clear All Files
+            </MudButton>
+        </div>
+    }
+
+    <!-- Uploaded Files List -->
+    @if (FileManagerService.UploadedFiles.Any())
+    {
+        <MudPaper Class="pa-4" Elevation="2">
+            <MudText Typo="Typo.h5" Class="mb-3">
+                <MudIcon Icon="Icons.Material.Filled.List" Class="mr-2" />
+                Uploaded Files (@FileManagerService.UploadedFiles.Count)
+            </MudText>
+
+            <MudTable Items="@FileManagerService.UploadedFiles"
+                      Hover="true"
+                      Striped="true"
+                      Dense="true"
+                      FixedHeader="true"
+                      Height="400px"
+                      Elevation="0">
+                <HeaderContent>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Size</MudTh>
+                    <MudTh>Type</MudTh>
+                    <MudTh>Upload Date</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Name">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@GetFileIcon(context.Type)" Size="Size.Small" Color="Color.Primary" />
+                            @context.Name
+                        </div>
+                    </MudTd>
+                    <MudTd DataLabel="Size">@FormatFileSize(context.Size)</MudTd>
+                    <MudTd DataLabel="Type">@context.Type</MudTd>
+                    <MudTd DataLabel="Upload Date">@context.UploadDate.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                    <MudTd DataLabel="Status">
+                        @if (context.IsLoaded)
+                        {
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="Icons.Material.Filled.CheckCircle">
+                                Loaded (@context.RowCount rows)
+                            </MudChip>
+                        }
+                        else if (context.HasError)
+                        {
+                            <MudChip T="string" Color="Color.Error" Size="Size.Small" Icon="Icons.Material.Filled.Error">
+                                Error
+                            </MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Color="Color.Info" Size="Size.Small" Icon="Icons.Material.Filled.Upload">
+                                Uploaded
+                            </MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Actions">
+                        <div class="d-flex gap-1">
+                            @if (!context.IsLoaded && !context.HasError)
+                            {
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           Size="Size.Small"
+                                           StartIcon="Icons.Material.Filled.TableView"
+                                           OnClick="() => LoadFileIntoDatabase(context)"
+                                           Disabled="isProcessing">
+                                    Load
+                                </MudButton>
+                            }
+                            @if (context.IsLoaded)
+                            {
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Info"
+                                           Size="Size.Small"
+                                           StartIcon="Icons.Material.Filled.Visibility"
+                                           OnClick="() => PreviewFile(context)"
+                                           Disabled="isProcessing">
+                                    Preview
+                                </MudButton>
+                            }
+                            <MudButton Variant="Variant.Text"
+                                       Color="Color.Error"
+                                       Size="Size.Small"
+                                       StartIcon="Icons.Material.Filled.Delete"
+                                       OnClick="() => RemoveFile(context)"
+                                       Disabled="isProcessing">
+                                Remove
+                            </MudButton>
+                        </div>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
+    else
+    {
+        <MudPaper Class="pa-6" Elevation="2">
+            <div class="d-flex flex-column align-center justify-center" style="min-height: 200px;">
+                <MudIcon Icon="Icons.Material.Filled.FileUpload" Size="Size.Large" Class="mb-3" Color="Color.Secondary" />
+                <MudText Typo="Typo.h5" Class="mb-2">No files uploaded yet</MudText>
+                <MudText Typo="Typo.body1" align="Align.Center" Class="mud-text-secondary">
+                    Upload CSV, JSON, Parquet, or TXT files to load them into the database.<br />
+                    Files can then be queried using KQL or SQL in the Query Editor.
+                </MudText>
+                <MudText Typo="Typo.caption" Class="mt-2" Color="Color.Success">
+                    <MudIcon Icon="Icons.Material.Filled.Info" Size="Size.Small" Class="mr-1" />
+                    Files persist across navigation
+                </MudText>
+            </div>
+        </MudPaper>
+    }
+
+    <!-- File Preview Dialog -->
+    <MudDialog @bind-Visible="previewDialogVisible" Options="new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true }">
+        <TitleContent>
+            <MudText Typo="Typo.h6">
+                <MudIcon Icon="Icons.Material.Filled.Visibility" Class="mr-2" />
+                Preview: @previewFileName
+            </MudText>
+        </TitleContent>
+        <DialogContent>
+            @if (previewData != null && previewData.Any())
+            {
+                <MudTable Items="@previewData.Take(100)"
+                          Hover="true"
+                          Striped="true"
+                          Dense="true"
+                          FixedHeader="true"
+                          Height="400px"
+                          Elevation="0">
+                    <HeaderContent>
+                        @if (previewData.FirstOrDefault() is Dictionary<string, object> firstRow)
+                        {
+                            @foreach (var column in firstRow.Keys)
+                            {
+                                <MudTh>@column</MudTh>
+                            }
+                        }
+                    </HeaderContent>
+                    <RowTemplate>
+                        @if (context is Dictionary<string, object> row)
+                        {
+                            @foreach (var column in row.Keys)
+                            {
+                                <MudTd DataLabel="@column">@(row[column]?.ToString() ?? "")</MudTd>
+                            }
+                        }
+                    </RowTemplate>
+                </MudTable>
+                @if (previewData.Count > 100)
+                {
+                    <MudText Typo="Typo.caption" Class="mt-2 mud-text-secondary">
+                        <MudIcon Icon="Icons.Material.Filled.Info" Size="Size.Small" Class="mr-1" />
+                        Showing first 100 rows of @previewData.Count total rows
+                    </MudText>
+                }
+            }
+            else
+            {
+                <div class="d-flex flex-column align-center justify-center" style="min-height: 200px;">
+                    <MudIcon Icon="Icons.Material.Filled.Error" Size="Size.Large" Color="Color.Warning" />
+                    <MudText Typo="Typo.h6" Class="mt-2">No data to preview</MudText>
+                </div>
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="() => previewDialogVisible = false" 
+                       StartIcon="Icons.Material.Filled.Close"
+                       Color="Color.Primary">
+                Close
+            </MudButton>
+        </DialogActions>
+    </MudDialog>
+</MudContainer>
+
+@code {
+    private bool isUploading = false;
+    private bool isProcessing = false;
+    private string uploadStatusMessage = string.Empty;
+    private string statusMessage = string.Empty;
+    private Severity statusSeverity = Severity.Info;
+    private bool isDragOver = false;
+    private bool previewDialogVisible = false;
+    private string previewFileName = string.Empty;
+    private List<Dictionary<string, object>>? previewData;
+
+    protected override async Task OnInitializedAsync()
+    {
+        FileManagerService.StateChanged += OnStateChanged;
+        await FileManagerService.InitializeAsync();
+    }
+
+    private void OnStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        FileManagerService.StateChanged -= OnStateChanged;
+    }
+
+    private string GetDropZoneStyle()
+    {
+        return isDragOver
+            ? "border-color: #1976d2 !important; background-color: #e3f2fd !important;"
+            : "";
+    }
+
+    private async Task HandleFileSelection(InputFileChangeEventArgs e)
+    {
+        await ProcessFiles(e.GetMultipleFiles(10));
+    }
+
+    private async Task HandleDrop(DragEventArgs e)
+    {
+        isDragOver = false;
+        StateHasChanged();
+
+        statusMessage = "Drag and drop detected! Please use the Browse Files button for file selection.";
+        statusSeverity = Severity.Info;
+        StateHasChanged();
+    }
+
+    private void HandleDragOver(DragEventArgs e)
+    {
+        if (!isDragOver)
+        {
+            isDragOver = true;
+            StateHasChanged();
+        }
+    }
+
+    private void HandleDragEnter(DragEventArgs e)
+    {
+        isDragOver = true;
+        StateHasChanged();
+    }
+
+    private void HandleDragLeave(DragEventArgs e)
+    {
+        isDragOver = false;
+        StateHasChanged();
+    }
+
+    private async Task ProcessFiles(IReadOnlyList<IBrowserFile> files)
+    {
+        if (!files.Any()) return;
+
+        isUploading = true;
+        uploadStatusMessage = $"Processing {files.Count} file(s)...";
+        StateHasChanged();
+
+        foreach (var file in files)
+        {
+            try
+            {
+                if (!IsValidFileType(file.Name, file.ContentType))
+                {
+                    statusMessage = $"Unsupported file type: {file.Name} ({file.ContentType})";
+                    statusSeverity = Severity.Warning;
+                    continue;
+                }
+
+                if (file.Size > 500 * 1024 * 1024)
+                {
+                    statusMessage = $"File too large: {file.Name} (max 500MB)";
+                    statusSeverity = Severity.Warning;
+                    continue;
+                }
+
+                uploadStatusMessage = $"Uploading {file.Name}...";
+                StateHasChanged();
+
+                var fileInfo = new UploadedFileInfo
+                {
+                    Name = file.Name,
+                    Size = file.Size,
+                    Type = file.ContentType ?? GetContentTypeFromExtension(file.Name),
+                    UploadDate = DateTime.Now
+                };
+
+                using var stream = file.OpenReadStream(maxAllowedSize: 500 * 1024 * 1024);
+                using var memoryStream = new MemoryStream();
+                await stream.CopyToAsync(memoryStream);
+                fileInfo.Content = memoryStream.ToArray();
+
+                await FileManagerService.AddFileAsync(fileInfo);
+            }
+            catch (Exception ex)
+            {
+                statusMessage = $"Failed to upload {file.Name}: {ex.Message}";
+                statusSeverity = Severity.Error;
+            }
+        }
+
+        isUploading = false;
+
+        if (files.Any())
+        {
+            statusMessage = $"Successfully uploaded {files.Count} file(s). Click 'Load' to add them to the database.";
+            statusSeverity = Severity.Success;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task LoadFileIntoDatabase(UploadedFileInfo fileInfo)
+    {
+        try
+        {
+            isProcessing = true;
+            StateHasChanged();
+
+            var base64Content = Convert.ToBase64String(fileInfo.Content);
+
+            var result = await DuckDbInterop.UploadFileToDatabaseAsync(
+                fileInfo.Name, base64Content, fileInfo.Type);
+
+            if (result != null && result.ContainsKey("success") && Convert.ToBoolean(result["success"]?.ToString().ToLowerInvariant()))
+            {
+                fileInfo.IsLoaded = true;
+                fileInfo.TableName = result["tableName"]?.ToString();
+
+                if (result.ContainsKey("rowCount"))
+                {
+                    var rowCountValue = result["rowCount"];
+                    if (rowCountValue != null)
+                    {
+                        if (rowCountValue is JsonElement jsonElement)
+                        {
+                            fileInfo.RowCount = jsonElement.ValueKind switch
+                            {
+                                JsonValueKind.Number => jsonElement.GetInt32(),
+                                JsonValueKind.String when int.TryParse(jsonElement.GetString(), out var parsed) => parsed,
+                                _ => 0
+                            };
+                        }
+                        else if (int.TryParse(rowCountValue.ToString(), out var parsedCount))
+                        {
+                            fileInfo.RowCount = parsedCount;
+                        }
+                        else
+                        {
+                            fileInfo.RowCount = 0;
+                        }
+                    }
+                }
+
+                await FileManagerService.UpdateFileAsync(fileInfo);
+
+                statusMessage = result["message"]?.ToString() ?? "File loaded successfully";
+                statusSeverity = Severity.Success;
+            }
+            else
+            {
+                fileInfo.HasError = true;
+                await FileManagerService.UpdateFileAsync(fileInfo);
+                
+                statusMessage = result?["message"]?.ToString() ?? "Failed to load file";
+                statusSeverity = Severity.Error;
+            }
+        }
+        catch (Exception ex)
+        {
+            fileInfo.HasError = true;
+            await FileManagerService.UpdateFileAsync(fileInfo);
+            
+            statusMessage = $"Failed to load {fileInfo.Name}: {ex.Message}";
+            statusSeverity = Severity.Error;
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PreviewFile(UploadedFileInfo fileInfo)
+    {
+        if (string.IsNullOrEmpty(fileInfo.TableName)) return;
+
+        try
+        {
+            isProcessing = true;
+            StateHasChanged();
+
+            var resultJson = await DuckDbInterop.QueryJsonAsync($"SELECT * FROM {fileInfo.TableName} LIMIT 100");
+
+            previewData = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(resultJson);
+            previewFileName = fileInfo.Name;
+            previewDialogVisible = true;
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Failed to preview {fileInfo.Name}: {ex.Message}";
+            statusSeverity = Severity.Error;
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RemoveFile(UploadedFileInfo fileInfo)
+    {
+        try
+        {
+            if (fileInfo.IsLoaded && !string.IsNullOrEmpty(fileInfo.TableName))
+            {
+                try
+                {
+                    await DuckDbInterop.QueryJsonAsync($"DROP TABLE IF EXISTS {fileInfo.TableName}");
+                }
+                catch
+                {
+                    // Ignore errors when dropping table
+                }
+            }
+
+            await FileManagerService.RemoveFileAsync(fileInfo);
+            
+            statusMessage = $"Removed {fileInfo.Name}";
+            statusSeverity = Severity.Info;
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Failed to remove {fileInfo.Name}: {ex.Message}";
+            statusSeverity = Severity.Error;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task ClearAllFiles()
+    {
+        try
+        {
+            foreach (var fileInfo in FileManagerService.UploadedFiles.Where(f => f.IsLoaded && !string.IsNullOrEmpty(f.TableName)))
+            {
+                try
+                {
+                    await DuckDbInterop.QueryJsonAsync($"DROP TABLE IF EXISTS {fileInfo.TableName}");
+                }
+                catch
+                {
+                    // Ignore errors when dropping table
+                }
+            }
+
+            await FileManagerService.ClearFilesAsync();
+            
+            statusMessage = "All files cleared";
+            statusSeverity = Severity.Info;
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Failed to clear files: {ex.Message}";
+            statusSeverity = Severity.Error;
+        }
+
+        StateHasChanged();
+    }
+
+    private bool IsValidFileType(string fileName, string? contentType)
+    {
+        var validExtensions = new[] { ".csv", ".json", ".parquet", ".txt" };
+        var validContentTypes = new[] { "text/csv", "application/json", "text/plain" };
+
+        return validExtensions.Any(ext => fileName.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) ||
+               (contentType != null && validContentTypes.Contains(contentType));
+    }
+
+    private string GetContentTypeFromExtension(string fileName)
+    {
+        return fileName.ToLower() switch
+        {
+            var name when name.EndsWith(".csv") => "text/csv",
+            var name when name.EndsWith(".json") => "application/json",
+            var name when name.EndsWith(".parquet") => "application/octet-stream",
+            var name when name.EndsWith(".txt") => "text/plain",
+            _ => "application/octet-stream"
+        };
+    }
+
+    private string GetFileIcon(string contentType)
+    {
+        return contentType switch
+        {
+            "text/csv" => Icons.Material.Filled.TableChart,
+            "application/json" => Icons.Material.Filled.DataObject,
+            "text/plain" => Icons.Material.Filled.TextSnippet,
+            _ => Icons.Material.Filled.InsertDriveFile
+        };
+    }
+
+    private string FormatFileSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024 * 1024):F1} MB";
+        return $"{bytes / (1024 * 1024 * 1024):F1} GB";
+    }
+}
