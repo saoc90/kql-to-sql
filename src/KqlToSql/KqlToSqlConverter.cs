@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Kusto.Language;
 using Kusto.Language.Syntax;
 using KqlToSql.Operators;
@@ -22,6 +23,8 @@ public class KqlToSqlConverter
 
     public string Convert(string kql)
     {
+        kql = StripComments(kql);
+
         var code = KustoCode.Parse(kql);
         var root = code.Syntax;
         
@@ -220,6 +223,125 @@ public class KqlToSqlConverter
     {
         var leftSql = ConvertNode(pipe.Expression);
         return _operators.ApplyOperator(leftSql, pipe.Operator, pipe.Expression);
+    }
+
+    private static string StripComments(string text)
+    {
+        var sb = new StringBuilder();
+        bool inSingleLine = false, inMultiLine = false;
+        bool inSingleQuote = false, inDoubleQuote = false;
+        bool lineHasCode = false;
+        int lineStart = 0;
+        bool skipWhiteUntilNewline = false;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+
+            if (skipWhiteUntilNewline)
+            {
+                if (c == '\n')
+                {
+                    skipWhiteUntilNewline = false;
+                    lineHasCode = false;
+                    lineStart = sb.Length;
+                }
+                else if (char.IsWhiteSpace(c))
+                {
+                    continue;
+                }
+                else
+                {
+                    skipWhiteUntilNewline = false;
+                }
+            }
+
+            if (inSingleLine)
+            {
+                if (c == '\n')
+                {
+                    inSingleLine = false;
+                    if (lineHasCode)
+                    {
+                        sb.Append('\n');
+                    }
+                    lineHasCode = false;
+                    lineStart = sb.Length;
+                }
+                continue;
+            }
+
+            if (inMultiLine)
+            {
+                if (c == '*' && i + 1 < text.Length && text[i + 1] == '/')
+                {
+                    inMultiLine = false;
+                    i++;
+                    if (!lineHasCode)
+                    {
+                        skipWhiteUntilNewline = true;
+                    }
+                }
+                continue;
+            }
+
+            if (!inSingleQuote && !inDoubleQuote && c == '/' && i + 1 < text.Length)
+            {
+                if (text[i + 1] == '/')
+                {
+                    inSingleLine = true;
+                    if (!lineHasCode)
+                    {
+                        sb.Length = lineStart;
+                    }
+                    i++;
+                    continue;
+                }
+                if (text[i + 1] == '*')
+                {
+                    inMultiLine = true;
+                    if (!lineHasCode)
+                    {
+                        sb.Length = lineStart;
+                    }
+                    i++;
+                    continue;
+                }
+            }
+
+            if (c == '\'' && !inDoubleQuote)
+            {
+                inSingleQuote = !inSingleQuote;
+                sb.Append(c);
+                lineHasCode = true;
+                continue;
+            }
+
+            if (c == '"' && !inSingleQuote)
+            {
+                inDoubleQuote = !inDoubleQuote;
+                sb.Append(c);
+                lineHasCode = true;
+                continue;
+            }
+
+            if (c == '\n')
+            {
+                sb.Append('\n');
+                lineHasCode = false;
+                lineStart = sb.Length;
+                continue;
+            }
+
+            if (!char.IsWhiteSpace(c))
+            {
+                lineHasCode = true;
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 }
 

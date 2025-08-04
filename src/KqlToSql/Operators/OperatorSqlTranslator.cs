@@ -209,25 +209,55 @@ internal class OperatorSqlTranslator
             .Select(e => ConvertByExpression(e.Element))
             .ToArray() ?? Array.Empty<(string Select, string Group)>();
 
+        if (summarize.Aggregates.Count == 1 &&
+            summarize.Aggregates[0].Element is Expression aggExpr &&
+            aggExpr is FunctionCallExpression fce &&
+            (fce.Name.ToString().Trim().Equals("arg_max", StringComparison.OrdinalIgnoreCase) ||
+             fce.Name.ToString().Trim().Equals("arg_min", StringComparison.OrdinalIgnoreCase)) &&
+            fce.ArgumentList.Expressions.Count == 2 &&
+            fce.ArgumentList.Expressions[1].Element is StarExpression)
+        {
+            var extremumExpr = ExpressionSqlBuilder.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
+
+            string fromSql;
+            if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
+            {
+                fromSql = leftSql.Substring("SELECT * FROM ".Length);
+            }
+            else
+            {
+                fromSql = $"({leftSql})";
+            }
+
+            var partition = byColumns.Length > 0
+                ? $"PARTITION BY {string.Join(", ", byColumns.Select(b => b.Group))} "
+                : string.Empty;
+
+            var direction = fce.Name.ToString().Trim().Equals("arg_min", StringComparison.OrdinalIgnoreCase)
+                ? "ASC" : "DESC";
+
+            return $"SELECT * FROM {fromSql} QUALIFY ROW_NUMBER() OVER ({partition}ORDER BY {extremumExpr} {direction}) = 1";
+        }
+
         var aggregates = new List<string>();
         foreach (var agg in summarize.Aggregates)
         {
-            aggregates.Add(ConvertAggregate(agg.Element));
+            aggregates.AddRange(ConvertAggregate(agg.Element));
         }
 
         var selectList = string.Join(", ", byColumns.Select(b => b.Select).Concat(aggregates));
 
-        string fromSql;
+        string finalFromSql;
         if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
         {
-            fromSql = leftSql.Substring("SELECT * FROM ".Length);
+            finalFromSql = leftSql.Substring("SELECT * FROM ".Length);
         }
         else
         {
-            fromSql = $"({leftSql})";
+            finalFromSql = $"({leftSql})";
         }
 
-        var sql = $"SELECT {selectList} FROM {fromSql}";
+        var sql = $"SELECT {selectList} FROM {finalFromSql}";
         if (byColumns.Length > 0)
         {
             sql += $" GROUP BY {string.Join(", ", byColumns.Select(b => b.Group))}";
@@ -399,7 +429,7 @@ internal class OperatorSqlTranslator
         return $"SELECT * FROM ({leftSql}) AS L {joinType} ({rightSql}) AS R ON {string.Join(" AND ", conditions)}";
     }
 
-    private string ConvertAggregate(SyntaxNode node)
+    private IEnumerable<string> ConvertAggregate(SyntaxNode node)
     {
         string? alias = null;
         Expression expr;
@@ -420,6 +450,32 @@ internal class OperatorSqlTranslator
         if (expr is FunctionCallExpression fce)
         {
             var name = fce.Name.ToString().Trim().ToLowerInvariant();
+            if (name == "arg_max" || name == "arg_min")
+            {
+                var extremumExpr = ExpressionSqlBuilder.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
+                var results = new List<string>();
+                for (int i = 1; i < fce.ArgumentList.Expressions.Count; i++)
+                {
+                    var argNode = fce.ArgumentList.Expressions[i].Element;
+                    var valueExpr = ExpressionSqlBuilder.ConvertExpression(argNode);
+                    string resultAlias;
+                    if (i == 1 && alias != null)
+                    {
+                        resultAlias = alias;
+                    }
+                    else if (argNode is NameReference nr)
+                    {
+                        resultAlias = nr.Name.ToString().Trim();
+                    }
+                    else
+                    {
+                        resultAlias = alias ?? $"{name}_{i}";
+                    }
+                    results.Add($"{name}({valueExpr}, {extremumExpr}) AS {resultAlias}");
+                }
+                return results;
+            }
+
             var args = fce.ArgumentList.Expressions.Select(a => ExpressionSqlBuilder.ConvertExpression(a.Element)).ToArray();
             alias ??= name switch
             {
@@ -438,7 +494,7 @@ internal class OperatorSqlTranslator
                 _ => throw new NotSupportedException($"Unsupported aggregate function {name}")
             };
 
-            return $"{sqlFunc} AS {alias}";
+            return new[] { $"{sqlFunc} AS {alias}" };
         }
 
         throw new NotSupportedException($"Unsupported aggregate expression {expr.Kind}");
