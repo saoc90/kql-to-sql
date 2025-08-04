@@ -96,6 +96,8 @@ internal static class ExpressionSqlBuilder
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", false, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotEndsWithCsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", true, true),
+            HasAnyExpression hae =>
+                ConvertHasAny(hae, leftAlias, rightAlias, false),
             BetweenExpression be when be.Kind == SyntaxKind.BetweenExpression =>
                 ConvertBetween(be, leftAlias, rightAlias, false),
             BetweenExpression be when be.Kind == SyntaxKind.NotBetweenExpression =>
@@ -111,12 +113,21 @@ internal static class ExpressionSqlBuilder
                 $"{ConvertExpression(pe.Expression, leftAlias, rightAlias)}.{pe.Selector}",
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression =>
                 ConvertDateTimeLiteral(lit),
+            LiteralExpression lit when lit.Kind == SyntaxKind.StringLiteralExpression =>
+                ConvertStringLiteral(lit),
             LiteralExpression lit => lit.ToString().Trim(),
             FunctionCallExpression fce =>
                 ConvertFunctionCall(fce, leftAlias, rightAlias),
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
             _ => throw new NotSupportedException($"Unsupported expression {expr.Kind}")
         };
+    }
+
+    private static string ConvertStringLiteral(LiteralExpression lit)
+    {
+        var text = lit.ToString().Trim().Trim('"', '\'');
+        text = text.Replace("'", "''");
+        return $"'{text}'";
     }
 
     private static string ConvertFunctionCall(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
@@ -137,8 +148,89 @@ internal static class ExpressionSqlBuilder
         {
             "bin" => ConvertBin(fce, leftAlias, rightAlias),
             "bag_pack" => $"json_object({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
+            "tolower" => $"LOWER({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
+            "toupper" => $"UPPER({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
+            "strlen" => $"LENGTH({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
+            "substring" => ConvertSubstring(fce, leftAlias, rightAlias),
+            "now" => "NOW()",
+            "ago" => ConvertAgo(fce, leftAlias, rightAlias),
+            "iif" => ConvertIif(fce, leftAlias, rightAlias),
+            "case" => ConvertCase(fce, leftAlias, rightAlias),
+            "pack_array" => $"LIST_VALUE({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
             _ => $"{name}({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})"
         };
+    }
+
+    private static string ConvertIif(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    {
+        if (fce.ArgumentList.Expressions.Count != 3)
+        {
+            throw new NotSupportedException("iif() expects exactly three arguments");
+        }
+
+        var condition = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
+        var trueExpr = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
+        var falseExpr = ConvertExpression(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
+        return $"CASE WHEN {condition} THEN {trueExpr} ELSE {falseExpr} END";
+    }
+
+    private static string ConvertCase(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    {
+        var args = fce.ArgumentList.Expressions;
+        if (args.Count < 3 || args.Count % 2 == 0)
+        {
+            throw new NotSupportedException("case() expects pairs of conditions and results, and a default result");
+        }
+
+        var cases = new List<string>();
+        for (var i = 0; i < args.Count - 1; i += 2)
+        {
+            var condition = ConvertExpression(args[i].Element, leftAlias, rightAlias);
+            var result = ConvertExpression(args[i + 1].Element, leftAlias, rightAlias);
+            cases.Add($"WHEN {condition} THEN {result}");
+        }
+        var defaultExpr = ConvertExpression(args[^1].Element, leftAlias, rightAlias);
+        return $"CASE {string.Join(" ", cases)} ELSE {defaultExpr} END";
+    }
+
+    private static string ConvertSubstring(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    {
+        if (fce.ArgumentList.Expressions.Count is < 2 or > 3)
+        {
+            throw new NotSupportedException("substring() expects two or three arguments");
+        }
+
+        var text = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
+        var start = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
+        var startExpr = $"({start}) + 1";
+        if (fce.ArgumentList.Expressions.Count == 3)
+        {
+            var length = ConvertExpression(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
+            return $"SUBSTR({text}, {startExpr}, {length})";
+        }
+
+        return $"SUBSTR({text}, {startExpr})";
+    }
+
+    private static string ConvertAgo(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    {
+        if (fce.ArgumentList.Expressions.Count != 1)
+        {
+            throw new NotSupportedException("ago() expects one argument");
+        }
+
+        var argExpr = fce.ArgumentList.Expressions[0].Element;
+        if (argExpr is LiteralExpression lit)
+        {
+            var text = lit.ToString().Trim().Trim('\'', '\"');
+            if (TryParseTimespan(text, out var ms))
+            {
+                return $"NOW() - {ms} * INTERVAL '1 millisecond'";
+            }
+        }
+
+        var arg = ConvertExpression(argExpr, leftAlias, rightAlias);
+        return $"NOW() - ({arg}) * INTERVAL '1 millisecond'";
     }
 
     internal static string ConvertInExpression(InExpression inExpr, string? leftAlias, string? rightAlias)
@@ -177,6 +269,30 @@ internal static class ExpressionSqlBuilder
         var upper = ConvertExpression(couple.Second, leftAlias, rightAlias);
         var expr = $"{left} BETWEEN {lower} AND {upper}";
         return negated ? $"NOT ({expr})" : expr;
+    }
+
+    private static string ConvertHasAny(HasAnyExpression expr, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated = false)
+    {
+        var left = ConvertExpression(expr.Left, leftAlias, rightAlias);
+        var list = expr.Right;
+        var like = caseSensitive ? "LIKE" : "ILIKE";
+        var conditions = new List<string>();
+        foreach (var e in list.Expressions)
+        {
+            var term = ConvertExpression(e.Element, leftAlias, rightAlias);
+            string pattern;
+            if (term.StartsWith("'", StringComparison.Ordinal) && term.EndsWith("'", StringComparison.Ordinal))
+            {
+                pattern = $"'%{term[1..^1]}%'";
+            }
+            else
+            {
+                pattern = $"'%' || {term} || '%'";
+            }
+            conditions.Add(negated ? $"{left} NOT {like} {pattern}" : $"{left} {like} {pattern}");
+        }
+        var sep = negated ? " AND " : " OR ";
+        return string.Join(sep, conditions);
     }
 
     private static string ConvertLike(BinaryExpression bin, string? leftAlias, string? rightAlias, string prefix, string suffix, bool caseSensitive, bool negated = false)

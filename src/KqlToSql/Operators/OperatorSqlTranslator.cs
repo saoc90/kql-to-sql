@@ -15,7 +15,7 @@ internal class OperatorSqlTranslator
         _converter = converter;
     }
 
-    internal string ApplyOperator(string leftSql, QueryOperator op)
+    internal string ApplyOperator(string leftSql, QueryOperator op, Expression? leftExpression = null)
     {
         return op switch
         {
@@ -31,8 +31,99 @@ internal class OperatorSqlTranslator
             CountOperator count => ApplyCount(leftSql, count),
             DistinctOperator distinct => ApplyDistinct(leftSql, distinct),
             JoinOperator join => ApplyJoin(leftSql, join),
+            UnionOperator union => ApplyUnion(leftSql, union, leftExpression),
+            MvExpandOperator mvExpand => ApplyMvExpand(leftSql, mvExpand),
             _ => throw new NotSupportedException($"Unsupported operator {op.Kind}")
         };
+    }
+
+    internal string ConvertRange(RangeOperator range)
+    {
+        var name = range.Name.Name.ToString().Trim();
+        var start = ExpressionSqlBuilder.ConvertExpression(range.From);
+        var end = ExpressionSqlBuilder.ConvertExpression(range.To);
+        var step = ExpressionSqlBuilder.ConvertExpression(range.Step);
+        return $"SELECT generate_series AS {name} FROM generate_series({start}, {end}, {step})";
+    }
+
+    internal string ConvertUnion(UnionOperator union)
+    {
+        var withSourceParam = union.Parameters.FirstOrDefault(p => p.Name.ToString().Trim().Equals("withsource", StringComparison.OrdinalIgnoreCase));
+        string? sourceColumn = withSourceParam != null ? withSourceParam.Expression.ToString().Trim() : null;
+
+        var parts = new List<string>();
+        foreach (var expr in union.Expressions)
+        {
+            var sql = _converter.ConvertNode(expr.Element);
+            if (sourceColumn != null)
+            {
+                var name = expr.Element.ToString().Trim();
+                sql = $"SELECT *, '{name}' AS {sourceColumn} FROM ({sql})";
+            }
+            parts.Add($"({sql})");
+        }
+
+        return string.Join(" UNION ALL ", parts);
+    }
+
+    private string ApplyUnion(string leftSql, UnionOperator union, Expression? leftExpression)
+    {
+        var withSourceParam = union.Parameters.FirstOrDefault(p => p.Name.ToString().Trim().Equals("withsource", StringComparison.OrdinalIgnoreCase));
+        string? sourceColumn = withSourceParam != null ? withSourceParam.Expression.ToString().Trim() : null;
+
+        var parts = new List<string>();
+        if (sourceColumn != null)
+        {
+            var name = leftExpression?.ToString().Trim() ?? "";
+            parts.Add($"(SELECT *, '{name}' AS {sourceColumn} FROM ({leftSql}))");
+        }
+        else
+        {
+            parts.Add($"({leftSql})");
+        }
+
+        foreach (var expr in union.Expressions)
+        {
+            var sql = _converter.ConvertNode(expr.Element);
+            if (sourceColumn != null)
+            {
+                var name = expr.Element.ToString().Trim();
+                sql = $"SELECT *, '{name}' AS {sourceColumn} FROM ({sql})";
+            }
+            parts.Add($"({sql})");
+        }
+
+        return string.Join(" UNION ALL ", parts);
+    }
+
+    private string ApplyMvExpand(string leftSql, MvExpandOperator mvExpand)
+    {
+        if (mvExpand.Expressions.Count != 1)
+        {
+            throw new NotSupportedException("mv-expand with multiple expressions is not supported");
+        }
+
+        if (mvExpand.Expressions[0].Element is not MvExpandExpression mve)
+        {
+            throw new NotSupportedException("Unexpected mv-expand expression type");
+        }
+
+        var column = mve.Expression.ToString().Trim();
+
+        string sourceAlias = "t";
+        string fromSql;
+        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = leftSql.Substring("SELECT * FROM ".Length);
+            fromSql = $"{rest} AS {sourceAlias}";
+        }
+        else
+        {
+            fromSql = $"({leftSql}) AS {sourceAlias}";
+        }
+
+        var unnestAlias = "u";
+        return $"SELECT {sourceAlias}.* EXCLUDE ({column}), {unnestAlias}.value AS {column} FROM {fromSql} CROSS JOIN UNNEST({sourceAlias}.{column}) AS {unnestAlias}(value)";
     }
 
     private string ApplyFilter(string leftSql, FilterOperator filter)
