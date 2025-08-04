@@ -25,6 +25,7 @@
 - [ ] Scalar
 - [ ] String
 - [ ] Tabular
+- [x] arg_max
 - [ ] as
 - [x] between
 - [x] bin()
