@@ -326,6 +326,149 @@ export async function createSampleStormEventsData() {
     }
 }
 
+// Store reference to current Monaco editor for schema updates
+let currentMonacoEditor = null;
+
+// Function to get database schema from DuckDB
+export async function getDatabaseSchema() {
+    if (!db) await init();
+    
+    try {
+        const c = await db.connect();
+        
+        // Get list of all tables
+        const tablesResult = await c.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'");
+        const tables = tablesResult.toArray();
+        
+        const schemaTables = [];
+        
+        // For each table, get its columns
+        for (const table of tables) {
+            const tableName = table.table_name;
+            const columnsResult = await c.query(`
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_schema = 'main' AND table_name = '${tableName}'
+                ORDER BY ordinal_position
+            `);
+            const columns = columnsResult.toArray();
+            
+            // Map DuckDB types to Kusto types
+            const schemaColumns = columns.map(col => ({
+                name: col.column_name,
+                type: mapDuckDbTypeToKustoType(col.data_type)
+            }));
+            
+            schemaTables.push({
+                name: tableName,
+                entityType: "Table",
+                columns: schemaColumns
+            });
+        }
+        
+        c.close();
+        
+        // Create the schema object in the format expected by Monaco Kusto
+        const schema = {
+            clusterType: "Engine",
+            cluster: {
+                connectionString: "DuckDB://memory",
+                databases: [{
+                    database: {
+                        name: "main",
+                        majorVersion: 1,
+                        minorVersion: 0,
+                        tables: schemaTables
+                    }
+                }]
+            },
+            database: {
+                name: "main",
+                majorVersion: 1,
+                minorVersion: 0,
+                tables: schemaTables
+            }
+        };
+        
+        return schema;
+        
+    } catch (error) {
+        console.error('Failed to get database schema:', error);
+        return {
+            clusterType: "Engine",
+            cluster: {
+                connectionString: "DuckDB://memory",
+                databases: [{
+                    database: {
+                        name: "main",
+                        majorVersion: 1,
+                        minorVersion: 0,
+                        tables: []
+                    }
+                }]
+            },
+            database: {
+                name: "main",
+                majorVersion: 1,
+                minorVersion: 0,
+                tables: []
+            }
+        };
+    }
+}
+
+// Helper function to map DuckDB types to Kusto types
+function mapDuckDbTypeToKustoType(duckDbType) {
+    const typeMapping = {
+        'VARCHAR': 'string',
+        'INTEGER': 'int',
+        'BIGINT': 'long',
+        'DOUBLE': 'real',
+        'BOOLEAN': 'bool',
+        'DATE': 'datetime',
+        'TIMESTAMP': 'datetime',
+        'TIME': 'timespan',
+        'DECIMAL': 'decimal',
+        'FLOAT': 'real',
+        'SMALLINT': 'int',
+        'TINYINT': 'int',
+        'UBIGINT': 'long',
+        'UINTEGER': 'int',
+        'USMALLINT': 'int',
+        'UTINYINT': 'int',
+        'JSON': 'dynamic',
+        'BLOB': 'string',
+        'UUID': 'guid'
+    };
+    
+    // Handle array types
+    if (duckDbType.includes('[]')) {
+        return 'dynamic';
+    }
+    
+    // Get the base type (remove any size specifications)
+    const baseType = duckDbType.split('(')[0].toUpperCase();
+    
+    return typeMapping[baseType] || 'string';
+}
+
+// Function to get list of available tables
+export async function getAvailableTables() {
+    if (!db) await init();
+    
+    try {
+        const c = await db.connect();
+        const tablesResult = await c.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name");
+        const tables = tablesResult.toArray();
+        c.close();
+        
+        return tables.map(t => t.table_name);
+    } catch (error) {
+        console.error('Failed to get table list:', error);
+        return [];
+    }
+}
+
 async function init() {
     const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
     const workerUrl = URL.createObjectURL(
@@ -340,3 +483,14 @@ async function init() {
     // Make db available globally for file manager
     window.db = db;
 }
+
+// Make functions available globally for Blazor JSImport
+globalThis.DuckDbInterop = {
+    queryJson,
+    uploadFileToDatabase,
+    setupFileDropZone,
+    loadStormEventsFromUrl,
+    createSampleStormEventsData,
+    getDatabaseSchema,
+    getAvailableTables
+};

@@ -1,7 +1,11 @@
 ﻿@page "/"
 @using DuckDbDemo.DuckDB
+@using DuckDbDemo.Services
 @using System.Text.Json
 @using KqlToSql
+@using Microsoft.JSInterop
+@inject IJSRuntime JSRuntime
+@implements IDisposable
 
 <PageTitle>KQL to SQL Converter</PageTitle>
 
@@ -20,6 +24,14 @@
             <MudText Typo="Typo.h5">Query Workspace</MudText>
             
             <div class="d-flex align-center gap-4">
+                <MudButton Variant="Variant.Text" 
+                           Color="Color.Secondary"
+                           Size="Size.Small"
+                           StartIcon="Icons.Material.Filled.Build"
+                           OnClick="InitializeEditor">
+                    Debug: Init Editor
+                </MudButton>
+                
                 <MudButton Variant="Variant.Outlined" 
                            Color="Color.Info"
                            Size="Size.Medium"
@@ -52,7 +64,7 @@
         }
         
         <div style="height: 350px; margin-bottom: 20px;">
-            <StandaloneCodeEditor @ref="editor" Id="editor" ConstructionOptions="EditorConstructionOptions" />
+            <div id="monaco-editor-container" style="height: 100%; border: 1px solid #ccc; border-radius: 4px;"></div>
         </div>
 
         <div class="d-flex align-center gap-4">
@@ -187,7 +199,6 @@
 
 @code
 {
-    private StandaloneCodeEditor? editor;
     private string result = string.Empty;
     private string errorMessage = string.Empty;
     private string conversionMessage = string.Empty;
@@ -197,16 +208,164 @@
     private List<Dictionary<string, object>>? resultData;
     private string selectedMode = "kql";
     private (Severity Severity, string Message)? dataLoadStatus;
+    private const string EditorContainerId = "monaco-editor-container";
 
-    private StandaloneEditorConstructionOptions EditorConstructionOptions(StandaloneCodeEditor editor)
+    protected override void OnInitialized()
     {
-        return new StandaloneEditorConstructionOptions
+        Console.WriteLine("🏠 Home component OnInitialized called");
+        base.OnInitialized();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        Console.WriteLine($"🎯 Home component OnAfterRenderAsync - firstRender: {firstRender}");
+        
+        if (firstRender)
         {
-            AutomaticLayout = true,
-            Language = selectedMode == "kql" ? "kql" : "sql",
-            Value = GetDefaultQuery(),
-            Theme = "vs-dark"
-        };
+            Console.WriteLine($"🎯 Home component first render - about to initialize editor");
+            
+            // Small delay to ensure DOM is fully rendered
+            await Task.Delay(100);
+            
+            await InitializeEditor();
+        }
+        else
+        {
+            Console.WriteLine($"🔄 Home component re-render (not first)");
+        }
+    }
+
+    private async Task InitializeEditor()
+    {
+        try
+        {
+            Console.WriteLine($"🎯 InitializeEditor starting for container: {EditorContainerId}");
+            
+            // Test basic JavaScript interop first
+            try
+            {
+                var result = await JSRuntime.InvokeAsync<string>("eval", "typeof window.nativeMonacoEditor");
+                Console.WriteLine($"🔍 window.nativeMonacoEditor type: {result}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Basic JS interop test failed: {ex.Message}");
+            }
+            
+            // Test if the ensureMonacoEditor function exists
+            try
+            {
+                var result = await JSRuntime.InvokeAsync<string>("eval", "typeof window.ensureMonacoEditor");
+                Console.WriteLine($"🔍 window.ensureMonacoEditor type: {result}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ ensureMonacoEditor function check failed: {ex.Message}");
+            }
+            
+            // Ensure the Monaco Editor exists (creates if needed, reuses if exists)
+            var initResult = await JSRuntime.InvokeAsync<Dictionary<string, object>>("ensureMonacoEditor", EditorContainerId);
+            
+            // Safely check if success is true (handle both boolean and string types)
+            bool isSuccess = false;
+            if (initResult != null && initResult.ContainsKey("success"))
+            {
+                var successValue = initResult["success"];
+                Console.WriteLine($"🔍 Success value type: {successValue?.GetType()}, value: {successValue}");
+                
+                if (successValue is bool boolValue)
+                {
+                    isSuccess = boolValue;
+                    Console.WriteLine($"🔍 Parsed as boolean: {isSuccess}");
+                }
+                else if (successValue is string stringValue)
+                {
+                    isSuccess = stringValue.Equals("true", StringComparison.OrdinalIgnoreCase);
+                    Console.WriteLine($"🔍 Parsed as string: {isSuccess}");
+                }
+                else
+                {
+                    // Try to convert whatever it is
+                    try
+                    {
+                        isSuccess = Convert.ToBoolean(successValue);
+                        Console.WriteLine($"🔍 Converted to boolean: {isSuccess}");
+                    }
+                    catch (Exception convertEx)
+                    {
+                        Console.WriteLine($"🔍 Failed to convert: {convertEx.Message}");
+                        isSuccess = false;
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"🔍 initResult is null or doesn't contain 'success' key");
+                Console.WriteLine($"🔍 initResult: {JsonSerializer.Serialize(initResult)}");
+            }
+            
+            if (isSuccess)
+            {
+                var message = (initResult?.ContainsKey("message") == true) ? initResult["message"]?.ToString() : "Editor initialized";
+                Console.WriteLine($"✅ Monaco Editor initialized successfully: {message}");
+            }
+            else
+            {
+                var errorMsg = initResult?.ContainsKey("message") == true ? initResult["message"]?.ToString() : "Unknown error";
+                Console.WriteLine($"❌ Editor initialization failed: {errorMsg}");
+                Console.WriteLine($"🔍 Debug info - initResult: {JsonSerializer.Serialize(initResult)}");
+                throw new Exception($"Editor initialization failed: {errorMsg}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Failed to initialize editor: {ex.Message}");
+            Console.WriteLine($"❌ Stack trace: {ex.StackTrace}");
+        }
+    }
+
+    private async Task SetKustoSchema()
+    {
+        try
+        {
+            var schema = new
+            {
+                Plugins = new object[0],
+                Databases = new
+                {
+                    SampleDB = new
+                    {
+                        Name = "SampleDB",
+                        Tables = new
+                        {
+                            StormEvents = new
+                            {
+                                Name = "StormEvents",
+                                DocString = "NOAA Storm Events Database",
+                                OrderedColumns = new[]
+                                {
+                                    new { Name = "STATE", Type = "System.String", CslType = "string" },
+                                    new { Name = "EVENT_TYPE", Type = "System.String", CslType = "string" },
+                                    new { Name = "YEAR", Type = "System.Int32", CslType = "int" },
+                                    new { Name = "MONTH_NAME", Type = "System.String", CslType = "string" },
+                                    new { Name = "BEGIN_DATE_TIME", Type = "System.DateTime", CslType = "datetime" },
+                                    new { Name = "END_DATE_TIME", Type = "System.DateTime", CslType = "datetime" },
+                                    new { Name = "DAMAGE_PROPERTY_NUM", Type = "System.Double", CslType = "real" },
+                                    new { Name = "DAMAGE_CROPS_NUM", Type = "System.Double", CslType = "real" }
+                                }
+                            }
+                        },
+                        Functions = new { }
+                    }
+                }
+            };
+
+            await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.setSchema", EditorContainerId, schema);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to set Kusto schema: {ex.Message}");
+        }
     }
 
     private string GetDefaultQuery()
@@ -264,16 +423,13 @@
                         
                         dataLoadStatus = (Severity.Success, $"{message} from {year} dataset!");
                         
-                        if (editor != null)
+                        var currentValue = await JSRuntime.InvokeAsync<string>("nativeMonacoEditor.getValue", EditorContainerId);
+                        if (currentValue == GetDefaultQuery())
                         {
-                            var currentValue = await editor.GetValue();
-                            if (currentValue == GetDefaultQuery())
-                            {
-                                var sampleQuery = selectedMode == "kql" 
-                                    ? "StormEvents | where STATE == 'TEXAS' | summarize EventCount = count() by EVENT_TYPE | sort by EventCount desc | take 10"
-                                    : "SELECT EVENT_TYPE, COUNT(*) as EventCount FROM StormEvents WHERE STATE = 'TEXAS' GROUP BY EVENT_TYPE ORDER BY EventCount DESC LIMIT 10;";
-                                await editor.SetValue(sampleQuery);
-                            }
+                            var sampleQuery = selectedMode == "kql" 
+                                ? "StormEvents | where STATE == 'TEXAS' | summarize EventCount = count() by EVENT_TYPE | sort by EventCount desc | take 10"
+                                : "SELECT EVENT_TYPE, COUNT(*) as EventCount FROM StormEvents WHERE STATE = 'TEXAS' GROUP BY EVENT_TYPE ORDER BY EventCount DESC LIMIT 10;";
+                            await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.setValue", EditorContainerId, sampleQuery);
                         }
                         return;
                     }
@@ -307,16 +463,13 @@
                     
                     dataLoadStatus = (Severity.Success, $"{message}. You can now try KQL and SQL queries!");
                     
-                    if (editor != null)
+                    var currentValue = await JSRuntime.InvokeAsync<string>("nativeMonacoEditor.getValue", EditorContainerId);
+                    if (currentValue == GetDefaultQuery())
                     {
-                        var currentValue = await editor.GetValue();
-                        if (currentValue == GetDefaultQuery())
-                        {
-                            var sampleQuery = selectedMode == "kql" 
-                                ? "StormEvents | where YEAR >= 2023 | summarize TotalDamage = sum(DAMAGE_PROPERTY_NUM + DAMAGE_CROPS_NUM), EventCount = count() by STATE | sort by TotalDamage desc"
-                                : "SELECT STATE, SUM(DAMAGE_PROPERTY_NUM + DAMAGE_CROPS_NUM) as TotalDamage, COUNT(*) as EventCount FROM StormEvents WHERE YEAR >= 2023 GROUP BY STATE ORDER BY TotalDamage DESC;";
-                            await editor.SetValue(sampleQuery);
-                        }
+                        var sampleQuery = selectedMode == "kql" 
+                            ? "StormEvents | where YEAR >= 2023 | summarize TotalDamage = sum(DAMAGE_PROPERTY_NUM + DAMAGE_CROPS_NUM), EventCount = count() by STATE | sort by TotalDamage desc"
+                            : "SELECT STATE, SUM(DAMAGE_PROPERTY_NUM + DAMAGE_CROPS_NUM) as TotalDamage, COUNT(*) as EventCount FROM StormEvents WHERE YEAR >= 2023 GROUP BY STATE ORDER BY TotalDamage DESC;";
+                        await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.setValue", EditorContainerId, sampleQuery);
                     }
                 }
                 else
@@ -390,21 +543,36 @@
         convertedSql = string.Empty;
         conversionMessage = string.Empty;
         
-        if (editor != null)
+        // Get current value before switching
+        var currentValue = await JSRuntime.InvokeAsync<string>("nativeMonacoEditor.getValue", EditorContainerId);
+        
+        // Switch the language in the editor
+        var newLanguage = selectedMode == "kql" ? "kusto" : "sql";
+        await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.setLanguage", EditorContainerId, newLanguage);
+        
+        // Set the default query for the new mode if current is empty or default
+        if (string.IsNullOrWhiteSpace(currentValue) || currentValue.Contains("Load sample data first"))
         {
-            await editor.SetValue(GetDefaultQuery());
+            await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.setValue", EditorContainerId, GetDefaultQuery());
         }
 
         StateHasChanged();
+        
+        // Set up Kusto schema if switching to KQL mode
+        if (selectedMode == "kql")
+        {
+            await Task.Delay(100); // Small delay to ensure language is switched
+            await SetKustoSchema();
+        }
     }
 
     private async Task ConvertToSql()
     {
-        if (editor == null || selectedMode != "kql") return;
+        if (selectedMode != "kql") return;
 
         try
         {
-            var kql = await editor.GetValue();
+            var kql = await JSRuntime.InvokeAsync<string>("nativeMonacoEditor.getValue", EditorContainerId);
             if (string.IsNullOrWhiteSpace(kql))
             {
                 errorMessage = "Please enter some KQL to convert.";
@@ -427,10 +595,11 @@
 
     private async Task UseConvertedSql()
     {
-        if (editor == null || string.IsNullOrEmpty(convertedSql)) return;
+        if (string.IsNullOrEmpty(convertedSql)) return;
 
         selectedMode = "sql";
-        await editor.SetValue(convertedSql);
+        await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.setLanguage", EditorContainerId, "sql");
+        await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.setValue", EditorContainerId, convertedSql);
         convertedSql = string.Empty;
         conversionMessage = "Converted SQL loaded into editor. You can now execute it.";
         StateHasChanged();
@@ -453,8 +622,6 @@
 
     private async Task Run()
     {
-        if (editor == null) return;
-
         try
         {
             isExecuting = true;
@@ -463,7 +630,7 @@
             resultData = null;
             StateHasChanged();
 
-            var query = await editor.GetValue();
+            var query = await JSRuntime.InvokeAsync<string>("nativeMonacoEditor.getValue", EditorContainerId);
             if (string.IsNullOrWhiteSpace(query))
             {
                 errorMessage = $"Please enter some {selectedMode.ToUpper()} to execute.";
@@ -509,6 +676,19 @@
         {
             isExecuting = false;
             StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            // Dispose the Monaco Editor when the component is disposed
+            JSRuntime.InvokeVoidAsync("nativeMonacoEditor.dispose", EditorContainerId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error disposing Monaco Editor: {ex.Message}");
         }
     }
 }

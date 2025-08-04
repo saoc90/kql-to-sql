@@ -1,0 +1,9 @@
+.monaco-editor-container {
+    height: 350px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+#kql-sql-editor {
+    height: 100%;
+}
