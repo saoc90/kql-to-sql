@@ -26,6 +26,7 @@
 - [ ] String
 - [ ] Tabular
 - [x] arg_max
+- [x] arg_min
 - [ ] as
 - [x] between
 - [x] bin()
