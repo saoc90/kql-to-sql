@@ -212,11 +212,12 @@ internal class OperatorSqlTranslator
         if (summarize.Aggregates.Count == 1 &&
             summarize.Aggregates[0].Element is Expression aggExpr &&
             aggExpr is FunctionCallExpression fce &&
-            fce.Name.ToString().Trim().Equals("arg_max", StringComparison.OrdinalIgnoreCase) &&
+            (fce.Name.ToString().Trim().Equals("arg_max", StringComparison.OrdinalIgnoreCase) ||
+             fce.Name.ToString().Trim().Equals("arg_min", StringComparison.OrdinalIgnoreCase)) &&
             fce.ArgumentList.Expressions.Count == 2 &&
             fce.ArgumentList.Expressions[1].Element is StarExpression)
         {
-            var maxExpr = ExpressionSqlBuilder.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
+            var extremumExpr = ExpressionSqlBuilder.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
 
             string fromSql;
             if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
@@ -232,7 +233,10 @@ internal class OperatorSqlTranslator
                 ? $"PARTITION BY {string.Join(", ", byColumns.Select(b => b.Group))} "
                 : string.Empty;
 
-            return $"SELECT * FROM {fromSql} QUALIFY ROW_NUMBER() OVER ({partition}ORDER BY {maxExpr} DESC) = 1";
+            var direction = fce.Name.ToString().Trim().Equals("arg_min", StringComparison.OrdinalIgnoreCase)
+                ? "ASC" : "DESC";
+
+            return $"SELECT * FROM {fromSql} QUALIFY ROW_NUMBER() OVER ({partition}ORDER BY {extremumExpr} {direction}) = 1";
         }
 
         var aggregates = new List<string>();
@@ -446,9 +450,9 @@ internal class OperatorSqlTranslator
         if (expr is FunctionCallExpression fce)
         {
             var name = fce.Name.ToString().Trim().ToLowerInvariant();
-            if (name == "arg_max")
+            if (name == "arg_max" || name == "arg_min")
             {
-                var maxExpr = ExpressionSqlBuilder.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
+                var extremumExpr = ExpressionSqlBuilder.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
                 var results = new List<string>();
                 for (int i = 1; i < fce.ArgumentList.Expressions.Count; i++)
                 {
@@ -465,9 +469,9 @@ internal class OperatorSqlTranslator
                     }
                     else
                     {
-                        resultAlias = alias ?? $"arg_max_{i}";
+                        resultAlias = alias ?? $"{name}_{i}";
                     }
-                    results.Add($"arg_max({valueExpr}, {maxExpr}) AS {resultAlias}");
+                    results.Add($"{name}({valueExpr}, {extremumExpr}) AS {resultAlias}");
                 }
                 return results;
             }
