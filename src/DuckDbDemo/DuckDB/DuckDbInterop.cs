@@ -24,6 +24,14 @@ namespace DuckDbDemo.DuckDB
         [JSImport("uploadFileToDatabase", "DuckDbInterop")]
         private static partial Task<string> UploadFileToDatabaseRawAsync(string fileName, string fileContent, string fileType);
 
+        // Kusto Monaco Editor support methods will be handled directly in C# using JSRuntime
+
+        [JSImport("getAvailableTables", "DuckDbInterop")]
+        private static partial Task<string> GetAvailableTablesRawAsync();
+
+        [JSImport("getDatabaseSchema", "DuckDbInterop")]
+        private static partial Task<string> GetDatabaseSchemaRawAsync();
+
         // Public wrapper methods that handle JSON parsing
         internal static async Task<Dictionary<string, object>?> LoadStormEventsFromUrlAsync(string csvUrl)
         {
@@ -76,6 +84,35 @@ namespace DuckDbDemo.DuckDB
                     ["error"] = ex.Message,
                     ["message"] = $"Failed to upload file: {ex.Message}"
                 };
+            }
+        }
+
+        internal static async Task<List<string>> GetAvailableTablesAsync()
+        {
+            try
+            {
+                var resultJson = await GetAvailableTablesRawAsync();
+                var tables = JsonSerializer.Deserialize<List<string>>(resultJson);
+                return tables ?? new List<string>();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to get tables: {ex.Message}");
+                return new List<string>();
+            }
+        }
+
+        internal static async Task<Dictionary<string, object>?> GetDatabaseSchemaAsync()
+        {
+            try
+            {
+                var resultJson = await GetDatabaseSchemaRawAsync();
+                return JsonSerializer.Deserialize<Dictionary<string, object>>(resultJson);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to get database schema: {ex.Message}");
+                return null;
             }
         }
 
