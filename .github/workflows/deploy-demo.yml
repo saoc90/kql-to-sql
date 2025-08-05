@@ -25,6 +25,8 @@ jobs:
       # Fix base href before build for GitHub Pages
       - name: Fix base href for GitHub Pages
         run: sed -i 's/<base href="\/" \/>/<base href="\/kql-to-sql\/" \/>/g' src/DuckDbDemo/wwwroot/index.html
+      - name: Fix JS import path for GitHub Pages
+        run: sed -i 's|"duckdbInterop\.js"|"/kql-to-sql/duckdbInterop.js"|g' src/DuckDbDemo/Program.cs
       - name: Publish demo
         run: dotnet publish src/DuckDbDemo/DuckDbDemo.csproj -c Release -o build
       # stop Jekyll from filtering _framework
