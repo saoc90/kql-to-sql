@@ -22,12 +22,7 @@
     <MudPaper Class="pa-6 mb-4" Elevation="2">
         <MudText Typo="Typo.h5" Class="mb-4">Upload Files</MudText>
         
-        <div @ondrop="HandleDrop"
-             @ondragover="HandleDragOver"
-             @ondragenter="HandleDragEnter"
-             @ondragleave="HandleDragLeave"
-             @ondragover:preventDefault="true"
-             @ondrop:preventDefault="true"
+        <div id="file-drop-zone"
              style="border: 2px dashed #ccc; background-color: #fafafa; min-height: 200px; @GetDropZoneStyle()"
              class="d-flex flex-column align-center justify-center rounded-lg">
 
@@ -35,19 +30,19 @@
             <MudText Typo="Typo.h6" Class="mb-2">Drag and drop files here</MudText>
             <MudText Typo="Typo.body1" Class="mb-3">or</MudText>
 
-            <MudFileUpload T="IBrowserFile"
-                           OnFilesChanged="HandleFileSelection"
-                           MaximumFileCount="10"
-                           Accept=".csv,.json,.parquet,.txt">
-                <ActivatorContent>
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               StartIcon="Icons.Material.Filled.Folder"
-                               Size="Size.Large">
-                        Browse Files
-                    </MudButton>
-                </ActivatorContent>
-            </MudFileUpload>
+            <input type="file" 
+                   id="file-input" 
+                   multiple 
+                   accept=".csv,.json,.parquet,.txt"
+                   style="display: none;" />
+            
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="Icons.Material.Filled.Folder"
+                       Size="Size.Large"
+                       OnClick="TriggerFileInput">
+                Browse Files
+            </MudButton>
 
             <MudText Typo="Typo.caption" Class="mt-3 mud-text-secondary">
                 Supported formats: CSV, JSON, Parquet, TXT (Max 500MB per file)
@@ -156,6 +151,17 @@
                                            OnClick="() => LoadFileIntoDatabase(context)"
                                            Disabled="isProcessing">
                                     Load
+                                </MudButton>
+                            }
+                            @if (context.IsLoaded)
+                            {
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           Size="Size.Small"
+                                           StartIcon="Icons.Material.Filled.TableView"
+                                           OnClick="() => LoadFileIntoDatabase(context)"
+                                           Disabled="isProcessing">
+                                    Re-Load
                                 </MudButton>
                             }
                             @if (context.IsLoaded)
@@ -274,11 +280,26 @@
     private bool previewDialogVisible = false;
     private string previewFileName = string.Empty;
     private List<Dictionary<string, object>>? previewData;
+    private DotNetObjectReference<FileManager>? dotnetRef;
 
     protected override async Task OnInitializedAsync()
     {
         FileManagerService.StateChanged += OnStateChanged;
-        await FileManagerService.InitializeAsync();
+        
+        // Create .NET object reference for JavaScript callbacks
+        dotnetRef = DotNetObjectReference.Create(this);
+        
+        // Initialize the file manager service with the .NET reference
+        await FileManagerService.InitializeAsync(DotNetObjectReference.Create<object>(this));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Setup JavaScript file handling after the component is rendered
+            await JSRuntime.InvokeVoidAsync("FileManagerInterop.setupFileHandling", "file-input", "file-drop-zone");
+        }
     }
 
     private void OnStateChanged()
@@ -289,6 +310,7 @@
     public void Dispose()
     {
         FileManagerService.StateChanged -= OnStateChanged;
+        dotnetRef?.Dispose();
     }
 
     private string GetDropZoneStyle()
@@ -298,102 +320,71 @@
             : "";
     }
 
-    private async Task HandleFileSelection(InputFileChangeEventArgs e)
+    private async Task TriggerFileInput()
     {
-        await ProcessFiles(e.GetMultipleFiles(10));
+        await JSRuntime.InvokeVoidAsync("document.getElementById('file-input').click");
     }
 
-    private async Task HandleDrop(DragEventArgs e)
+    // JavaScript callback methods
+    [JSInvokable]
+    public async Task OnUploadStarted(JsonElement data)
     {
-        isDragOver = false;
-        StateHasChanged();
-
-        statusMessage = "Drag and drop detected! Please use the Browse Files button for file selection.";
-        statusSeverity = Severity.Info;
-        StateHasChanged();
-    }
-
-    private void HandleDragOver(DragEventArgs e)
-    {
-        if (!isDragOver)
-        {
-            isDragOver = true;
-            StateHasChanged();
-        }
-    }
-
-    private void HandleDragEnter(DragEventArgs e)
-    {
-        isDragOver = true;
-        StateHasChanged();
-    }
-
-    private void HandleDragLeave(DragEventArgs e)
-    {
-        isDragOver = false;
-        StateHasChanged();
-    }
-
-    private async Task ProcessFiles(IReadOnlyList<IBrowserFile> files)
-    {
-        if (!files.Any()) return;
-
         isUploading = true;
-        uploadStatusMessage = $"Processing {files.Count} file(s)...";
-        StateHasChanged();
+        var count = data.TryGetProperty("count", out var countProp) ? countProp.GetInt32() : 0;
+        uploadStatusMessage = $"Processing {count} file(s)...";
+        await InvokeAsync(StateHasChanged);
+    }
 
-        foreach (var file in files)
-        {
-            try
-            {
-                if (!IsValidFileType(file.Name, file.ContentType))
-                {
-                    statusMessage = $"Unsupported file type: {file.Name} ({file.ContentType})";
-                    statusSeverity = Severity.Warning;
-                    continue;
-                }
-
-                if (file.Size > 500 * 1024 * 1024)
-                {
-                    statusMessage = $"File too large: {file.Name} (max 500MB)";
-                    statusSeverity = Severity.Warning;
-                    continue;
-                }
-
-                uploadStatusMessage = $"Uploading {file.Name}...";
-                StateHasChanged();
-
-                var fileInfo = new UploadedFileInfo
-                {
-                    Name = file.Name,
-                    Size = file.Size,
-                    Type = file.ContentType ?? GetContentTypeFromExtension(file.Name),
-                    UploadDate = DateTime.Now
-                };
-
-                using var stream = file.OpenReadStream(maxAllowedSize: 500 * 1024 * 1024);
-                using var memoryStream = new MemoryStream();
-                await stream.CopyToAsync(memoryStream);
-                fileInfo.Content = memoryStream.ToArray();
-
-                await FileManagerService.AddFileAsync(fileInfo);
-            }
-            catch (Exception ex)
-            {
-                statusMessage = $"Failed to upload {file.Name}: {ex.Message}";
-                statusSeverity = Severity.Error;
-            }
-        }
-
+    [JSInvokable]
+    public async Task OnUploadCompleted(JsonElement data)
+    {
         isUploading = false;
-
-        if (files.Any())
+        var success = data.TryGetProperty("success", out var successProp) && successProp.GetBoolean();
+        var count = data.TryGetProperty("count", out var countProp) ? countProp.GetInt32() : 0;
+        
+        if (success)
         {
-            statusMessage = $"Successfully uploaded {files.Count} file(s). Click 'Load' to add them to the database.";
+            statusMessage = $"Successfully processed {count} file(s). Click 'Load' to add them to the database.";
             statusSeverity = Severity.Success;
         }
+        else
+        {
+            var error = data.TryGetProperty("error", out var errorProp) ? errorProp.GetString() : "Unknown error";
+            statusMessage = $"Failed to process files: {error}";
+            statusSeverity = Severity.Error;
+        }
+        
+        await InvokeAsync(StateHasChanged);
+    }
 
-        StateHasChanged();
+    [JSInvokable]
+    public async Task OnFileAdded(JsonElement fileMetadata)
+    {
+        // Refresh metadata from JavaScript
+        await FileManagerService.RefreshMetadataAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnFileValidationFailed(JsonElement data)
+    {
+        var fileName = data.TryGetProperty("fileName", out var nameProp) ? nameProp.GetString() : "Unknown file";
+        var error = data.TryGetProperty("error", out var errorProp) ? errorProp.GetString() : "Validation failed";
+        
+        statusMessage = $"{fileName}: {error}";
+        statusSeverity = Severity.Warning;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnFileProcessingFailed(JsonElement data)
+    {
+        var fileName = data.TryGetProperty("fileName", out var nameProp) ? nameProp.GetString() : "Unknown file";
+        var error = data.TryGetProperty("error", out var errorProp) ? errorProp.GetString() : "Processing failed";
+        
+        statusMessage = $"Failed to process {fileName}: {error}";
+        statusSeverity = Severity.Error;
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadFileIntoDatabase(UploadedFileInfo fileInfo)
@@ -403,60 +394,34 @@
             isProcessing = true;
             StateHasChanged();
 
-            var base64Content = Convert.ToBase64String(fileInfo.Content);
-
-            var result = await DuckDbInterop.UploadFileToDatabaseAsync(
-                fileInfo.Name, base64Content, fileInfo.Type);
-
-            if (result != null && result.ContainsKey("success") && Convert.ToBoolean(result["success"]?.ToString().ToLowerInvariant()))
+            var result = await FileManagerService.LoadFileIntoDatabaseAsync(fileInfo.Id);
+            
+            // Parse the result from JSON
+            if (result is JsonElement jsonResult)
             {
-                fileInfo.IsLoaded = true;
-                fileInfo.TableName = result["tableName"]?.ToString();
-
-                if (result.ContainsKey("rowCount"))
+                var success = jsonResult.TryGetProperty("success", out var successProp) && successProp.GetBoolean();
+                
+                if (success)
                 {
-                    var rowCountValue = result["rowCount"];
-                    if (rowCountValue != null)
-                    {
-                        if (rowCountValue is JsonElement jsonElement)
-                        {
-                            fileInfo.RowCount = jsonElement.ValueKind switch
-                            {
-                                JsonValueKind.Number => jsonElement.GetInt32(),
-                                JsonValueKind.String when int.TryParse(jsonElement.GetString(), out var parsed) => parsed,
-                                _ => 0
-                            };
-                        }
-                        else if (int.TryParse(rowCountValue.ToString(), out var parsedCount))
-                        {
-                            fileInfo.RowCount = parsedCount;
-                        }
-                        else
-                        {
-                            fileInfo.RowCount = 0;
-                        }
-                    }
+                    var message = jsonResult.TryGetProperty("message", out var msgProp) ? msgProp.GetString() : "File loaded successfully";
+                    statusMessage = message ?? "File loaded successfully";
+                    statusSeverity = Severity.Success;
                 }
-
-                await FileManagerService.UpdateFileAsync(fileInfo);
-
-                statusMessage = result["message"]?.ToString() ?? "File loaded successfully";
-                statusSeverity = Severity.Success;
+                else
+                {
+                    var error = jsonResult.TryGetProperty("error", out var errorProp) ? errorProp.GetString() : "Unknown error";
+                    statusMessage = $"Failed to load {fileInfo.Name}: {error ?? "Unknown error"}";
+                    statusSeverity = Severity.Error;
+                }
             }
             else
             {
-                fileInfo.HasError = true;
-                await FileManagerService.UpdateFileAsync(fileInfo);
-                
-                statusMessage = result?["message"]?.ToString() ?? "Failed to load file";
-                statusSeverity = Severity.Error;
+                statusMessage = "File loaded successfully";
+                statusSeverity = Severity.Success;
             }
         }
         catch (Exception ex)
         {
-            fileInfo.HasError = true;
-            await FileManagerService.UpdateFileAsync(fileInfo);
-            
             statusMessage = $"Failed to load {fileInfo.Name}: {ex.Message}";
             statusSeverity = Severity.Error;
         }
@@ -510,7 +475,7 @@
                 }
             }
 
-            await FileManagerService.RemoveFileAsync(fileInfo);
+            await FileManagerService.RemoveFileAsync(fileInfo.Id);
             
             statusMessage = $"Removed {fileInfo.Name}";
             statusSeverity = Severity.Info;
@@ -552,27 +517,6 @@
         }
 
         StateHasChanged();
-    }
-
-    private bool IsValidFileType(string fileName, string? contentType)
-    {
-        var validExtensions = new[] { ".csv", ".json", ".parquet", ".txt" };
-        var validContentTypes = new[] { "text/csv", "application/json", "text/plain" };
-
-        return validExtensions.Any(ext => fileName.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) ||
-               (contentType != null && validContentTypes.Contains(contentType));
-    }
-
-    private string GetContentTypeFromExtension(string fileName)
-    {
-        return fileName.ToLower() switch
-        {
-            var name when name.EndsWith(".csv") => "text/csv",
-            var name when name.EndsWith(".json") => "application/json",
-            var name when name.EndsWith(".parquet") => "application/octet-stream",
-            var name when name.EndsWith(".txt") => "text/plain",
-            _ => "application/octet-stream"
-        };
     }
 
     private string GetFileIcon(string contentType)

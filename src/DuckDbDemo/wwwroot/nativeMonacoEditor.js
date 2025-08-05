@@ -408,6 +408,18 @@ window.nativeMonacoEditor = {
         }
     },
 
+    // Set editor language
+    setLanguage(containerId, language) {
+        const editor = this.getEditor(containerId);
+        if (editor) {
+            const model = editor.getModel();
+            if (model) {
+                this.monaco.editor.setModelLanguage(model, language);
+                console.log(`✅ Language changed to: ${language} for editor: ${containerId}`);
+            }
+        }
+    },
+
     // Dispose editor
     dispose(containerId) {
         const editor = this.editors.get(containerId);
@@ -422,6 +434,84 @@ window.nativeMonacoEditor = {
     disposeAll() {
         for (const [containerId] of this.editors) {
             this.dispose(containerId);
+        }
+    },
+
+    // Add keyboard shortcut to editor
+    addKeyboardShortcut(containerId, keyCombo, dotnetRef, methodName) {
+        const editor = this.getEditor(containerId);
+        if (editor && this.monaco) {
+            // Parse key combination (e.g., "Shift+Enter")
+            let keyCode;
+            let ctrlKey = false;
+            let shiftKey = false;
+            let altKey = false;
+            let metaKey = false;
+
+            const parts = keyCombo.split('+');
+            const key = parts[parts.length - 1].toLowerCase();
+            
+            // Check for modifier keys
+            for (let i = 0; i < parts.length - 1; i++) {
+                const modifier = parts[i].toLowerCase();
+                switch (modifier) {
+                    case 'ctrl':
+                    case 'control':
+                        ctrlKey = true;
+                        break;
+                    case 'shift':
+                        shiftKey = true;
+                        break;
+                    case 'alt':
+                        altKey = true;
+                        break;
+                    case 'meta':
+                    case 'cmd':
+                        metaKey = true;
+                        break;
+                }
+            }
+
+            // Map key names to Monaco key codes
+            switch (key) {
+                case 'enter':
+                    keyCode = this.monaco.KeyCode.Enter;
+                    break;
+                case 'space':
+                    keyCode = this.monaco.KeyCode.Space;
+                    break;
+                case 'escape':
+                    keyCode = this.monaco.KeyCode.Escape;
+                    break;
+                case 'f5':
+                    keyCode = this.monaco.KeyCode.F5;
+                    break;
+                default:
+                    // For single character keys, use the char code
+                    if (key.length === 1) {
+                        keyCode = key.toUpperCase().charCodeAt(0);
+                    } else {
+                        console.warn(`Unsupported key: ${key}`);
+                        return;
+                    }
+            }
+
+            // Add the keyboard shortcut
+            editor.addCommand(keyCode | (ctrlKey ? this.monaco.KeyMod.CtrlCmd : 0) | 
+                                      (shiftKey ? this.monaco.KeyMod.Shift : 0) | 
+                                      (altKey ? this.monaco.KeyMod.Alt : 0), 
+                () => {
+                    console.log(`🎹 Keyboard shortcut triggered: ${keyCombo}`);
+                    try {
+                        dotnetRef.invokeMethodAsync(methodName);
+                    } catch (error) {
+                        console.error(`❌ Failed to invoke .NET method ${methodName}:`, error);
+                    }
+                });
+
+            console.log(`✅ Keyboard shortcut added: ${keyCombo} -> ${methodName}`);
+        } else {
+            console.warn(`❌ Cannot add keyboard shortcut: editor not found for ${containerId}`);
         }
     }
 };
@@ -499,6 +589,17 @@ window.ensureMonacoEditor = async function(containerId) {
     } catch (error) {
         console.error('❌ Failed to ensure Monaco Editor:', error);
         console.error('❌ Error details:', error.message, error.stack);
+        return { success: false, message: error.message };
+    }
+};
+
+window.setEditorLanguage = function(containerId, language) {
+    try {
+        window.nativeMonacoEditor.setLanguage(containerId, language);
+        console.log(`✅ Language set to ${language} for container ${containerId}`);
+        return { success: true, message: `Language changed to ${language}` };
+    } catch (error) {
+        console.error('❌ Failed to set editor language:', error);
         return { success: false, message: error.message };
     }
 };

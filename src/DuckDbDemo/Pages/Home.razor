@@ -32,23 +32,6 @@
                     Debug: Init Editor
                 </MudButton>
                 
-                <MudButton Variant="Variant.Outlined" 
-                           Color="Color.Info"
-                           Size="Size.Medium"
-                           StartIcon="Icons.Material.Filled.CloudDownload"
-                           OnClick="LoadStormEventsData"
-                           Disabled="isLoading">
-                    @if (isLoading)
-                    {
-                        <MudProgressCircular Class="mr-2" Size="Size.Small" Indeterminate="true" />
-                        <span>Loading Sample Data...</span>
-                    }
-                    else
-                    {
-                        <span>Load Sample Data</span>
-                    }
-                </MudButton>
-                
                 <MudToggleGroup T="string" Value="@selectedMode" ValueChanged="OnModeChanged" Color="Color.Primary" CheckMark>
                     <MudToggleItem T="string" Value="@("kql")" Text="KQL" />
                     <MudToggleItem T="string" Value="@("sql")" Text="SQL" />
@@ -73,6 +56,7 @@
                        Size="Size.Large"
                        StartIcon="Icons.Material.Filled.PlayArrow"
                        OnClick="Run"
+                       Title="Execute query (Shift+Enter)"
                        Disabled="isExecuting">
                 @if (isExecuting)
                 {
@@ -81,7 +65,7 @@
                 }
                 else
                 {
-                    <span>Execute @selectedMode.ToUpper()</span>
+                    <span>Execute @selectedMode.ToUpper() <small class="opacity-75">(Shift+Enter)</small></span>
                 }
             </MudButton>
 
@@ -204,11 +188,11 @@
     private string conversionMessage = string.Empty;
     private string convertedSql = string.Empty;
     private bool isExecuting = false;
-    private bool isLoading = false;
     private List<Dictionary<string, object>>? resultData;
     private string selectedMode = "kql";
     private (Severity Severity, string Message)? dataLoadStatus;
     private const string EditorContainerId = "monaco-editor-container";
+    private DotNetObjectReference<Home>? dotnetRef;
 
     protected override void OnInitialized()
     {
@@ -228,6 +212,7 @@
             await Task.Delay(100);
             
             await InitializeEditor();
+            await SetupKeyboardShortcuts();
         }
         else
         {
@@ -324,6 +309,38 @@
         }
     }
 
+    private async Task SetupKeyboardShortcuts()
+    {
+        try
+        {
+            // Create a .NET object reference for JavaScript callbacks
+            dotnetRef = DotNetObjectReference.Create(this);
+            
+            // Setup keyboard shortcuts in the Monaco Editor
+            await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.addKeyboardShortcut", 
+                EditorContainerId, 
+                "Shift+Enter", 
+                dotnetRef, 
+                "ExecuteQuery");
+                
+            Console.WriteLine("✅ Keyboard shortcuts setup successfully");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Failed to setup keyboard shortcuts: {ex.Message}");
+        }
+    }
+
+    [JSInvokable]
+    public async Task ExecuteQuery()
+    {
+        // Don't execute if already executing
+        if (isExecuting) return;
+        
+        Console.WriteLine("🎹 Keyboard shortcut triggered: Shift+Enter");
+        await Run();
+    }
+
     private async Task SetKustoSchema()
     {
         try
@@ -373,125 +390,6 @@
         return selectedMode == "kql" 
             ? "// Load sample data first, then try KQL queries like:\n// StormEvents | where STATE == 'TEXAS' | take 10"
             : "-- Load sample data first, then try SQL queries like:\n-- SELECT * FROM StormEvents WHERE STATE = 'TEXAS' LIMIT 10;";
-    }
-
-    private async Task LoadStormEventsData()
-    {
-        try
-        {
-            isLoading = true;
-            dataLoadStatus = null;
-            StateHasChanged();
-
-            try
-            {
-                var checkResult = await DuckDbInterop.QueryJsonAsync("SELECT COUNT(*) as count FROM StormEvents LIMIT 1;");
-                var checkData = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(checkResult);
-                if (checkData != null && checkData.Any())
-                {
-                    var count = checkData[0]["count"];
-                    dataLoadStatus = (Severity.Info, $"StormEvents table already exists with {count} rows. Use 'Show Tables' to see available tables.");
-                    return;
-                }
-            }
-            catch
-            {
-            }
-
-            dataLoadStatus = (Severity.Info, "Attempting to load real NOAA StormEvents data...");
-            StateHasChanged();
-
-            var urls = new[]
-            {
-                "https://www.ncei.noaa.gov/pub/data/swdi/stormevents/csvfiles/StormEvents_details-ftp_v1.0_d1950_c20250520.csv.gz",
-                "https://www.ncei.noaa.gov/pub/data/swdi/stormevents/csvfiles/StormEvents_details-ftp_v1.0_d2023_c20250731.csv.gz",
-            };
-
-            foreach (var csvUrl in urls)
-            {
-                try
-                {
-                    var year = csvUrl.Contains("d1950") ? "1950" : "2023";
-                    dataLoadStatus = (Severity.Info, $"Trying to load {year} NOAA StormEvents data with proper file registration...");
-                    StateHasChanged();
-
-                    var result = await DuckDbInterop.LoadStormEventsFromUrlAsync(csvUrl);
-                    
-                    if (result != null && result.ContainsKey("success") && Convert.ToBoolean(result["success"]))
-                    {
-                        var message = result["message"]?.ToString() ?? "Data loaded successfully";
-                        
-                        dataLoadStatus = (Severity.Success, $"{message} from {year} dataset!");
-                        
-                        var currentValue = await JSRuntime.InvokeAsync<string>("nativeMonacoEditor.getValue", EditorContainerId);
-                        if (currentValue == GetDefaultQuery())
-                        {
-                            var sampleQuery = selectedMode == "kql" 
-                                ? "StormEvents | where STATE == 'TEXAS' | summarize EventCount = count() by EVENT_TYPE | sort by EventCount desc | take 10"
-                                : "SELECT EVENT_TYPE, COUNT(*) as EventCount FROM StormEvents WHERE STATE = 'TEXAS' GROUP BY EVENT_TYPE ORDER BY EventCount DESC LIMIT 10;";
-                            await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.setValue", EditorContainerId, sampleQuery);
-                        }
-                        return;
-                    }
-                    else
-                    {
-                        var errorMsg = result?["message"]?.ToString() ?? "Unknown error occurred";
-                        dataLoadStatus = (Severity.Warning, $"Failed to load from {year} data: {errorMsg}");
-                        StateHasChanged();
-                        await Task.Delay(1000);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    var year = csvUrl.Contains("d1950") ? "1950" : "2023";
-                    dataLoadStatus = (Severity.Warning, $"Failed to load {year} data: {ex.Message}");
-                    StateHasChanged();
-                    await Task.Delay(1000);
-                }
-            }
-
-            dataLoadStatus = (Severity.Info, "Real data loading failed. Creating comprehensive sample data...");
-            StateHasChanged();
-
-            try
-            {
-                var sampleResult = await DuckDbInterop.CreateSampleStormEventsDataAsync();
-                
-                if (sampleResult != null && sampleResult.ContainsKey("success") && Convert.ToBoolean(sampleResult["success"]))
-                {
-                    var message = sampleResult["message"]?.ToString() ?? "Sample data created successfully";
-                    
-                    dataLoadStatus = (Severity.Success, $"{message}. You can now try KQL and SQL queries!");
-                    
-                    var currentValue = await JSRuntime.InvokeAsync<string>("nativeMonacoEditor.getValue", EditorContainerId);
-                    if (currentValue == GetDefaultQuery())
-                    {
-                        var sampleQuery = selectedMode == "kql" 
-                            ? "StormEvents | where YEAR >= 2023 | summarize TotalDamage = sum(DAMAGE_PROPERTY_NUM + DAMAGE_CROPS_NUM), EventCount = count() by STATE | sort by TotalDamage desc"
-                            : "SELECT STATE, SUM(DAMAGE_PROPERTY_NUM + DAMAGE_CROPS_NUM) as TotalDamage, COUNT(*) as EventCount FROM StormEvents WHERE YEAR >= 2023 GROUP BY STATE ORDER BY TotalDamage DESC;";
-                        await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.setValue", EditorContainerId, sampleQuery);
-                    }
-                }
-                else
-                {
-                    var errorMsg = sampleResult?["message"]?.ToString() ?? "Unknown error occurred";
-                    dataLoadStatus = (Severity.Error, $"Failed to create sample data: {errorMsg}");
-                }
-            }
-            catch (Exception ex)
-            {
-                dataLoadStatus = (Severity.Error, $"Failed to create sample data: {ex.Message}");
-            }
-        }
-        catch (Exception ex)
-        {
-            dataLoadStatus = (Severity.Error, $"Failed to load data: {ex.Message}");
-        }
-        finally
-        {
-            isLoading = false;
-            StateHasChanged();
-        }
     }
 
     private async Task CheckTableExists()
@@ -685,10 +583,13 @@
         {
             // Dispose the Monaco Editor when the component is disposed
             JSRuntime.InvokeVoidAsync("nativeMonacoEditor.dispose", EditorContainerId);
+            
+            // Dispose the .NET object reference
+            dotnetRef?.Dispose();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error disposing Monaco Editor: {ex.Message}");
+            Console.WriteLine($"Error disposing Home component: {ex.Message}");
         }
     }
 }
