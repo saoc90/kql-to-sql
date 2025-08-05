@@ -7,24 +7,17 @@ namespace DuckDbDemo.Services
     {
         List<UploadedFileInfo> UploadedFiles { get; }
         event Action? StateChanged;
-        Task InitializeAsync();
-        Task AddFileAsync(UploadedFileInfo fileInfo);
-        Task RemoveFileAsync(UploadedFileInfo fileInfo);
-        Task UpdateFileAsync(UploadedFileInfo fileInfo);
+        Task InitializeAsync(DotNetObjectReference<object> dotnetRef);
+        Task<object> LoadFileIntoDatabaseAsync(string fileId);
+        Task RemoveFileAsync(string fileId);
         Task ClearFilesAsync();
-
-        // Legacy synchronous methods for backward compatibility
-        void AddFile(UploadedFileInfo fileInfo);
-        void RemoveFile(UploadedFileInfo fileInfo);
-        void UpdateFile(UploadedFileInfo fileInfo);
-        void ClearFiles();
+        Task RefreshMetadataAsync();
     }
 
     public class FileManagerService : IFileManagerService
     {
         private readonly IJSRuntime _jsRuntime;
         private readonly List<UploadedFileInfo> _uploadedFiles = new();
-        private const string StorageKey = "fileManagerState";
 
         public FileManagerService(IJSRuntime jsRuntime)
         {
@@ -35,98 +28,149 @@ namespace DuckDbDemo.Services
 
         public event Action? StateChanged;
 
-        public async Task InitializeAsync()
+        public async Task InitializeAsync(DotNetObjectReference<object> dotnetRef)
         {
             try
             {
-                // Try to load from browser storage
-                var json = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", StorageKey);
-                if (!string.IsNullOrEmpty(json))
-                {
-                    var files = JsonSerializer.Deserialize<List<UploadedFileInfo>>(json);
-                    if (files != null)
-                    {
-                        _uploadedFiles.Clear();
-                        _uploadedFiles.AddRange(files);
-                        StateChanged?.Invoke();
-                    }
-                }
+                // Initialize the JavaScript file manager
+                await _jsRuntime.InvokeVoidAsync("FileManagerInterop.initialize", dotnetRef);
+                await RefreshMetadataAsync();
             }
-            catch
+            catch (Exception ex)
             {
-                // If localStorage fails, just continue with empty state
+                Console.WriteLine($"Failed to initialize FileManagerService: {ex.Message}");
             }
         }
 
-        public async Task AddFileAsync(UploadedFileInfo fileInfo)
+        public async Task<object> LoadFileIntoDatabaseAsync(string fileId)
         {
-            _uploadedFiles.Add(fileInfo);
-            await SaveToStorageAsync();
-            StateChanged?.Invoke();
+            try
+            {
+                var result = await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabase", fileId);
+                
+                // Update local metadata
+                await RefreshMetadataAsync();
+                
+                return result;
+            }
+            catch (Exception ex)
+            {
+                return new { success = false, error = ex.Message };
+            }
         }
 
-        public async Task RemoveFileAsync(UploadedFileInfo fileInfo)
+        public async Task RemoveFileAsync(string fileId)
         {
-            _uploadedFiles.Remove(fileInfo);
-            await SaveToStorageAsync();
-            StateChanged?.Invoke();
-        }
-
-        public async Task UpdateFileAsync(UploadedFileInfo fileInfo)
-        {
-            // The file object is already updated by reference, just save and notify
-            await SaveToStorageAsync();
-            StateChanged?.Invoke();
+            try
+            {
+                await _jsRuntime.InvokeVoidAsync("FileManagerInterop.removeFile", fileId);
+                await RefreshMetadataAsync();
+                StateChanged?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to remove file: {ex.Message}");
+            }
         }
 
         public async Task ClearFilesAsync()
         {
-            _uploadedFiles.Clear();
-            await SaveToStorageAsync();
-            StateChanged?.Invoke();
+            try
+            {
+                await _jsRuntime.InvokeVoidAsync("FileManagerInterop.clearAllFiles");
+                _uploadedFiles.Clear();
+                StateChanged?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to clear files: {ex.Message}");
+            }
         }
 
-        private async Task SaveToStorageAsync()
+        public async Task RefreshMetadataAsync()
         {
             try
             {
-                // Create a copy without the large Content arrays for storage
-                var filesToStore = _uploadedFiles.Select(f => new UploadedFileInfo
+                var metadata = await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.getFileMetadata");
+                
+                _uploadedFiles.Clear();
+                
+                if (metadata.ValueKind == JsonValueKind.Array)
                 {
-                    Name = f.Name,
-                    Size = f.Size,
-                    Type = f.Type,
-                    UploadDate = f.UploadDate,
-                    IsLoaded = f.IsLoaded,
-                    HasError = f.HasError,
-                    TableName = f.TableName,
-                    RowCount = f.RowCount,
-                    Content = Array.Empty<byte>() // Don't store large file content
-                }).ToList();
-
-                var json = JsonSerializer.Serialize(filesToStore);
-                await _jsRuntime.InvokeVoidAsync("localStorage.setItem", StorageKey, json);
+                    foreach (var item in metadata.EnumerateArray())
+                    {
+                        var fileInfo = new UploadedFileInfo
+                        {
+                            Id = GetStringProperty(item, "id"),
+                            Name = GetStringProperty(item, "name"),
+                            Size = GetLongProperty(item, "size"),
+                            Type = GetStringProperty(item, "type"),
+                            UploadDate = GetDateTimeProperty(item, "uploadDate"),
+                            IsLoaded = GetBoolProperty(item, "isLoaded"),
+                            HasError = GetBoolProperty(item, "hasError"),
+                            TableName = GetStringProperty(item, "tableName"),
+                            RowCount = GetIntProperty(item, "rowCount")
+                        };
+                        
+                        _uploadedFiles.Add(fileInfo);
+                    }
+                }
+                
+                StateChanged?.Invoke();
             }
-            catch
+            catch (Exception ex)
             {
-                // If localStorage fails, just continue
+                Console.WriteLine($"Failed to refresh metadata: {ex.Message}");
             }
         }
 
-        // Legacy synchronous methods for backward compatibility
-        public void AddFile(UploadedFileInfo fileInfo) => _ = AddFileAsync(fileInfo);
-        public void RemoveFile(UploadedFileInfo fileInfo) => _ = RemoveFileAsync(fileInfo);
-        public void UpdateFile(UploadedFileInfo fileInfo) => _ = UpdateFileAsync(fileInfo);
-        public void ClearFiles() => _ = ClearFilesAsync();
+        private static string GetStringProperty(JsonElement element, string propertyName)
+        {
+            return element.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String 
+                ? prop.GetString() ?? string.Empty 
+                : string.Empty;
+        }
+
+        private static long GetLongProperty(JsonElement element, string propertyName)
+        {
+            return element.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.Number 
+                ? prop.GetInt64() 
+                : 0;
+        }
+
+        private static int GetIntProperty(JsonElement element, string propertyName)
+        {
+            return element.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.Number 
+                ? prop.GetInt32() 
+                : 0;
+        }
+
+        private static bool GetBoolProperty(JsonElement element, string propertyName)
+        {
+            return element.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.True;
+        }
+
+        private static DateTime GetDateTimeProperty(JsonElement element, string propertyName)
+        {
+            if (element.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String)
+            {
+                var dateString = prop.GetString();
+                if (DateTime.TryParse(dateString, out var date))
+                {
+                    return date;
+                }
+            }
+            return DateTime.Now;
+        }
     }
 
     public class UploadedFileInfo
     {
+        public string Id { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public long Size { get; set; }
         public string Type { get; set; } = string.Empty;
         public DateTime UploadDate { get; set; }
-        public byte[] Content { get; set; } = Array.Empty<byte>();
         public bool IsLoaded { get; set; }
         public bool HasError { get; set; }
         public string? TableName { get; set; }
