@@ -14,6 +14,10 @@ type-casting functions such as `tostring()`, `toint()`, `tolong()`, `todouble()`
 against DuckDB in the unit tests using
 StormEvents data downloaded from NOAA.
 
+## Demo
+
+A Blazor WebAssembly demo in `src/DuckDbDemo` is automatically built and deployed to GitHub Pages using a GitHub Actions workflow defined in `.github/workflows/deploy-demo.yml`.
+
 ## Run tests
 
 ```
