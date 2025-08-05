@@ -25,8 +25,8 @@ jobs:
       - name: Publish demo
         run: dotnet publish src/DuckDbDemo/DuckDbDemo.csproj -c Release -o build
       # Fix base href for GitHub Pages
-      - name: Fix base href
-        run: sed -i 's/<base href="\/" \/>/<base href="\/kql-to-sql\/" \/>/g' build/wwwroot/index.html
+      #- name: Fix base href
+      #  run: sed -i 's/<base href="\/" \/>/<base href="\/kql-to-sql\/" \/>/g' build/wwwroot/index.html
       # stop Jekyll from filtering _framework
       - name: Add .nojekyll
         run: touch build/wwwroot/.nojekyll
