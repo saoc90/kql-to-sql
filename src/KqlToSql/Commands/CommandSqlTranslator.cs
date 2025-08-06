@@ -18,6 +18,8 @@ public class CommandSqlTranslator
         var text = kqlText.Trim();
         if (text.StartsWith(".ingest", StringComparison.OrdinalIgnoreCase))
             return TranslateIngest(text);
+        if (text.StartsWith(".create table", StringComparison.OrdinalIgnoreCase))
+            return TranslateCreateTable(text);
         if (text.StartsWith(".view", StringComparison.OrdinalIgnoreCase))
             return TranslateView(text);
         throw new NotSupportedException("Unsupported command");
@@ -61,5 +63,47 @@ public class CommandSqlTranslator
         var query = match.Groups[2].Value;
         var sql = _converter.Convert(query);
         return $"CREATE VIEW {name} AS {sql}";
+    }
+
+    private static string TranslateCreateTable(string text)
+    {
+        var match = Regex.Match(text, @"\.create\s+table\s+(\w+)\s*\(([^)]*)\)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        if (!match.Success)
+            throw new NotSupportedException("Malformed create table command");
+
+        var table = match.Groups[1].Value;
+        var columnsPart = match.Groups[2].Value;
+        var columns = columnsPart.Split(',')
+            .Select(c => c.Trim())
+            .Where(c => c.Length > 0)
+            .Select(c =>
+            {
+                var parts = c.Split(':', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length != 2)
+                    throw new NotSupportedException("Invalid column definition");
+                var name = parts[0].Trim();
+                var type = MapType(parts[1].Trim());
+                return $"{name} {type}";
+            });
+
+        return $"CREATE TABLE {table} ({string.Join(", ", columns)})";
+    }
+
+    private static string MapType(string type)
+    {
+        return type.ToLowerInvariant() switch
+        {
+            "bool" or "boolean" => "BOOLEAN",
+            "int" => "INT",
+            "long" => "BIGINT",
+            "real" => "DOUBLE",
+            "decimal" => "DECIMAL",
+            "datetime" => "TIMESTAMP",
+            "date" => "DATE",
+            "string" => "VARCHAR",
+            "dynamic" => "JSON",
+            "guid" => "UUID",
+            _ => throw new NotSupportedException($"Unsupported type '{type}'")
+        };
     }
 }
