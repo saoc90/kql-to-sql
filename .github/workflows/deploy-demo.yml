@@ -1,0 +1,49 @@
+name: Build and Deploy Demo
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      # Fix base href before build for GitHub Pages
+      - name: Fix base href for GitHub Pages
+        run: sed -i 's/<base href="\/" \/>/<base href="\/kql-to-sql\/" \/>/g' src/DuckDbDemo/wwwroot/index.html
+      - name: Fix JS import path for GitHub Pages
+        run: sed -i 's|"duckdbInterop\.js"|"/kql-to-sql/duckdbInterop.js"|g' src/DuckDbDemo/Program.cs
+      - name: Publish demo
+        run: dotnet publish src/DuckDbDemo/DuckDbDemo.csproj -c Release -o build
+      # stop Jekyll from filtering _framework
+      - name: Add .nojekyll
+        run: touch build/wwwroot/.nojekyll
+      - name: Upload static site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/wwwroot
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
