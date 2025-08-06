@@ -20,7 +20,7 @@ builder.Services.AddSingleton<IFileManagerService, FileManagerService>();
 
 if (OperatingSystem.IsBrowser())
 {
-    await JSHost.ImportAsync("DuckDbInterop", "/duckdbInterop.js");
+    await JSHost.ImportAsync("DuckDbInterop", "duckdbInterop.js");
     
     // Register the Monaco Kusto service for handling Kusto language support
     builder.Services.AddScoped<MonacoKustoService>();
