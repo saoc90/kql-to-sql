@@ -1,5 +1,4 @@
 using DuckDbDemo;
-using DuckDbDemo.DuckDB;
 using DuckDbDemo.Services;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
@@ -20,8 +19,8 @@ builder.Services.AddSingleton<IFileManagerService, FileManagerService>();
 
 if (OperatingSystem.IsBrowser())
 {
-    await JSHost.ImportAsync("DuckDbInterop", "duckdbInterop.js");
-    
+    await JSHost.ImportAsync("DuckDbInterop", "../js/duckdbInterop.js");
+
     // Register the Monaco Kusto service for handling Kusto language support
     builder.Services.AddScoped<MonacoKustoService>();
 }

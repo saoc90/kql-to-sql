@@ -87,6 +87,13 @@
                        Disabled="isExecuting">
                 Show Tables
             </MudButton>
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Info"
+                       StartIcon="Icons.Material.Filled.TableView"
+                       OnClick="RefreshSchema"
+                       Disabled="isExecuting">
+                Refresh Schema
+            </MudButton>
         </div>
     </MudPaper>
 
@@ -203,14 +210,14 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         Console.WriteLine($"🎯 Home component OnAfterRenderAsync - firstRender: {firstRender}");
-        
+
         if (firstRender)
         {
             Console.WriteLine($"🎯 Home component first render - about to initialize editor");
-            
+
             // Small delay to ensure DOM is fully rendered
             await Task.Delay(100);
-            
+
             await InitializeEditor();
             await SetupKeyboardShortcuts();
         }
@@ -225,7 +232,7 @@
         try
         {
             Console.WriteLine($"🎯 InitializeEditor starting for container: {EditorContainerId}");
-            
+
             // Test basic JavaScript interop first
             try
             {
@@ -236,7 +243,7 @@
             {
                 Console.WriteLine($"❌ Basic JS interop test failed: {ex.Message}");
             }
-            
+
             // Test if the ensureMonacoEditor function exists
             try
             {
@@ -247,17 +254,17 @@
             {
                 Console.WriteLine($"❌ ensureMonacoEditor function check failed: {ex.Message}");
             }
-            
+
             // Ensure the Monaco Editor exists (creates if needed, reuses if exists)
             var initResult = await JSRuntime.InvokeAsync<Dictionary<string, object>>("ensureMonacoEditor", EditorContainerId);
-            
+
             // Safely check if success is true (handle both boolean and string types)
             bool isSuccess = false;
             if (initResult != null && initResult.ContainsKey("success"))
             {
                 var successValue = initResult["success"];
                 Console.WriteLine($"🔍 Success value type: {successValue?.GetType()}, value: {successValue}");
-                
+
                 if (successValue is bool boolValue)
                 {
                     isSuccess = boolValue;
@@ -288,7 +295,7 @@
                 Console.WriteLine($"🔍 initResult is null or doesn't contain 'success' key");
                 Console.WriteLine($"🔍 initResult: {JsonSerializer.Serialize(initResult)}");
             }
-            
+
             if (isSuccess)
             {
                 var message = (initResult?.ContainsKey("message") == true) ? initResult["message"]?.ToString() : "Editor initialized";
@@ -315,14 +322,14 @@
         {
             // Create a .NET object reference for JavaScript callbacks
             dotnetRef = DotNetObjectReference.Create(this);
-            
+
             // Setup keyboard shortcuts in the Monaco Editor
             await JSRuntime.InvokeVoidAsync("nativeMonacoEditor.addKeyboardShortcut", 
                 EditorContainerId, 
                 "Shift+Enter", 
                 dotnetRef, 
                 "ExecuteQuery");
-                
+
             Console.WriteLine("✅ Keyboard shortcuts setup successfully");
         }
         catch (Exception ex)
@@ -336,9 +343,14 @@
     {
         // Don't execute if already executing
         if (isExecuting) return;
-        
+
         Console.WriteLine("🎹 Keyboard shortcut triggered: Shift+Enter");
         await Run();
+    }
+
+    private async Task RefreshSchema()
+    {
+        //await JSRuntime.InvokeVoidAsync("refreshEditorSchema");
     }
 
     private async Task SetKustoSchema()
