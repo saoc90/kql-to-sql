@@ -93,6 +93,7 @@
 - [x] union
 - [x] where
 - [x] materialize()
+- [x] create table (command)
 - [x] view (command)
 - [x] view() (function declaration)
 
