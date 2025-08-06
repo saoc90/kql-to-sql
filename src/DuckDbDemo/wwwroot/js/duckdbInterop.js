@@ -296,10 +296,10 @@ export async function getAvailableTables() {
         const tables = tablesResult.toArray();
         c.close();
         
-        return tables.map(t => t.table_name);
+        return JSON.stringify(tables.map(t => t.table_name));
     } catch (error) {
         console.error('Failed to get table list:', error);
-        return [];
+        return JSON.stringify([]);
     }
 }
 
