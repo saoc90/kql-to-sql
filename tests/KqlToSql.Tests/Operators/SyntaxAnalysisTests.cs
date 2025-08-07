@@ -7,7 +7,7 @@ namespace KqlToSql.Tests.Operators;
 
 public class SyntaxAnalysisTests
 {
-    [Fact]
+    [Fact(Skip = "Debug helper test")]
     public void Analyze_Let_Statement_Structure()
     {
         var kql = @"let ViewData = StormEvents | where State == ""TEXAS"";
