@@ -480,6 +480,7 @@ internal class OperatorSqlTranslator
             alias ??= name switch
             {
                 "count" => "count",
+                "countif" => "countif",
                 _ when args.Length > 0 => $"{name}_{args[0]}",
                 _ => name
             };
@@ -489,6 +490,26 @@ internal class OperatorSqlTranslator
                 "count" => "COUNT(*)",
                 "sum" => $"SUM({args[0]})",
                 "avg" => $"AVG({args[0]})",
+                "avgif" => $"AVG(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "binary_all_and" => $"BIT_AND({args[0]})",
+                "binary_all_or" => $"BIT_OR({args[0]})",
+                "binary_all_xor" => $"BIT_XOR({args[0]})",
+                "buildschema" => $"MIN(typeof({args[0]}))",
+                "count_distinct" => $"COUNT(DISTINCT {args[0]})",
+                "count_distinctif" => $"COUNT(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END)",
+                "countif" => $"COUNT(CASE WHEN {args[0]} THEN 1 END)",
+                "covariance" => $"COVAR_SAMP({args[0]}, {args[1]})",
+                "covarianceif" => $"COVAR_SAMP(CASE WHEN {args[2]} THEN {args[0]} END, CASE WHEN {args[2]} THEN {args[1]} END)",
+                "covariancep" => $"COVAR_POP({args[0]}, {args[1]})",
+                "covariancepif" => $"COVAR_POP(CASE WHEN {args[2]} THEN {args[0]} END, CASE WHEN {args[2]} THEN {args[1]} END)",
+                "dcount" => $"APPROX_COUNT_DISTINCT({args[0]})",
+                "dcountif" => $"APPROX_COUNT_DISTINCT(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "hll" => $"hll({args[0]})",
+                "hll_if" => $"hll(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "hll_merge" => $"hll_merge({args[0]})",
+                "make_bag" => $"histogram({args[0]})",
+                "make_bag_if" => $"histogram(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "make_list" => $"LIST({args[0]})",
                 "min" => $"MIN({args[0]})",
                 "max" => $"MAX({args[0]})",
                 _ => throw new NotSupportedException($"Unsupported aggregate function {name}")
