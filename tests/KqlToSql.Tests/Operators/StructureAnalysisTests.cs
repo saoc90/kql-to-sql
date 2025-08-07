@@ -8,7 +8,7 @@ namespace KqlToSql.Tests.Operators;
 
 public class StructureAnalysisTests
 {
-    [Fact]
+    [Fact(Skip = "Debug helper test")]
     public void Analyze_Materialize_Structure()
     {
         var kql = @"let MaterializedData = materialize(StormEvents | where State == ""TEXAS"");
@@ -28,7 +28,7 @@ MaterializedData | top 5 by count_";
         Assert.Fail($"Root: {root.GetType().Name}, Statements: [{string.Join(", ", allTypes)}], Let expression type: {exprType}");
     }
     
-    [Fact]
+    [Fact(Skip = "Debug helper test")]
     public void Analyze_View_Structure()
     {
         var kql = @"let ViewData = view(StormEvents | where State == ""TEXAS"");

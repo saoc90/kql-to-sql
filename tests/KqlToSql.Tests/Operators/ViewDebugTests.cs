@@ -8,7 +8,7 @@ namespace KqlToSql.Tests.Operators;
 
 public class ViewDebugTests
 {
-    [Fact]
+    [Fact(Skip = "Debug helper test")]
     public void Debug_View_Statement_Types()
     {
         // Test the view case to see why it's different
