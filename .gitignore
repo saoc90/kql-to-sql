@@ -3,5 +3,6 @@ obj/
 *.user
 *.suo
 *.db
+*.duckdb
 libduckdb.so
 .vs

@@ -8,7 +8,7 @@ namespace KqlToSql.Tests.Operators;
 
 public class ViewFunctionDebugTests
 {
-    [Fact]
+    [Fact(Skip = "Debug helper test")]
     public void Debug_View_Function_Syntax()
     {
         var kql = @"let T_view = view () { StormEvents | where STATE == 'TEXAS' };
