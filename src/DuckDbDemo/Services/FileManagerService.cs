@@ -8,7 +8,7 @@ namespace DuckDbDemo.Services
         List<UploadedFileInfo> UploadedFiles { get; }
         event Action? StateChanged;
         Task InitializeAsync(DotNetObjectReference<object> dotnetRef);
-        Task<object> LoadFileIntoDatabaseAsync(string fileId);
+    Task<object> LoadFileIntoDatabaseAsync(string fileId, string backend);
         Task RemoveFileAsync(string fileId);
         Task ClearFilesAsync();
         Task RefreshMetadataAsync();
@@ -42,11 +42,20 @@ namespace DuckDbDemo.Services
             }
         }
 
-        public async Task<object> LoadFileIntoDatabaseAsync(string fileId)
+        public async Task<object> LoadFileIntoDatabaseAsync(string fileId, string backend)
         {
             try
             {
-                var result = await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabase", fileId);
+                JsonElement result;
+                if (backend == "pglite")
+                {
+                    // Use alternate JS function that loads into PGlite
+                    result = await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabasePglite", fileId);
+                }
+                else
+                {
+                    result = await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabase", fileId);
+                }
                 
                 // Update local metadata
                 await RefreshMetadataAsync();
