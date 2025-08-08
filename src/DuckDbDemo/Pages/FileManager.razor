@@ -21,6 +21,13 @@
     <!-- File Upload Section -->
     <MudPaper Class="pa-6 mb-4" Elevation="2">
         <MudText Typo="Typo.h5" Class="mb-4">Upload Files</MudText>
+        <div class="d-flex align-center gap-4 mb-4">
+            <MudSelect T="string" @bind-Value="selectedBackend" Label="Target DB" Dense="true" Variant="Variant.Outlined" Style="min-width:180px;">
+                <MudSelectItem Value="@BackendDuckDb">DuckDB</MudSelectItem>
+                <MudSelectItem Value="@BackendPglite">PGlite</MudSelectItem>
+            </MudSelect>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Choose which in-browser database to load new datasets into.</MudText>
+        </div>
         
         <div id="file-drop-zone"
              style="border: 2px dashed #ccc; background-color: #fafafa; min-height: 200px; @GetDropZoneStyle()"
@@ -281,6 +288,9 @@
     private string previewFileName = string.Empty;
     private List<Dictionary<string, object>>? previewData;
     private DotNetObjectReference<FileManager>? dotnetRef;
+    private const string BackendDuckDb = "duckdb";
+    private const string BackendPglite = "pglite";
+    private string selectedBackend = BackendDuckDb; // duckdb | pglite
 
     protected override async Task OnInitializedAsync()
     {
@@ -394,7 +404,7 @@
             isProcessing = true;
             StateHasChanged();
 
-            var result = await FileManagerService.LoadFileIntoDatabaseAsync(fileInfo.Id);
+            var result = await FileManagerService.LoadFileIntoDatabaseAsync(fileInfo.Id, selectedBackend);
             
             // Parse the result from JSON
             if (result is JsonElement jsonResult)
@@ -441,7 +451,17 @@
             isProcessing = true;
             StateHasChanged();
 
-            var resultJson = await DuckDbInterop.QueryJsonAsync($"SELECT * FROM {fileInfo.TableName} LIMIT 100");
+            // Determine which backend the table resides in based on last load backend (heuristic: DuckDB by default)
+            string resultJson;
+            if (selectedBackend == "pglite")
+            {
+                // Query PGlite
+                resultJson = await JSRuntime.InvokeAsync<string>("PGliteInterop.queryJson", $"SELECT * FROM {fileInfo.TableName} LIMIT 100");
+            }
+            else
+            {
+                resultJson = await DuckDbInterop.QueryJsonAsync($"SELECT * FROM {fileInfo.TableName} LIMIT 100");
+            }
 
             previewData = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(resultJson);
             previewFileName = fileInfo.Name;

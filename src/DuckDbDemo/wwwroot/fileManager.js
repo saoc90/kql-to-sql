@@ -9,7 +9,7 @@ class FileManager {
         this.storageKey = 'fileManagerMetadata';
         this.fileHandlesKey = 'fileManagerHandles';
         this.maxFileSize = 500 * 1024 * 1024; // 500MB
-        this.supportedTypes = ['.csv', '.json', '.parquet', '.txt'];
+        this.supportedTypes = ['.csv', '.gz', '.json', '.parquet', '.txt'];
         this.supportsFileSystemAccess = 'showOpenFilePicker' in window;
     }
 
@@ -94,7 +94,7 @@ class FileManager {
                 types: [{
                     description: 'Data files',
                     accept: {
-                        'text/csv': ['.csv'],
+                        'text/csv': ['.csv', '.csv.gz'],
                         'application/json': ['.json'],
                         'text/plain': ['.txt'],
                         'application/octet-stream': ['.parquet']
@@ -359,11 +359,85 @@ class FileManager {
         }
     }
 
+    // Load file into PGlite database (simpler: create text columns for CSV/TSV, JSON via COPY not yet; fallback to DuckDB style parsing where possible)
+    async loadFileIntoDatabasePglite(fileId) {
+        try {
+            let file = this.files.get(fileId);
+            if (!file) throw new Error('File not found in memory for PGlite load');
+
+            if (!window.PGliteInterop || !window.pg) {
+                console.log('Initializing PGlite for file load...');
+                // Trigger init via a no-op query
+                await window.PGliteInterop.queryJson('SELECT 1');
+            }
+
+            const lower = file.name.toLowerCase();
+            // Read entire file text (only for manageable sizes; large file handling could be streamed later)
+            const arrayBuffer = await file.arrayBuffer();
+            let bytes = new Uint8Array(arrayBuffer);
+            // If gzip
+            if (lower.endsWith('.gz')) {
+                if (typeof DecompressionStream !== 'undefined') {
+                    const stream = new ReadableStream({ start(c){ c.enqueue(bytes); c.close(); }});
+                    const ds = stream.pipeThrough(new DecompressionStream('gzip'));
+                    const resp = new Response(ds);
+                    const ab = await resp.arrayBuffer();
+                    bytes = new Uint8Array(ab);
+                } else {
+                    throw new Error('Gzip not supported in this browser (no DecompressionStream)');
+                }
+            }
+            const text = new TextDecoder().decode(bytes);
+            let tableName = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_');
+            if (/^\d/.test(tableName)) tableName = 'table_' + tableName;
+
+            // Simple CSV handling only (Parquet unsupported for PGlite path here)
+            if (lower.endsWith('.parquet')) {
+                throw new Error('Parquet support not implemented for PGlite backend');
+            }
+
+            // Derive columns from first line
+            const firstNewline = text.indexOf('\n');
+            if (firstNewline === -1) throw new Error('Cannot detect header row');
+            const headerLine = text.substring(0, firstNewline).replace(/\r$/, '');
+            const headers = headerLine.split(',').map(h => h.replace(/"/g,'').trim()).filter(Boolean);
+            if (!headers.length) throw new Error('No columns detected');
+            const sanitized = headers.map(h => h.replace(/[^A-Za-z0-9_]/g,'_').replace(/^([0-9])/, '_$1').toLowerCase());
+            const colsDef = sanitized.map(c => `"${c}" text`).join(', ');
+            await window.pg.exec(`DROP TABLE IF EXISTS ${tableName}; CREATE TABLE ${tableName} (${colsDef});`);
+
+            const blob = new Blob([bytes], { type: 'text/csv' });
+            await window.pg.query(`COPY ${tableName} FROM '/dev/blob' WITH (FORMAT csv, HEADER true);`, [], { blob });
+            const count = await window.pg.query(`SELECT COUNT(*) AS cnt FROM ${tableName};`);
+            const rowCount = count.rows[0].cnt;
+
+            const metadata = this.getMetadataFromStorage().find(m => m.id === fileId);
+            if (metadata) {
+                metadata.isLoaded = true;
+                metadata.tableName = tableName;
+                metadata.rowCount = rowCount;
+                metadata.hasError = false;
+                this.saveMetadataToStorage(metadata);
+            }
+
+            return { success: true, tableName, rowCount, message: `Loaded ${rowCount} rows into ${tableName} (PGlite)` };
+        } catch (error) {
+            console.error('Failed to load file into PGlite:', error);
+            const metadata = this.getMetadataFromStorage().find(m => m.id === fileId);
+            if (metadata) {
+                metadata.hasError = true;
+                metadata.isLoaded = false;
+                this.saveMetadataToStorage(metadata);
+            }
+            return { success: false, error: error.message, message: `Failed to load file into PGlite: ${error.message}` };
+        }
+    }
+
     // Generate CREATE TABLE SQL based on file type
     generateCreateTableSQL(fileName, fileType, tableName) {
         const lowerFileName = fileName.toLowerCase();
-        
-        if (fileType === 'text/csv' || lowerFileName.endsWith('.csv')) {
+
+        if (fileType === 'text/csv' || lowerFileName.endsWith('.csv') || lowerFileName.endsWith('.csv.gz')) {
             return `CREATE TABLE ${tableName} AS SELECT * FROM read_csv('${fileName}', header=true, ignore_errors=true, null_padding=true)`;
         } else if (fileType === 'application/json' || lowerFileName.endsWith('.json')) {
             return `CREATE TABLE ${tableName} AS SELECT * FROM read_json('${fileName}')`;
@@ -550,5 +624,6 @@ globalThis.FileManagerInterop = {
     removeFile: (fileId) => window.fileManager.removeFile(fileId),
     clearAllFiles: () => window.fileManager.clearAllFiles(),
     getFileMetadata: () => window.fileManager.getFileMetadata(),
-    selectPersistentFiles: () => window.fileManager.selectPersistentFiles()
+    selectPersistentFiles: () => window.fileManager.selectPersistentFiles(),
+    loadFileIntoDatabasePglite: (fileId) => window.fileManager.loadFileIntoDatabasePglite(fileId)
 };
