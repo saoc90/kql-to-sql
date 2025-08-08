@@ -8,7 +8,7 @@ namespace DuckDbDemo.Services
         List<UploadedFileInfo> UploadedFiles { get; }
         event Action? StateChanged;
         Task InitializeAsync(DotNetObjectReference<object> dotnetRef);
-    Task<object> LoadFileIntoDatabaseAsync(string fileId, string backend);
+        Task<object> LoadFileIntoDatabaseAsync(string fileId, string backend);
         Task RemoveFileAsync(string fileId);
         Task ClearFilesAsync();
         Task RefreshMetadataAsync();
