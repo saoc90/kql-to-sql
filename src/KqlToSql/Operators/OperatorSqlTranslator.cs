@@ -477,10 +477,39 @@ internal class OperatorSqlTranslator
             }
 
             var args = fce.ArgumentList.Expressions.Select(a => ExpressionSqlBuilder.ConvertExpression(a.Element)).ToArray();
+
+            if (name == "percentiles")
+            {
+                var baseName = alias ?? (fce.ArgumentList.Expressions[0].Element is NameReference nr ? nr.Name.ToString().Trim() : "expr");
+                var results = new List<string>();
+                for (int i = 1; i < args.Length; i++)
+                {
+                    var p = args[i];
+                    var resultAlias = i == 1 && alias != null ? alias : $"percentiles_{p}_{baseName}";
+                    results.Add($"quantile_cont({args[0]}, {p} / 100.0) AS {resultAlias}");
+                }
+                return results;
+            }
+
+            if (name == "percentilesw")
+            {
+                var baseName = alias ?? (fce.ArgumentList.Expressions[0].Element is NameReference nr ? nr.Name.ToString().Trim() : "expr");
+                var results = new List<string>();
+                for (int i = 2; i < args.Length; i++)
+                {
+                    var p = args[i];
+                    var resultAlias = i == 2 && alias != null ? alias : $"percentilesw_{p}_{baseName}";
+                    results.Add($"quantile_cont({args[0]}, {p} / 100.0) AS {resultAlias}");
+                }
+                return results;
+            }
+
             alias ??= name switch
             {
                 "count" => "count",
                 "countif" => "countif",
+                "percentile" => $"percentile_{args[1]}_{args[0]}",
+                "percentilew" => $"percentilew_{args[2]}_{args[0]}",
                 _ when args.Length > 0 => $"{name}_{args[0]}",
                 _ => name
             };
@@ -510,8 +539,26 @@ internal class OperatorSqlTranslator
                 "make_bag" => $"histogram({args[0]})",
                 "make_bag_if" => $"histogram(CASE WHEN {args[1]} THEN {args[0]} END)",
                 "make_list" => $"LIST({args[0]})",
+                "make_list_if" => $"LIST(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "make_list_with_nulls" => $"LIST({args[0]})",
+                "make_set" => $"LIST(DISTINCT {args[0]})",
+                "make_set_if" => $"LIST(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END)",
                 "min" => $"MIN({args[0]})",
+                "minif" => $"MIN(CASE WHEN {args[1]} THEN {args[0]} END)",
                 "max" => $"MAX({args[0]})",
+                "maxif" => $"MAX(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "percentile" => $"quantile_cont({args[0]}, {args[1]} / 100.0)",
+                "percentilew" => $"quantile_cont({args[0]}, {args[2]} / 100.0)",
+                "stdev" => $"STDDEV_SAMP({args[0]})",
+                "stdevif" => $"STDDEV_SAMP(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "stdevp" => $"STDDEV_POP({args[0]})",
+                "sumif" => $"SUM(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "take_any" => $"ANY_VALUE({args[0]})",
+                "take_anyif" => $"ANY_VALUE(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "variance" => $"VAR_SAMP({args[0]})",
+                "varianceif" => $"VAR_SAMP(CASE WHEN {args[1]} THEN {args[0]} END)",
+                "variancep" => $"VAR_POP({args[0]})",
+                "variancepif" => $"VAR_POP(CASE WHEN {args[1]} THEN {args[0]} END)",
                 _ => throw new NotSupportedException($"Unsupported aggregate function {name}")
             };
 
