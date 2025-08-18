@@ -1,0 +1,93 @@
+using System.Collections.Generic;
+using KqlToSql;
+using Xunit;
+
+namespace KqlToSql.Tests.Operators;
+
+public class HasPrefixOperatorTests
+{
+    [Fact]
+    public void Converts_HasPrefix()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = @"StormEvents
+| summarize event_count=count() by State
+| where State hasprefix ""New""
+| where event_count > 1
+| project State, event_count";
+        var sql = converter.Convert(kql);
+        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State ILIKE '%New%' AND event_count > 1", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var results = new List<(string State, long Count)>();
+        while (reader.Read())
+        {
+            results.Add((reader.GetString(0), reader.GetInt64(1)));
+        }
+        Assert.Equal(new List<(string, long)> { ("NEW MEXICO", 2) }, results);
+    }
+
+    [Fact]
+    public void Converts_HasPrefix_CaseSensitive_NoMatch()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = "StormEvents | where State hasprefix_cs 'new'";
+        var sql = converter.Convert(kql);
+        Assert.Equal("SELECT * FROM StormEvents WHERE State LIKE '%new%'", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        var result = cmd.ExecuteScalar();
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Converts_NotHasPrefix()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = @"StormEvents
+| summarize event_count=count() by State
+| where State !hasprefix ""New""
+| project State";
+        var sql = converter.Convert(kql);
+        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State NOT ILIKE '%New%'", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var states = new List<string>();
+        while (reader.Read())
+        {
+            states.Add(reader.GetString(0));
+        }
+        Assert.DoesNotContain("NEW MEXICO", states);
+    }
+
+    [Fact]
+    public void Converts_NotHasPrefix_CaseSensitive()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = @"StormEvents
+| summarize event_count=count() by State
+| where State !hasprefix_cs ""New""
+| project State";
+        var sql = converter.Convert(kql);
+        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State NOT LIKE '%New%'", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var states = new List<string>();
+        while (reader.Read())
+        {
+            states.Add(reader.GetString(0));
+        }
+        Assert.Contains("NEW MEXICO", states);
+    }
+}

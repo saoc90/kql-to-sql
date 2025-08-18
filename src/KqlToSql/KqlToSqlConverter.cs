@@ -174,6 +174,7 @@ public class KqlToSqlConverter
             FunctionCallExpression fce => ConvertFunctionCall(fce),
             MaterializeExpression matExpr => ConvertNode(matExpr.Expression),
             ExpressionStatement exprStmt => ConvertNode(exprStmt.Expression),
+            PrintOperator print => _operators.ConvertPrint(print),
             FunctionBody fb => ConvertFunctionBody(fb),
             _ => throw new NotSupportedException($"Unsupported node type {node.Kind}")
         };
