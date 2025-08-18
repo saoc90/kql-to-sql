@@ -96,8 +96,26 @@ internal static class ExpressionSqlBuilder
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", false, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotEndsWithCsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", true, true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.HasPrefixExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
+            BinaryExpression bin when bin.Kind == SyntaxKind.HasPrefixCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotHasPrefixExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false, true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotHasPrefixCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true, true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.HasSuffixExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
+            BinaryExpression bin when bin.Kind == SyntaxKind.HasSuffixCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotHasSuffixExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false, true),
+            BinaryExpression bin when bin.Kind == SyntaxKind.NotHasSuffixCsExpression =>
+                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true, true),
             HasAnyExpression hae =>
                 ConvertHasAny(hae, leftAlias, rightAlias, false),
+            HasAllExpression hae =>
+                ConvertHasAll(hae, leftAlias, rightAlias, false),
             BetweenExpression be when be.Kind == SyntaxKind.BetweenExpression =>
                 ConvertBetween(be, leftAlias, rightAlias, false),
             BetweenExpression be when be.Kind == SyntaxKind.NotBetweenExpression =>
@@ -292,6 +310,30 @@ internal static class ExpressionSqlBuilder
             conditions.Add(negated ? $"{left} NOT {like} {pattern}" : $"{left} {like} {pattern}");
         }
         var sep = negated ? " AND " : " OR ";
+        return string.Join(sep, conditions);
+    }
+
+    private static string ConvertHasAll(HasAllExpression expr, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated = false)
+    {
+        var left = ConvertExpression(expr.Left, leftAlias, rightAlias);
+        var list = expr.Right;
+        var like = caseSensitive ? "LIKE" : "ILIKE";
+        var conditions = new List<string>();
+        foreach (var e in list.Expressions)
+        {
+            var term = ConvertExpression(e.Element, leftAlias, rightAlias);
+            string pattern;
+            if (term.StartsWith("'", StringComparison.Ordinal) && term.EndsWith("'", StringComparison.Ordinal))
+            {
+                pattern = $"'%{term[1..^1]}%'";
+            }
+            else
+            {
+                pattern = $"'%' || {term} || '%'";
+            }
+            conditions.Add(negated ? $"{left} NOT {like} {pattern}" : $"{left} {like} {pattern}");
+        }
+        var sep = negated ? " OR " : " AND ";
         return string.Join(sep, conditions);
     }
 

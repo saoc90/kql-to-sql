@@ -23,6 +23,8 @@ internal class OperatorSqlTranslator
             ProjectOperator project => ApplyProject(leftSql, project),
             ProjectAwayOperator projectAway => ApplyProjectAway(leftSql, projectAway),
             ProjectRenameOperator projectRename => ApplyProjectRename(leftSql, projectRename),
+            ProjectKeepOperator projectKeep => ApplyProjectKeep(leftSql, projectKeep),
+            ProjectReorderOperator projectReorder => ApplyProjectReorder(leftSql, projectReorder),
             SummarizeOperator summarize => ApplySummarize(leftSql, summarize),
             SortOperator sort => ApplySort(leftSql, sort),
             ExtendOperator extend => ApplyExtend(leftSql, extend),
@@ -64,6 +66,27 @@ internal class OperatorSqlTranslator
         }
 
         return string.Join(" UNION ALL ", parts);
+    }
+
+    internal string ConvertPrint(PrintOperator print)
+    {
+        var parts = new List<string>();
+        int i = 0;
+        foreach (var expr in print.Expressions)
+        {
+            if (expr.Element is SimpleNamedExpression sne)
+            {
+                var name = sne.Name.ToString().Trim();
+                var value = ExpressionSqlBuilder.ConvertExpression(sne.Expression);
+                parts.Add($"{value} AS {name}");
+            }
+            else
+            {
+                var value = ExpressionSqlBuilder.ConvertExpression(expr.Element);
+                parts.Add($"{value} AS print_{i++}");
+            }
+        }
+        return $"SELECT {string.Join(", ", parts)}";
     }
 
     private string ApplyUnion(string leftSql, UnionOperator union, Expression? leftExpression)
@@ -200,6 +223,34 @@ internal class OperatorSqlTranslator
         else
         {
             return $"SELECT * RENAME ({string.Join(", ", mappings)}) FROM ({leftSql})";
+        }
+    }
+
+    private string ApplyProjectKeep(string leftSql, ProjectKeepOperator projectKeep)
+    {
+        var columns = projectKeep.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
+        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = leftSql.Substring("SELECT * FROM ".Length);
+            return $"SELECT {string.Join(", ", columns)} FROM {rest}";
+        }
+        else
+        {
+            return $"SELECT {string.Join(", ", columns)} FROM ({leftSql})";
+        }
+    }
+
+    private string ApplyProjectReorder(string leftSql, ProjectReorderOperator projectReorder)
+    {
+        var columns = projectReorder.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
+        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = leftSql.Substring("SELECT * FROM ".Length);
+            return $"SELECT {string.Join(", ", columns)}, * EXCLUDE ({string.Join(", ", columns)}) FROM {rest}";
+        }
+        else
+        {
+            return $"SELECT {string.Join(", ", columns)}, * EXCLUDE ({string.Join(", ", columns)}) FROM ({leftSql})";
         }
     }
 
