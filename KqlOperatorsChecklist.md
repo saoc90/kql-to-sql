@@ -6,10 +6,10 @@
 - [x] !endswith_cs
 - [x] !has
 - [x] !has_cs
-- [ ] !hasprefix
-- [ ] !hasprefix_cs
-- [ ] !hassuffix
-- [ ] !hassuffix_cs
+- [x] !hasprefix
+- [x] !hasprefix_cs
+- [x] !hassuffix
+- [x] !hassuffix_cs
 - [x] !in
 - [x] !in~
 - [x] !startswith
@@ -46,13 +46,13 @@
 - [ ] fork
 - [ ] getschema
 - [x] has
-- [ ] has_all
+- [x] has_all
 - [x] has_any
-- [ ] has_cs
-- [ ] hasprefix
-- [ ] hasprefix_cs
-- [ ] hassuffix
-- [ ] hassuffix_cs
+- [x] has_cs
+- [x] hasprefix
+- [x] hasprefix_cs
+- [x] hassuffix
+- [x] hassuffix_cs
 - [x] in
 - [ ] invoke
 - [x] in~
@@ -67,13 +67,13 @@
 - [ ] parse-kv
 - [ ] parse-where
 - [ ] partition
-- [ ] print
+- [x] print
 - [x] project
 - [x] project-away
 - [ ] project-by-names
-- [ ] project-keep
+- [x] project-keep
 - [x] project-rename
-- [ ] project-reorder
+- [x] project-reorder
 - [x] range
 - [ ] reduce
 - [ ] render
