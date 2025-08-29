@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
     <Description>Kusto Query Language (KQL) to SQL converter library.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/saoc90/kql-to-sql/</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/saoc90/kql-to-sql/</PackageProjectUrl>
+    <PackageTags>KQL;Kusto;SQL;Converter</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
