@@ -11,7 +11,7 @@ public class ArgMaxOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize arg_max(END_DATE_TIME, EVENT_TYPE) by STATE | sort by STATE";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT STATE, arg_max(EVENT_TYPE, END_DATE_TIME) AS EVENT_TYPE FROM StormEvents GROUP BY STATE ORDER BY STATE ASC", sql);
+        Assert.Equal("SELECT STATE, arg_max(EVENT_TYPE, END_DATE_TIME) AS EVENT_TYPE FROM StormEvents GROUP BY STATE ORDER BY STATE DESC", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

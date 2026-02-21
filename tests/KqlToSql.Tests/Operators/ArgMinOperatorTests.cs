@@ -11,7 +11,7 @@ public class ArgMinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize arg_min(END_DATE_TIME, EVENT_TYPE) by STATE | sort by STATE";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT STATE, arg_min(EVENT_TYPE, END_DATE_TIME) AS EVENT_TYPE FROM StormEvents GROUP BY STATE ORDER BY STATE ASC", sql);
+        Assert.Equal("SELECT STATE, arg_min(EVENT_TYPE, END_DATE_TIME) AS EVENT_TYPE FROM StormEvents GROUP BY STATE ORDER BY STATE DESC", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
