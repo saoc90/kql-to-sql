@@ -251,7 +251,7 @@
                             {
                                 @foreach (var column in row.Keys)
                                 {
-                                    <MudTd DataLabel="@column" Style="white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">@(row[column]?.ToString() ?? "")</MudTd>
+                                    <MudTd DataLabel="@column" Style="white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;" title="@(row[column]?.ToString() ?? "")">@(row[column]?.ToString() ?? "")</MudTd>
                                 }
                             }
                         </RowTemplate>
