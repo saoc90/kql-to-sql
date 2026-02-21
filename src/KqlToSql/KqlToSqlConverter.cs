@@ -175,6 +175,7 @@ public class KqlToSqlConverter
             MaterializeExpression matExpr => ConvertNode(matExpr.Expression),
             ExpressionStatement exprStmt => ConvertNode(exprStmt.Expression),
             PrintOperator print => _operators.ConvertPrint(print),
+            DataTableExpression dt => _operators.ConvertDataTable(dt),
             FunctionBody fb => ConvertFunctionBody(fb),
             _ => throw new NotSupportedException($"Unsupported node type {node.Kind}")
         };

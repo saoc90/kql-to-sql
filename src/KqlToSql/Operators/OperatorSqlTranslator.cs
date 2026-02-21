@@ -89,6 +89,34 @@ internal class OperatorSqlTranslator
         return $"SELECT {string.Join(", ", parts)}";
     }
 
+    internal string ConvertDataTable(DataTableExpression dt)
+    {
+        var columnNames = new List<string>();
+        foreach (var col in dt.Schema.Columns)
+        {
+            if (col.Element is NameAndTypeDeclaration nat)
+            {
+                columnNames.Add(nat.Name.ToString().Trim());
+            }
+        }
+
+        var colCount = columnNames.Count;
+        var values = dt.Values;
+        var rows = new List<string>();
+
+        for (int i = 0; i < values.Count; i += colCount)
+        {
+            var rowValues = new List<string>();
+            for (int j = 0; j < colCount && (i + j) < values.Count; j++)
+            {
+                rowValues.Add(ExpressionSqlBuilder.ConvertLiteralValue(values[i + j].Element));
+            }
+            rows.Add($"({string.Join(", ", rowValues)})");
+        }
+
+        return $"SELECT * FROM (VALUES {string.Join(", ", rows)}) AS t({string.Join(", ", columnNames)})";
+    }
+
     private string ApplyUnion(string leftSql, UnionOperator union, Expression? leftExpression)
     {
         var withSourceParam = union.Parameters.FirstOrDefault(p => p.Name.ToString().Trim().Equals("withsource", StringComparison.OrdinalIgnoreCase));
