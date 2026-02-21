@@ -8,30 +8,30 @@
 
 <PageTitle>File Manager</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.ExtraLarge">
-    <MudText Typo="Typo.h3" Class="mb-4">
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="px-2 px-sm-4 px-md-6">
+    <MudText Typo="Typo.h4" Class="mb-2 mb-sm-4">
         <MudIcon Icon="Icons.Material.Filled.Folder" Class="mr-2" />
         Data File Manager
     </MudText>
     
-    <MudText Typo="Typo.body1" Class="mb-6 mud-text-secondary">
+    <MudText Typo="Typo.body2" Class="mb-3 mb-sm-6 mud-text-secondary d-none d-sm-block">
         Upload and manage your data files. Supported formats include CSV, JSON, Parquet, and TXT files.
     </MudText>
 
     <!-- File Upload Section -->
-    <MudPaper Class="pa-6 mb-4" Elevation="2">
-        <MudText Typo="Typo.h5" Class="mb-4">Upload Files</MudText>
-        <div class="d-flex align-center gap-4 mb-4">
-            <MudSelect T="string" @bind-Value="selectedBackend" Label="Target DB" Dense="true" Variant="Variant.Outlined" Style="min-width:180px;">
+    <MudPaper Class="pa-3 pa-sm-6 mb-4" Elevation="2">
+        <MudText Typo="Typo.h6" Class="mb-4">Upload Files</MudText>
+        <div class="d-flex flex-column flex-sm-row align-start align-sm-center gap-2 gap-sm-4 mb-4">
+            <MudSelect T="string" @bind-Value="selectedBackend" Label="Target DB" Dense="true" Variant="Variant.Outlined" Style="min-width:150px; max-width:200px;">
                 <MudSelectItem Value="@BackendDuckDb">DuckDB</MudSelectItem>
                 <MudSelectItem Value="@BackendPglite">PGlite</MudSelectItem>
             </MudSelect>
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Choose which in-browser database to load new datasets into.</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-none d-sm-block">Choose which in-browser database to load new datasets into.</MudText>
         </div>
         
         <div id="file-drop-zone"
-             style="border: 2px dashed #ccc; background-color: #fafafa; min-height: 200px; @GetDropZoneStyle()"
-             class="d-flex flex-column align-center justify-center rounded-lg">
+             style="border: 2px dashed #ccc; background-color: #fafafa; min-height: 150px; @GetDropZoneStyle()"
+             class="d-flex flex-column align-center justify-center rounded-lg pa-4">
 
             <MudIcon Icon="Icons.Material.Filled.CloudUpload" Size="Size.Large" Class="mb-2" Color="Color.Primary" />
             <MudText Typo="Typo.h6" Class="mb-2">Drag and drop files here</MudText>
@@ -96,37 +96,39 @@
     <!-- Uploaded Files List -->
     @if (FileManagerService.UploadedFiles.Any())
     {
-        <MudPaper Class="pa-4" Elevation="2">
-            <MudText Typo="Typo.h5" Class="mb-3">
+        <MudPaper Class="pa-3 pa-sm-4" Elevation="2">
+            <MudText Typo="Typo.h6" Class="mb-3">
                 <MudIcon Icon="Icons.Material.Filled.List" Class="mr-2" />
                 Uploaded Files (@FileManagerService.UploadedFiles.Count)
             </MudText>
 
-            <MudTable Items="@FileManagerService.UploadedFiles"
-                      Hover="true"
-                      Striped="true"
-                      Dense="true"
-                      FixedHeader="true"
-                      Height="400px"
-                      Elevation="0">
+            <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                <MudTable Items="@FileManagerService.UploadedFiles"
+                          Hover="true"
+                          Striped="true"
+                          Dense="true"
+                          FixedHeader="true"
+                          Height="400px"
+                          Elevation="0"
+                          Style="min-width: max-content;">
                 <HeaderContent>
-                    <MudTh>Name</MudTh>
-                    <MudTh>Size</MudTh>
-                    <MudTh>Type</MudTh>
-                    <MudTh>Upload Date</MudTh>
-                    <MudTh>Status</MudTh>
-                    <MudTh>Actions</MudTh>
+                    <MudTh Style="white-space: nowrap;">Name</MudTh>
+                    <MudTh Style="white-space: nowrap;">Size</MudTh>
+                    <MudTh Style="white-space: nowrap;">Type</MudTh>
+                    <MudTh Style="white-space: nowrap;">Upload Date</MudTh>
+                    <MudTh Style="white-space: nowrap;">Status</MudTh>
+                    <MudTh Style="white-space: nowrap;">Actions</MudTh>
                 </HeaderContent>
                 <RowTemplate>
-                    <MudTd DataLabel="Name">
+                    <MudTd DataLabel="Name" Style="white-space: nowrap;">
                         <div class="d-flex align-center gap-2">
                             <MudIcon Icon="@GetFileIcon(context.Type)" Size="Size.Small" Color="Color.Primary" />
                             @context.Name
                         </div>
                     </MudTd>
-                    <MudTd DataLabel="Size">@FormatFileSize(context.Size)</MudTd>
-                    <MudTd DataLabel="Type">@context.Type</MudTd>
-                    <MudTd DataLabel="Upload Date">@context.UploadDate.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                    <MudTd DataLabel="Size" Style="white-space: nowrap;">@FormatFileSize(context.Size)</MudTd>
+                    <MudTd DataLabel="Type" Style="white-space: nowrap;">@context.Type</MudTd>
+                    <MudTd DataLabel="Upload Date" Style="white-space: nowrap;">@context.UploadDate.ToString("yyyy-MM-dd HH:mm")</MudTd>
                     <MudTd DataLabel="Status">
                         @if (context.IsLoaded)
                         {
@@ -147,8 +149,8 @@
                             </MudChip>
                         }
                     </MudTd>
-                    <MudTd DataLabel="Actions">
-                        <div class="d-flex gap-1">
+                    <MudTd DataLabel="Actions" Style="white-space: nowrap;">
+                        <div class="d-flex flex-wrap gap-1">
                             @if (!context.IsLoaded && !context.HasError)
                             {
                                 <MudButton Variant="Variant.Text"
@@ -194,12 +196,13 @@
                     </MudTd>
                 </RowTemplate>
             </MudTable>
+            </div>
         </MudPaper>
     }
     else
     {
-        <MudPaper Class="pa-6" Elevation="2">
-            <div class="d-flex flex-column align-center justify-center" style="min-height: 200px;">
+        <MudPaper Class="pa-4 pa-sm-6" Elevation="2">
+            <div class="d-flex flex-column align-center justify-center" style="min-height: 150px;">
                 <MudIcon Icon="Icons.Material.Filled.FileUpload" Size="Size.Large" Class="mb-3" Color="Color.Secondary" />
                 <MudText Typo="Typo.h5" Class="mb-2">No files uploaded yet</MudText>
                 <MudText Typo="Typo.body1" align="Align.Center" Class="mud-text-secondary">
@@ -225,32 +228,35 @@
         <DialogContent>
             @if (previewData != null && previewData.Any())
             {
-                <MudTable Items="@previewData.Take(100)"
-                          Hover="true"
-                          Striped="true"
-                          Dense="true"
-                          FixedHeader="true"
-                          Height="400px"
-                          Elevation="0">
-                    <HeaderContent>
-                        @if (previewData.FirstOrDefault() is Dictionary<string, object> firstRow)
-                        {
-                            @foreach (var column in firstRow.Keys)
+                <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                    <MudTable Items="@previewData.Take(100)"
+                              Hover="true"
+                              Striped="true"
+                              Dense="true"
+                              FixedHeader="true"
+                              Height="400px"
+                              Elevation="0"
+                              Style="min-width: max-content;">
+                        <HeaderContent>
+                            @if (previewData.FirstOrDefault() is Dictionary<string, object> firstRow)
                             {
-                                <MudTh>@column</MudTh>
+                                @foreach (var column in firstRow.Keys)
+                                {
+                                    <MudTh Style="white-space: nowrap;">@column</MudTh>
+                                }
                             }
-                        }
-                    </HeaderContent>
-                    <RowTemplate>
-                        @if (context is Dictionary<string, object> row)
-                        {
-                            @foreach (var column in row.Keys)
+                        </HeaderContent>
+                        <RowTemplate>
+                            @if (context is Dictionary<string, object> row)
                             {
-                                <MudTd DataLabel="@column">@(row[column]?.ToString() ?? "")</MudTd>
+                                @foreach (var column in row.Keys)
+                                {
+                                    <MudTd DataLabel="@column" Style="white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;" title="@(row[column]?.ToString() ?? "")">@(row[column]?.ToString() ?? "")</MudTd>
+                                }
                             }
-                        }
-                    </RowTemplate>
-                </MudTable>
+                        </RowTemplate>
+                    </MudTable>
+                </div>
                 @if (previewData.Count > 100)
                 {
                     <MudText Typo="Typo.caption" Class="mt-2 mud-text-secondary">

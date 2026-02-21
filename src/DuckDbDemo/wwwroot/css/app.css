@@ -311,10 +311,27 @@ a, .btn-link {
 /* Responsive improvements */
 @media (max-width: 768px) {
     .mud-container {
-        padding: 1rem !important;
+        padding: 0.5rem !important;
     }
     
     .monaco-editor-container {
         height: 250px;
+    }
+}
+
+/* Editor wrapper responsive height */
+.editor-wrapper {
+    height: 350px;
+}
+
+@media (max-width: 600px) {
+    .editor-wrapper {
+        height: 220px;
+    }
+}
+
+@media (min-width: 601px) and (max-width: 960px) {
+    .editor-wrapper {
+        height: 280px;
     }
 }

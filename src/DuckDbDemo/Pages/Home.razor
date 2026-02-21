@@ -9,37 +9,29 @@
 
 <PageTitle>KQL to SQL Converter</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.ExtraLarge">
-    <MudText Typo="Typo.h3" Class="mb-4">
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="px-2 px-sm-4 px-md-6">
+    <MudText Typo="Typo.h4" Class="mb-2 mb-sm-4">
         <MudIcon Icon="Icons.Material.Filled.Transform" Class="mr-2" />
         KQL to SQL Query Editor
     </MudText>
     
-    <MudText Typo="Typo.body1" Class="mb-6 mud-text-secondary">
+    <MudText Typo="Typo.body2" Class="mb-3 mb-sm-6 mud-text-secondary d-none d-sm-block">
         Convert Kusto Query Language (KQL) to SQL and execute queries against your data using DuckDB or PGlite (Postgres WASM).
     </MudText>
 
-    <MudPaper Class="pa-6" Elevation="2">
-        <div class="d-flex justify-space-between align-center mb-4">
-            <MudText Typo="Typo.h5">Query Workspace</MudText>
+    <MudPaper Class="pa-3 pa-sm-6" Elevation="2">
+        <div class="d-flex flex-column flex-sm-row justify-space-between align-start align-sm-center gap-2 mb-4">
+            <MudText Typo="Typo.h6">Query Workspace</MudText>
             
-            <div class="d-flex align-center gap-4">
-                <MudButton Variant="Variant.Text" 
-                           Color="Color.Secondary"
-                           Size="Size.Small"
-                           StartIcon="Icons.Material.Filled.Build"
-                           OnClick="InitializeEditor">
-                    Debug: Init Editor
-                </MudButton>
-                
+            <div class="d-flex flex-wrap align-center gap-2 gap-sm-4">
                 <MudToggleGroup T="string" Value="@selectedMode" ValueChanged="OnModeChanged" Color="Color.Primary" CheckMark>
                     <MudToggleItem T="string" Value="@("kql")" Text="KQL" />
                     <MudToggleItem T="string" Value="@("sql")" Text="SQL" />
                 </MudToggleGroup>
 
-                <MudSelect T="string" @bind-Value="selectedBackend" Label="DB" Dense="true" Class="ml-4" AnchorOrigin="Origin.BottomLeft" Variant="Variant.Outlined" Style="min-width:150px;">
+                <MudSelect T="string" @bind-Value="selectedBackend" Label="DB" Dense="true" AnchorOrigin="Origin.BottomLeft" Variant="Variant.Outlined" Style="min-width:130px;">
                     <MudSelectItem Value="@BackendDuckDb">DuckDB</MudSelectItem>
-                    <MudSelectItem Value="@BackendPglite">Postgres (PGlite)</MudSelectItem>
+                    <MudSelectItem Value="@BackendPglite">PGlite</MudSelectItem>
                 </MudSelect>
             </div>
         </div>
@@ -51,26 +43,25 @@
             </MudAlert>
         }
         
-        <div style="height: 350px; margin-bottom: 20px;">
+        <div class="editor-wrapper" style="margin-bottom: 16px;">
             <div id="monaco-editor-container" style="height: 100%; border: 1px solid #ccc; border-radius: 4px;"></div>
         </div>
 
-        <div class="d-flex align-center gap-4">
+        <div class="d-flex flex-wrap align-center gap-2 gap-sm-4">
             <MudButton Variant="Variant.Filled" 
                        Color="Color.Primary" 
-                       Size="Size.Large"
+                       Size="Size.Medium"
                        StartIcon="Icons.Material.Filled.PlayArrow"
                        OnClick="Run"
-                       Title="Execute query (Shift+Enter)"
                        Disabled="isExecuting">
                 @if (isExecuting)
                 {
                     <MudProgressCircular Class="mr-2" Size="Size.Small" Indeterminate="true" />
-                    <span>Executing...</span>
+                    <span>Running...</span>
                 }
                 else
                 {
-                    <span>Execute @selectedMode.ToUpper() <small class="opacity-75">(Shift+Enter)</small></span>
+                    <span>Execute @selectedMode.ToUpper()</span>
                 }
             </MudButton>
 
@@ -78,6 +69,7 @@
             {
                 <MudButton Variant="Variant.Outlined" 
                            Color="Color.Secondary"
+                           Size="Size.Medium"
                            StartIcon="Icons.Material.Filled.Transform"
                            OnClick="ConvertToSql"
                            Disabled="isExecuting">
@@ -87,6 +79,7 @@
 
             <MudButton Variant="Variant.Text" 
                        Color="Color.Info"
+                       Size="Size.Medium"
                        StartIcon="Icons.Material.Filled.TableView"
                        OnClick="CheckTableExists"
                        Disabled="isExecuting">
@@ -138,38 +131,41 @@
 
     @if (resultData != null && resultData.Any())
     {
-        <MudPaper Class="pa-4 mt-4" Elevation="2">
+        <MudPaper Class="pa-3 pa-sm-4 mt-4" Elevation="2">
             <MudText Typo="Typo.h6" Class="mb-3">
                 <MudIcon Icon="Icons.Material.Filled.TableChart" Class="mr-2" />
                 Query Results (@resultData.Count rows)
             </MudText>
             
-            <MudTable Items="@resultData" 
-                      Hover="true" 
-                      Striped="true" 
-                      Dense="true"
-                      FixedHeader="true"
-                      Height="400px"
-                      Elevation="0">
-                <HeaderContent>
-                    @if (resultData.FirstOrDefault() is Dictionary<string, object> firstRow)
-                    {
-                        @foreach (var column in firstRow.Keys)
+            <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                <MudTable Items="@resultData" 
+                          Hover="true" 
+                          Striped="true" 
+                          Dense="true"
+                          FixedHeader="true"
+                          Height="400px"
+                          Elevation="0"
+                          Style="min-width: max-content;">
+                    <HeaderContent>
+                        @if (resultData.FirstOrDefault() is Dictionary<string, object> firstRow)
                         {
-                            <MudTh>@column</MudTh>
+                            @foreach (var column in firstRow.Keys)
+                            {
+                                <MudTh Style="white-space: nowrap;">@column</MudTh>
+                            }
                         }
-                    }
-                </HeaderContent>
-                <RowTemplate>
-                    @if (context is Dictionary<string, object> row)
-                    {
-                        @foreach (var column in row.Keys)
+                    </HeaderContent>
+                    <RowTemplate>
+                        @if (context is Dictionary<string, object> row)
                         {
-                            <MudTd DataLabel="@column">@(row[column]?.ToString() ?? "")</MudTd>
+                            @foreach (var column in row.Keys)
+                            {
+                                <MudTd DataLabel="@column" Style="white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;" title="@(row[column]?.ToString() ?? "")">@(row[column]?.ToString() ?? "")</MudTd>
+                            }
                         }
-                    }
-                </RowTemplate>
-            </MudTable>
+                    </RowTemplate>
+                </MudTable>
+            </div>
         </MudPaper>
     }
     else if (!string.IsNullOrEmpty(result) && string.IsNullOrEmpty(errorMessage))
