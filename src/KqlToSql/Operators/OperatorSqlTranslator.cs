@@ -351,7 +351,7 @@ internal class OperatorSqlTranslator
             else
             {
                 var expr = ExpressionSqlBuilder.ConvertExpression(se.Element);
-                orderings.Add($"{expr} ASC");
+                orderings.Add($"{expr} DESC");
             }
         }
 

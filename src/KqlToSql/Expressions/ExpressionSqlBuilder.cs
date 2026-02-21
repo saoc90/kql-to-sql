@@ -60,6 +60,14 @@ internal static class ExpressionSqlBuilder
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} <= {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.AddExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} + {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+            BinaryExpression bin when bin.Kind == SyntaxKind.SubtractExpression =>
+                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} - {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+            BinaryExpression bin when bin.Kind == SyntaxKind.MultiplyExpression =>
+                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} * {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+            BinaryExpression bin when bin.Kind == SyntaxKind.DivideExpression =>
+                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} / {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+            BinaryExpression bin when bin.Kind == SyntaxKind.ModuloExpression =>
+                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} % {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.AndExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} AND {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.OrExpression =>
@@ -172,7 +180,7 @@ internal static class ExpressionSqlBuilder
             "substring" => ConvertSubstring(fce, leftAlias, rightAlias),
             "now" => "NOW()",
             "ago" => ConvertAgo(fce, leftAlias, rightAlias),
-            "iif" => ConvertIif(fce, leftAlias, rightAlias),
+            "iif" or "iff" => ConvertIif(fce, leftAlias, rightAlias),
             "case" => ConvertCase(fce, leftAlias, rightAlias),
             "pack_array" => $"LIST_VALUE({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
             _ => $"{name}({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})"
