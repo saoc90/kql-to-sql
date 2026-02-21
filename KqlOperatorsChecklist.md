@@ -123,6 +123,7 @@
 - [ ] parse_json()
 - [ ] parse_url()
 - [x] iif()
+- [x] iff()
 - [ ] isnull()
 - [ ] isempty()
 - [ ] coalesce()
