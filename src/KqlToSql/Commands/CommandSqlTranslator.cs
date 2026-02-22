@@ -81,9 +81,9 @@ public class CommandSqlTranslator
                 var parts = c.Split(':', StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length != 2)
                     throw new NotSupportedException("Invalid column definition");
-                var colName = parts[0].Trim();
+                var name = parts[0].Trim();
                 var type = _converter.Dialect.MapType(parts[1].Trim());
-                return $"{colName} {type}";
+                return $"{name} {type}";
             });
 
         return $"CREATE TABLE {table} ({string.Join(", ", columns)})";
