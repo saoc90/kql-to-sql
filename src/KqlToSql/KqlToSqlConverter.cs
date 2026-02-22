@@ -6,6 +6,7 @@ using Kusto.Language;
 using Kusto.Language.Syntax;
 using KqlToSql.Operators;
 using KqlToSql.Commands;
+using KqlToSql.Dialects;
 
 namespace KqlToSql;
 
@@ -15,8 +16,14 @@ public class KqlToSqlConverter
     private readonly CommandSqlTranslator _commands;
     private readonly Dictionary<string, (string sql, bool materialized)> _ctes = new();
 
-    public KqlToSqlConverter()
+    /// <summary>The SQL dialect used for engine-specific translations.</summary>
+    public ISqlDialect Dialect { get; }
+
+    public KqlToSqlConverter() : this(new DuckDbDialect()) { }
+
+    public KqlToSqlConverter(ISqlDialect dialect)
     {
+        Dialect = dialect;
         _operators = new OperatorSqlTranslator(this);
         _commands = new CommandSqlTranslator(this);
     }

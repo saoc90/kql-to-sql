@@ -9,10 +9,13 @@ namespace KqlToSql.Operators;
 internal class OperatorSqlTranslator
 {
     private readonly KqlToSqlConverter _converter;
+    private readonly ExpressionSqlBuilder _expr;
+    private ISqlDialect Dialect => _converter.Dialect;
 
     internal OperatorSqlTranslator(KqlToSqlConverter converter)
     {
         _converter = converter;
+        _expr = new ExpressionSqlBuilder(converter.Dialect);
     }
 
     internal string ApplyOperator(string leftSql, QueryOperator op, Expression? leftExpression = null)
@@ -42,10 +45,10 @@ internal class OperatorSqlTranslator
     internal string ConvertRange(RangeOperator range)
     {
         var name = range.Name.Name.ToString().Trim();
-        var start = ExpressionSqlBuilder.ConvertExpression(range.From);
-        var end = ExpressionSqlBuilder.ConvertExpression(range.To);
-        var step = ExpressionSqlBuilder.ConvertExpression(range.Step);
-        return $"SELECT generate_series AS {name} FROM generate_series({start}, {end}, {step})";
+        var start = _expr.ConvertExpression(range.From);
+        var end = _expr.ConvertExpression(range.To);
+        var step = _expr.ConvertExpression(range.Step);
+        return Dialect.GenerateSeries(name, start, end, step);
     }
 
     internal string ConvertUnion(UnionOperator union)
@@ -77,12 +80,12 @@ internal class OperatorSqlTranslator
             if (expr.Element is SimpleNamedExpression sne)
             {
                 var name = sne.Name.ToString().Trim();
-                var value = ExpressionSqlBuilder.ConvertExpression(sne.Expression);
+                var value = _expr.ConvertExpression(sne.Expression);
                 parts.Add($"{value} AS {name}");
             }
             else
             {
-                var value = ExpressionSqlBuilder.ConvertExpression(expr.Element);
+                var value = _expr.ConvertExpression(expr.Element);
                 parts.Add($"{value} AS print_{i++}");
             }
         }
@@ -109,7 +112,7 @@ internal class OperatorSqlTranslator
             var rowValues = new List<string>();
             for (int j = 0; j < colCount && (i + j) < values.Count; j++)
             {
-                rowValues.Add(ExpressionSqlBuilder.ConvertLiteralValue(values[i + j].Element));
+                rowValues.Add(_expr.ConvertLiteralValue(values[i + j].Element));
             }
             rows.Add($"({string.Join(", ", rowValues)})");
         }
@@ -174,12 +177,14 @@ internal class OperatorSqlTranslator
         }
 
         var unnestAlias = "u";
-        return $"SELECT {sourceAlias}.* EXCLUDE ({column}), {unnestAlias}.value AS {column} FROM {fromSql} CROSS JOIN UNNEST({sourceAlias}.{column}) AS {unnestAlias}(value)";
+        var excludeClause = Dialect.SelectExclude(new[] { column });
+        var unnestClause = Dialect.Unnest(sourceAlias, column, unnestAlias);
+        return $"SELECT {sourceAlias}.{excludeClause}, {unnestAlias}.value AS {column} FROM {fromSql} {unnestClause}";
     }
 
     private string ApplyFilter(string leftSql, FilterOperator filter)
     {
-        var condition = ExpressionSqlBuilder.ConvertExpression(filter.Condition);
+        var condition = _expr.ConvertExpression(filter.Condition);
         if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase) &&
             !leftSql.Contains(" WHERE ", StringComparison.OrdinalIgnoreCase))
         {
@@ -200,9 +205,9 @@ internal class OperatorSqlTranslator
         {
             if (se.Element is SimpleNamedExpression sne)
             {
-                return $"{ExpressionSqlBuilder.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
+                return $"{_expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
             }
-            return ExpressionSqlBuilder.ConvertExpression(se.Element);
+            return _expr.ConvertExpression(se.Element);
         }).ToArray();
 
         if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
@@ -219,14 +224,15 @@ internal class OperatorSqlTranslator
     private string ApplyProjectAway(string leftSql, ProjectAwayOperator projectAway)
     {
         var columns = projectAway.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
+        var excludeClause = Dialect.SelectExclude(columns);
         if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
         {
             var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT * EXCLUDE ({string.Join(", ", columns)}) FROM {rest}";
+            return $"SELECT {excludeClause} FROM {rest}";
         }
         else
         {
-            return $"SELECT * EXCLUDE ({string.Join(", ", columns)}) FROM ({leftSql})";
+            return $"SELECT {excludeClause} FROM ({leftSql})";
         }
     }
 
@@ -236,21 +242,22 @@ internal class OperatorSqlTranslator
         {
             if (se.Element is SimpleNamedExpression sne)
             {
-                var expr = ExpressionSqlBuilder.ConvertExpression(sne.Expression);
+                var expr = _expr.ConvertExpression(sne.Expression);
                 var name = sne.Name.ToString().Trim();
                 return $"{expr} AS {name}";
             }
             throw new NotSupportedException("Unsupported project-rename expression");
         }).ToArray();
 
+        var renameClause = Dialect.SelectRename(mappings);
         if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
         {
             var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT * RENAME ({string.Join(", ", mappings)}) FROM {rest}";
+            return $"SELECT {renameClause} FROM {rest}";
         }
         else
         {
-            return $"SELECT * RENAME ({string.Join(", ", mappings)}) FROM ({leftSql})";
+            return $"SELECT {renameClause} FROM ({leftSql})";
         }
     }
 
@@ -271,14 +278,15 @@ internal class OperatorSqlTranslator
     private string ApplyProjectReorder(string leftSql, ProjectReorderOperator projectReorder)
     {
         var columns = projectReorder.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
+        var excludeClause = Dialect.SelectExclude(columns);
         if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
         {
             var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT {string.Join(", ", columns)}, * EXCLUDE ({string.Join(", ", columns)}) FROM {rest}";
+            return $"SELECT {string.Join(", ", columns)}, {excludeClause} FROM {rest}";
         }
         else
         {
-            return $"SELECT {string.Join(", ", columns)}, * EXCLUDE ({string.Join(", ", columns)}) FROM ({leftSql})";
+            return $"SELECT {string.Join(", ", columns)}, {excludeClause} FROM ({leftSql})";
         }
     }
 
@@ -296,7 +304,7 @@ internal class OperatorSqlTranslator
             fce.ArgumentList.Expressions.Count == 2 &&
             fce.ArgumentList.Expressions[1].Element is StarExpression)
         {
-            var extremumExpr = ExpressionSqlBuilder.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
+            var extremumExpr = _expr.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
 
             string fromSql;
             if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
@@ -315,7 +323,8 @@ internal class OperatorSqlTranslator
             var direction = fce.Name.ToString().Trim().Equals("arg_min", StringComparison.OrdinalIgnoreCase)
                 ? "ASC" : "DESC";
 
-            return $"SELECT * FROM {fromSql} QUALIFY ROW_NUMBER() OVER ({partition}ORDER BY {extremumExpr} {direction}) = 1";
+            var qualifyCondition = $"ROW_NUMBER() OVER ({partition}ORDER BY {extremumExpr} {direction}) = 1";
+            return $"SELECT * FROM {fromSql} {Dialect.Qualify(qualifyCondition)}";
         }
 
         var aggregates = new List<string>();
@@ -348,7 +357,7 @@ internal class OperatorSqlTranslator
     {
         if (expr is SimpleNamedExpression sne)
         {
-            var inner = ExpressionSqlBuilder.ConvertExpression(sne.Expression);
+            var inner = _expr.ConvertExpression(sne.Expression);
             var name = sne.Name.ToString().Trim();
             return ($"{inner} AS {name}", inner);
         }
@@ -356,12 +365,12 @@ internal class OperatorSqlTranslator
         if (expr is FunctionCallExpression fce && fce.Name.ToString().Trim().Equals("bin", StringComparison.OrdinalIgnoreCase) &&
             fce.ArgumentList.Expressions.Count > 0 && fce.ArgumentList.Expressions[0].Element is NameReference nr)
         {
-            var inner = ExpressionSqlBuilder.ConvertBin(fce, null, null);
+            var inner = _expr.ConvertBin(fce, null, null);
             var name = nr.Name.ToString().Trim();
             return ($"{inner} AS {name}", inner);
         }
 
-        var exp = ExpressionSqlBuilder.ConvertExpression(expr);
+        var exp = _expr.ConvertExpression(expr);
         return (exp, exp);
     }
 
@@ -372,13 +381,13 @@ internal class OperatorSqlTranslator
         {
             if (se.Element is OrderedExpression oe)
             {
-                var expr = ExpressionSqlBuilder.ConvertExpression(oe.Expression);
+                var expr = _expr.ConvertExpression(oe.Expression);
                 var dir = oe.Ordering?.ToString().Trim().ToUpperInvariant() ?? "ASC";
                 orderings.Add($"{expr} {dir}");
             }
             else
             {
-                var expr = ExpressionSqlBuilder.ConvertExpression(se.Element);
+                var expr = _expr.ConvertExpression(se.Element);
                 orderings.Add($"{expr} DESC");
             }
         }
@@ -398,7 +407,7 @@ internal class OperatorSqlTranslator
 
     private string ApplyDistinct(string leftSql, DistinctOperator distinct)
     {
-        var columns = distinct.Expressions.Select(e => ExpressionSqlBuilder.ConvertExpression(e.Element)).ToArray();
+        var columns = distinct.Expressions.Select(e => _expr.ConvertExpression(e.Element)).ToArray();
         var cols = string.Join(", ", columns);
         if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
         {
@@ -417,7 +426,7 @@ internal class OperatorSqlTranslator
         {
             if (se.Element is SimpleNamedExpression sne)
             {
-                return $"{ExpressionSqlBuilder.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
+                return $"{_expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
             }
             throw new NotSupportedException("Unsupported extend expression");
         }).ToArray();
@@ -432,24 +441,24 @@ internal class OperatorSqlTranslator
 
     private string ApplyTake(string leftSql, TakeOperator take)
     {
-        var count = ExpressionSqlBuilder.ConvertExpression(take.Expression);
+        var count = _expr.ConvertExpression(take.Expression);
         return $"{leftSql} LIMIT {count}";
     }
 
     private string ApplyTop(string leftSql, TopOperator top)
     {
-        var count = ExpressionSqlBuilder.ConvertExpression(top.Expression);
+        var count = _expr.ConvertExpression(top.Expression);
 
         string order;
         if (top.ByExpression is OrderedExpression oe)
         {
-            var expr = ExpressionSqlBuilder.ConvertExpression(oe.Expression);
+            var expr = _expr.ConvertExpression(oe.Expression);
             var dir = oe.Ordering?.ToString().Trim().ToUpperInvariant() ?? "DESC";
             order = $"{expr} {dir}";
         }
         else
         {
-            var expr = ExpressionSqlBuilder.ConvertExpression(top.ByExpression);
+            var expr = _expr.ConvertExpression(top.ByExpression);
             order = $"{expr} DESC";
         }
 
@@ -488,8 +497,8 @@ internal class OperatorSqlTranslator
             }
             else if (expr is BinaryExpression be && be.Kind == SyntaxKind.EqualExpression)
             {
-                var left = ExpressionSqlBuilder.ConvertExpression(be.Left, "L", "R");
-                var right = ExpressionSqlBuilder.ConvertExpression(be.Right, "L", "R");
+                var left = _expr.ConvertExpression(be.Left, "L", "R");
+                var right = _expr.ConvertExpression(be.Right, "L", "R");
                 conditions.Add($"{left} = {right}");
                 leftKeys.Add(ExpressionSqlBuilder.ExtractLeftKey(be.Left));
             }
@@ -501,7 +510,8 @@ internal class OperatorSqlTranslator
 
         if (kind is null or "innerunique")
         {
-            leftSql = $"SELECT * FROM ({leftSql}) QUALIFY ROW_NUMBER() OVER (PARTITION BY {string.Join(", ", leftKeys)}) = 1";
+            var qualifyCondition = $"ROW_NUMBER() OVER (PARTITION BY {string.Join(", ", leftKeys)}) = 1";
+            leftSql = $"SELECT * FROM ({leftSql}) {Dialect.Qualify(qualifyCondition)}";
         }
 
         var rightSql = _converter.ConvertNode(join.Expression);
@@ -531,12 +541,12 @@ internal class OperatorSqlTranslator
             var name = fce.Name.ToString().Trim().ToLowerInvariant();
             if (name == "arg_max" || name == "arg_min")
             {
-                var extremumExpr = ExpressionSqlBuilder.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
+                var extremumExpr = _expr.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
                 var results = new List<string>();
                 for (int i = 1; i < fce.ArgumentList.Expressions.Count; i++)
                 {
                     var argNode = fce.ArgumentList.Expressions[i].Element;
-                    var valueExpr = ExpressionSqlBuilder.ConvertExpression(argNode);
+                    var valueExpr = _expr.ConvertExpression(argNode);
                     string resultAlias;
                     if (i == 1 && alias != null)
                     {
@@ -555,7 +565,7 @@ internal class OperatorSqlTranslator
                 return results;
             }
 
-            var args = fce.ArgumentList.Expressions.Select(a => ExpressionSqlBuilder.ConvertExpression(a.Element)).ToArray();
+            var args = fce.ArgumentList.Expressions.Select(a => _expr.ConvertExpression(a.Element)).ToArray();
 
             if (name == "percentiles")
             {
@@ -593,53 +603,8 @@ internal class OperatorSqlTranslator
                 _ => name
             };
 
-            var sqlFunc = name switch
-            {
-                "count" => "COUNT(*)",
-                "sum" => $"SUM({args[0]})",
-                "avg" => $"AVG({args[0]})",
-                "avgif" => $"AVG(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "binary_all_and" => $"BIT_AND({args[0]})",
-                "binary_all_or" => $"BIT_OR({args[0]})",
-                "binary_all_xor" => $"BIT_XOR({args[0]})",
-                "buildschema" => $"MIN(typeof({args[0]}))",
-                "count_distinct" => $"COUNT(DISTINCT {args[0]})",
-                "count_distinctif" => $"COUNT(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END)",
-                "countif" => $"COUNT(CASE WHEN {args[0]} THEN 1 END)",
-                "covariance" => $"COVAR_SAMP({args[0]}, {args[1]})",
-                "covarianceif" => $"COVAR_SAMP(CASE WHEN {args[2]} THEN {args[0]} END, CASE WHEN {args[2]} THEN {args[1]} END)",
-                "covariancep" => $"COVAR_POP({args[0]}, {args[1]})",
-                "covariancepif" => $"COVAR_POP(CASE WHEN {args[2]} THEN {args[0]} END, CASE WHEN {args[2]} THEN {args[1]} END)",
-                "dcount" => $"APPROX_COUNT_DISTINCT({args[0]})",
-                "dcountif" => $"APPROX_COUNT_DISTINCT(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "hll" => $"hll({args[0]})",
-                "hll_if" => $"hll(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "hll_merge" => $"hll_merge({args[0]})",
-                "make_bag" => $"histogram({args[0]})",
-                "make_bag_if" => $"histogram(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "make_list" => $"LIST({args[0]})",
-                "make_list_if" => $"LIST(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "make_list_with_nulls" => $"LIST({args[0]})",
-                "make_set" => $"LIST(DISTINCT {args[0]})",
-                "make_set_if" => $"LIST(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END)",
-                "min" => $"MIN({args[0]})",
-                "minif" => $"MIN(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "max" => $"MAX({args[0]})",
-                "maxif" => $"MAX(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "percentile" => $"quantile_cont({args[0]}, {args[1]} / 100.0)",
-                "percentilew" => $"quantile_cont({args[0]}, {args[2]} / 100.0)",
-                "stdev" => $"STDDEV_SAMP({args[0]})",
-                "stdevif" => $"STDDEV_SAMP(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "stdevp" => $"STDDEV_POP({args[0]})",
-                "sumif" => $"SUM(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "take_any" => $"ANY_VALUE({args[0]})",
-                "take_anyif" => $"ANY_VALUE(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "variance" => $"VAR_SAMP({args[0]})",
-                "varianceif" => $"VAR_SAMP(CASE WHEN {args[1]} THEN {args[0]} END)",
-                "variancep" => $"VAR_POP({args[0]})",
-                "variancepif" => $"VAR_POP(CASE WHEN {args[1]} THEN {args[0]} END)",
-                _ => throw new NotSupportedException($"Unsupported aggregate function {name}")
-            };
+            var sqlFunc = Dialect.TryTranslateAggregate(name, args)
+                ?? throw new NotSupportedException($"Unsupported aggregate function {name}");
 
             return new[] { $"{sqlFunc} AS {alias}" };
         }
