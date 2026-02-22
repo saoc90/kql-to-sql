@@ -3,6 +3,7 @@
 @using DuckDbDemo.Services
 @using System.Text.Json
 @using KqlToSql
+@using KqlToSql.Dialects
 @using Microsoft.JSInterop
 @inject IJSRuntime JSRuntime
 @implements IDisposable
@@ -489,9 +490,10 @@
                 return;
             }
 
-            var converter = new KqlToSqlConverter();
+            ISqlDialect dialect = selectedBackend == BackendPglite ? new PGliteDialect() : new DuckDbDialect();
+            var converter = new KqlToSqlConverter(dialect);
             convertedSql = converter.Convert(kql);
-            conversionMessage = "KQL successfully converted to SQL!";
+            conversionMessage = $"KQL successfully converted to SQL ({dialect.Name})!";
             errorMessage = string.Empty;
         }
         catch (Exception ex)
@@ -553,7 +555,8 @@
             {
                 try
                 {
-                    var converter = new KqlToSqlConverter();
+                    ISqlDialect dialect = selectedBackend == BackendPglite ? new PGliteDialect() : new DuckDbDialect();
+                    var converter = new KqlToSqlConverter(dialect);
                     sqlToExecute = converter.Convert(query);
                 }
                 catch (Exception ex)
