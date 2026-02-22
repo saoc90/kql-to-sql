@@ -65,7 +65,7 @@ public class CommandSqlTranslator
         return $"CREATE VIEW {name} AS {sql}";
     }
 
-    private static string TranslateCreateTable(string text)
+    private string TranslateCreateTable(string text)
     {
         var match = Regex.Match(text, @"\.create\s+table\s+(\w+)\s*\(([^)]*)\)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
         if (!match.Success)
@@ -82,28 +82,10 @@ public class CommandSqlTranslator
                 if (parts.Length != 2)
                     throw new NotSupportedException("Invalid column definition");
                 var name = parts[0].Trim();
-                var type = MapType(parts[1].Trim());
+                var type = _converter.Dialect.MapType(parts[1].Trim());
                 return $"{name} {type}";
             });
 
         return $"CREATE TABLE {table} ({string.Join(", ", columns)})";
-    }
-
-    private static string MapType(string type)
-    {
-        return type.ToLowerInvariant() switch
-        {
-            "bool" or "boolean" => "BOOLEAN",
-            "int" => "INT",
-            "long" => "BIGINT",
-            "real" => "DOUBLE",
-            "decimal" => "DECIMAL",
-            "datetime" => "TIMESTAMP",
-            "date" => "DATE",
-            "string" => "VARCHAR",
-            "dynamic" => "JSON",
-            "guid" => "UUID",
-            _ => throw new NotSupportedException($"Unsupported type '{type}'")
-        };
     }
 }
