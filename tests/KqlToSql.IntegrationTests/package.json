@@ -1,0 +1,10 @@
+{
+  "name": "kql-to-sql-integration-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Integration tests for KQL-to-SQL with DuckDB WASM and PGlite engines",
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.29.0",
+    "@electric-sql/pglite": "^0.3.0"
+  }
+}

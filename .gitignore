@@ -6,3 +6,5 @@ obj/
 *.duckdb
 libduckdb.so
 .vs
+node_modules/
+package-lock.json
