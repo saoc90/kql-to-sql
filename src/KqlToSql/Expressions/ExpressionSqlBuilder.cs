@@ -6,8 +6,15 @@ using Kusto.Language.Syntax;
 
 namespace KqlToSql.Expressions;
 
-internal static class ExpressionSqlBuilder
+internal class ExpressionSqlBuilder
 {
+    private readonly ISqlDialect _dialect;
+
+    internal ExpressionSqlBuilder(ISqlDialect dialect)
+    {
+        _dialect = dialect;
+    }
+
     private static readonly Dictionary<string, string> CastFunctionMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["tobool"] = "BOOLEAN",
@@ -33,7 +40,7 @@ internal static class ExpressionSqlBuilder
         ["totimespan"] = "INTERVAL",
         ["timespan"] = "INTERVAL"
     };
-    internal static string ConvertExpression(Expression expr, string? leftAlias = null, string? rightAlias = null)
+    internal string ConvertExpression(Expression expr, string? leftAlias = null, string? rightAlias = null)
     {
         if (TryConvertDynamicAccess(expr, leftAlias, rightAlias, out var dynamicSql))
         {
@@ -156,7 +163,7 @@ internal static class ExpressionSqlBuilder
         return $"'{text}'";
     }
 
-    private static string ConvertFunctionCall(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertFunctionCall(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         var name = fce.Name.ToString().Trim();
         var lower = name.ToLowerInvariant();
@@ -170,76 +177,40 @@ internal static class ExpressionSqlBuilder
             return $"CAST({arg} AS {sqlType})";
         }
 
-        return lower switch
+        // Handle functions with structural conversion logic
+        switch (lower)
         {
-            "bin" => ConvertBin(fce, leftAlias, rightAlias),
-            "bag_pack" => $"json_object({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
-            "tolower" => $"LOWER({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "toupper" => $"UPPER({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "strlen" => $"LENGTH({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "substring" => ConvertSubstring(fce, leftAlias, rightAlias),
-            "now" => "NOW()",
-            "ago" => ConvertAgo(fce, leftAlias, rightAlias),
-            "iif" or "iff" => ConvertIif(fce, leftAlias, rightAlias),
-            "case" => ConvertCase(fce, leftAlias, rightAlias),
-            "pack_array" => $"LIST_VALUE({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
-            "isempty" => $"({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)} IS NULL OR CAST({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)} AS VARCHAR) = '')",
-            "isnotempty" or "isnotnull" => $"({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)} IS NOT NULL)",
-            "isnull" => $"({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)} IS NULL)",
-            "not" => $"NOT ({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "strcat" => $"CONCAT({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
-            "replace_string" => $"REPLACE({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
-            "trim" => ConvertTrim(fce, leftAlias, rightAlias),
-            "trim_start" => ConvertTrimStart(fce, leftAlias, rightAlias),
-            "trim_end" => ConvertTrimEnd(fce, leftAlias, rightAlias),
-            "indexof" => $"(INSTR({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}, {ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias)}) - 1)",
-            "coalesce" => $"COALESCE({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
-            "countof" => $"(LENGTH({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}) - LENGTH(REPLACE({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}, {ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias)}, ''))) / LENGTH({ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias)})",
-            "reverse" => $"REVERSE({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "split" => $"STRING_SPLIT({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}, {ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias)})",
-            "strcat_delim" => ConvertStrcatDelim(fce, leftAlias, rightAlias),
-            "extract" => ConvertExtract(fce, leftAlias, rightAlias),
-            "floor" => $"FLOOR({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "ceiling" => $"CEILING({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "abs" => $"ABS({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "round" => ConvertRound(fce, leftAlias, rightAlias),
-            "sqrt" => $"SQRT({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "log" => $"LN({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "log10" => $"LOG10({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "log2" => $"LOG2({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "exp" => $"EXP({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "exp2" => $"POWER(2, {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "exp10" => $"POWER(10, {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "pow" or "power" => $"POWER({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}, {ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias)})",
-            "pi" => "PI()",
-            "cos" => $"COS({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "sin" => $"SIN({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "tan" => $"TAN({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "acos" => $"ACOS({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "asin" => $"ASIN({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "atan" => $"ATAN({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "atan2" => $"ATAN2({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}, {ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias)})",
-            "sign" => $"SIGN({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "rand" => "RANDOM()",
-            "parse_json" or "todynamic" => $"CAST({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)} AS JSON)",
-            "format_datetime" => $"STRFTIME({ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}, {ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias)})",
-            "startofday" => $"DATE_TRUNC('day', {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "startofweek" => $"DATE_TRUNC('week', {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "startofmonth" => $"DATE_TRUNC('month', {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "startofyear" => $"DATE_TRUNC('year', {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)})",
-            "endofday" => $"DATE_TRUNC('day', {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}) + INTERVAL '1 day' - INTERVAL '1 microsecond'",
-            "endofweek" => $"DATE_TRUNC('week', {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}) + INTERVAL '7 days' - INTERVAL '1 microsecond'",
-            "endofmonth" => $"DATE_TRUNC('month', {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}) + INTERVAL '1 month' - INTERVAL '1 microsecond'",
-            "endofyear" => $"DATE_TRUNC('year', {ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias)}) + INTERVAL '1 year' - INTERVAL '1 microsecond'",
-            "datetime_add" => ConvertDatetimeAdd(fce, leftAlias, rightAlias),
-            "datetime_diff" => ConvertDatetimeDiff(fce, leftAlias, rightAlias),
-            "min_of" => $"LEAST({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
-            "max_of" => $"GREATEST({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})",
-            _ => $"{name}({string.Join(", ", fce.ArgumentList.Expressions.Select(a => ConvertExpression(a.Element, leftAlias, rightAlias)))})"
-        };
+            case "bin": return ConvertBin(fce, leftAlias, rightAlias);
+            case "substring": return ConvertSubstring(fce, leftAlias, rightAlias);
+            case "ago": return ConvertAgo(fce, leftAlias, rightAlias);
+            case "iif" or "iff": return ConvertIif(fce, leftAlias, rightAlias);
+            case "case": return ConvertCase(fce, leftAlias, rightAlias);
+            case "trim": return ConvertTrim(fce, leftAlias, rightAlias);
+            case "trim_start": return ConvertTrimStart(fce, leftAlias, rightAlias);
+            case "trim_end": return ConvertTrimEnd(fce, leftAlias, rightAlias);
+            case "strcat_delim": return ConvertStrcatDelim(fce, leftAlias, rightAlias);
+            case "extract": return ConvertExtract(fce, leftAlias, rightAlias);
+            case "round": return ConvertRound(fce, leftAlias, rightAlias);
+            case "datetime_add": return ConvertDatetimeAdd(fce, leftAlias, rightAlias);
+            case "datetime_diff": return ConvertDatetimeDiff(fce, leftAlias, rightAlias);
+        }
+
+        // Delegate to dialect for engine-specific function translation
+        var args = fce.ArgumentList.Expressions
+            .Select(a => ConvertExpression(a.Element, leftAlias, rightAlias))
+            .ToArray();
+
+        var dialectResult = _dialect.TryTranslateFunction(lower, args);
+        if (dialectResult != null)
+        {
+            return dialectResult;
+        }
+
+        // Fallback: pass through as-is
+        return $"{name}({string.Join(", ", args)})";
     }
 
-    private static string ConvertIif(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertIif(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count != 3)
         {
@@ -252,7 +223,7 @@ internal static class ExpressionSqlBuilder
         return $"CASE WHEN {condition} THEN {trueExpr} ELSE {falseExpr} END";
     }
 
-    private static string ConvertCase(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertCase(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         var args = fce.ArgumentList.Expressions;
         if (args.Count < 3 || args.Count % 2 == 0)
@@ -271,7 +242,7 @@ internal static class ExpressionSqlBuilder
         return $"CASE {string.Join(" ", cases)} ELSE {defaultExpr} END";
     }
 
-    private static string ConvertSubstring(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertSubstring(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count is < 2 or > 3)
         {
@@ -290,7 +261,7 @@ internal static class ExpressionSqlBuilder
         return $"SUBSTR({text}, {startExpr})";
     }
 
-    private static string ConvertAgo(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertAgo(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count != 1)
         {
@@ -311,7 +282,7 @@ internal static class ExpressionSqlBuilder
         return $"NOW() - ({arg}) * INTERVAL '1 millisecond'";
     }
 
-    internal static string ConvertInExpression(InExpression inExpr, string? leftAlias, string? rightAlias)
+    internal string ConvertInExpression(InExpression inExpr, string? leftAlias, string? rightAlias)
     {
         var left = ConvertExpression(inExpr.Left, leftAlias, rightAlias);
         if (inExpr.Right is not ExpressionList list)
@@ -339,7 +310,7 @@ internal static class ExpressionSqlBuilder
         return $"{left} {op} ({string.Join(", ", items)})";
     }
 
-    internal static string ConvertBetween(BetweenExpression bin, string? leftAlias, string? rightAlias, bool negated)
+    internal string ConvertBetween(BetweenExpression bin, string? leftAlias, string? rightAlias, bool negated)
     {
         var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
         var couple = bin.Right;
@@ -349,11 +320,11 @@ internal static class ExpressionSqlBuilder
         return negated ? $"NOT ({expr})" : expr;
     }
 
-    private static string ConvertHasAny(HasAnyExpression expr, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated = false)
+    private string ConvertHasAny(HasAnyExpression expr, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated = false)
     {
         var left = ConvertExpression(expr.Left, leftAlias, rightAlias);
         var list = expr.Right;
-        var like = caseSensitive ? "LIKE" : "ILIKE";
+        var like = caseSensitive ? "LIKE" : _dialect.CaseInsensitiveLike;
         var conditions = new List<string>();
         foreach (var e in list.Expressions)
         {
@@ -373,11 +344,11 @@ internal static class ExpressionSqlBuilder
         return string.Join(sep, conditions);
     }
 
-    private static string ConvertHasAll(HasAllExpression expr, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated = false)
+    private string ConvertHasAll(HasAllExpression expr, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated = false)
     {
         var left = ConvertExpression(expr.Left, leftAlias, rightAlias);
         var list = expr.Right;
-        var like = caseSensitive ? "LIKE" : "ILIKE";
+        var like = caseSensitive ? "LIKE" : _dialect.CaseInsensitiveLike;
         var conditions = new List<string>();
         foreach (var e in list.Expressions)
         {
@@ -397,7 +368,7 @@ internal static class ExpressionSqlBuilder
         return string.Join(sep, conditions);
     }
 
-    private static string ConvertLike(BinaryExpression bin, string? leftAlias, string? rightAlias, string prefix, string suffix, bool caseSensitive, bool negated = false)
+    private string ConvertLike(BinaryExpression bin, string? leftAlias, string? rightAlias, string prefix, string suffix, bool caseSensitive, bool negated = false)
     {
         var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
         string pattern;
@@ -422,7 +393,7 @@ internal static class ExpressionSqlBuilder
             pattern = string.Join(" || ", parts);
         }
 
-        var like = caseSensitive ? "LIKE" : "ILIKE";
+        var like = caseSensitive ? "LIKE" : _dialect.CaseInsensitiveLike;
         if (negated)
         {
             return $"{left} NOT {like} {pattern}";
@@ -445,7 +416,7 @@ internal static class ExpressionSqlBuilder
         return $"TIMESTAMP '{text}'";
     }
 
-    private static bool TryConvertDynamicAccess(Expression expr, string? leftAlias, string? rightAlias, out string sql)
+    private bool TryConvertDynamicAccess(Expression expr, string? leftAlias, string? rightAlias, out string sql)
     {
         sql = string.Empty;
         var segments = new Stack<string>();
@@ -485,13 +456,13 @@ internal static class ExpressionSqlBuilder
                     }
                     var baseSql = ConvertExpression(current, leftAlias, rightAlias);
                     var path = string.Join('.', segments);
-                    sql = $"trim(both '\"' from json_extract({baseSql}, '$.{path}'))";
+                    sql = _dialect.JsonAccess(baseSql, path);
                     return true;
             }
         }
     }
 
-    internal static string ConvertBin(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    internal string ConvertBin(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count != 2)
         {
@@ -553,7 +524,7 @@ internal static class ExpressionSqlBuilder
         };
     }
 
-    private static string ConvertTrim(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertTrim(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count != 2)
             throw new NotSupportedException("trim() expects two arguments");
@@ -562,7 +533,7 @@ internal static class ExpressionSqlBuilder
         return $"TRIM({text}, {chars})";
     }
 
-    private static string ConvertTrimStart(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertTrimStart(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count != 2)
             throw new NotSupportedException("trim_start() expects two arguments");
@@ -571,7 +542,7 @@ internal static class ExpressionSqlBuilder
         return $"LTRIM({text}, {chars})";
     }
 
-    private static string ConvertTrimEnd(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertTrimEnd(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count != 2)
             throw new NotSupportedException("trim_end() expects two arguments");
@@ -580,7 +551,7 @@ internal static class ExpressionSqlBuilder
         return $"RTRIM({text}, {chars})";
     }
 
-    private static string ConvertStrcatDelim(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertStrcatDelim(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count < 2)
             throw new NotSupportedException("strcat_delim() expects at least a delimiter and one value");
@@ -589,7 +560,7 @@ internal static class ExpressionSqlBuilder
         return $"CONCAT_WS({delim}, {string.Join(", ", values)})";
     }
 
-    private static string ConvertExtract(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertExtract(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count < 3)
             throw new NotSupportedException("extract() expects at least three arguments");
@@ -599,7 +570,7 @@ internal static class ExpressionSqlBuilder
         return $"REGEXP_EXTRACT({text}, {regex}, {group})";
     }
 
-    private static string ConvertRound(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertRound(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         var value = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
         if (fce.ArgumentList.Expressions.Count >= 2)
@@ -610,7 +581,7 @@ internal static class ExpressionSqlBuilder
         return $"ROUND({value})";
     }
 
-    private static string ConvertDatetimeAdd(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertDatetimeAdd(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count != 3)
             throw new NotSupportedException("datetime_add() expects three arguments");
@@ -620,7 +591,7 @@ internal static class ExpressionSqlBuilder
         return $"{dt} + {amount} * INTERVAL '1 {part}'";
     }
 
-    private static string ConvertDatetimeDiff(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    private string ConvertDatetimeDiff(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count != 3)
             throw new NotSupportedException("datetime_diff() expects three arguments");
@@ -630,7 +601,7 @@ internal static class ExpressionSqlBuilder
         return $"DATE_DIFF('{part}', {dt2}, {dt1})";
     }
 
-    internal static string ConvertLiteralValue(Expression expr)
+    internal string ConvertLiteralValue(Expression expr)
     {
         return expr switch
         {
