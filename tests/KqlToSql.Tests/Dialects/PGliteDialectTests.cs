@@ -256,14 +256,42 @@ public class PGliteDialectTests
     public void PGlite_JsonAccess_Single_Key()
     {
         var dialect = new PGliteDialect();
-        Assert.Equal("(col->>'name')", dialect.JsonAccess("col", "name"));
+        Assert.Equal("(col::jsonb->>'name')", dialect.JsonAccess("col", "name"));
     }
 
     [Fact]
     public void PGlite_JsonAccess_Nested_Path()
     {
         var dialect = new PGliteDialect();
-        Assert.Equal("(col->'address'->>'city')", dialect.JsonAccess("col", "address.city"));
+        Assert.Equal("(col::jsonb->'address'->>'city')", dialect.JsonAccess("col", "address.city"));
+    }
+
+    [Fact]
+    public void PGlite_Extend_DotNotation_JsonAccess_CastsToJsonb()
+    {
+        var sql = _converter.Convert("StormEvents | take 10 | extend test = StormSummary.TotalDamages");
+        Assert.Equal("SELECT *, (StormSummary::jsonb->>'TotalDamages') AS test FROM StormEvents LIMIT 10", sql);
+    }
+
+    [Fact]
+    public void PGlite_Extend_BracketNotation_JsonAccess_CastsToJsonb()
+    {
+        var sql = _converter.Convert("StormEvents | take 10 | extend test = StormSummary['TotalDamages']");
+        Assert.Equal("SELECT *, (StormSummary::jsonb->>'TotalDamages') AS test FROM StormEvents LIMIT 10", sql);
+    }
+
+    [Fact]
+    public void PGlite_ToInt_Of_DotNotation_JsonProperty_CastsToJsonb()
+    {
+        var sql = _converter.Convert("StormEvents | take 10 | extend test = toint(StormSummary.TotalDamages)");
+        Assert.Equal("SELECT *, CAST((StormSummary::jsonb->>'TotalDamages') AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
+    }
+
+    [Fact]
+    public void PGlite_ToInt_Of_BracketNotation_JsonProperty_CastsToJsonb()
+    {
+        var sql = _converter.Convert("StormEvents | take 10 | extend test = toint(StormSummary['TotalDamages'])");
+        Assert.Equal("SELECT *, CAST((StormSummary::jsonb->>'TotalDamages') AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
     }
 
     [Fact]
