@@ -155,6 +155,66 @@ public class DuckDbWasmIntegrationTests : IAsyncLifetime
         Assert.Equal(5, rows[0].GetProperty("Count").GetInt32());
     }
 
+    /// <summary>
+    /// Verifies that a newly created table is immediately queryable after creation,
+    /// simulating what happens when a file is loaded via File Manager into DuckDB.
+    /// The table must appear in information_schema so the Monaco schema refresh
+    /// (refreshEditorSchema) can pick it up for IntelliSense.
+    /// </summary>
+    [Fact]
+    public async Task DuckDb_NewTable_IsQueryableAfterLoad()
+    {
+        await Exec("DROP TABLE IF EXISTS LoadedFile");
+        await Exec("CREATE TABLE LoadedFile (id INTEGER, name VARCHAR, value DOUBLE)");
+        await Exec("INSERT INTO LoadedFile VALUES (1, 'alpha', 1.5), (2, 'beta', 2.5)");
+
+        var rows = await Query("SELECT * FROM LoadedFile ORDER BY id");
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, rows[0].GetProperty("id").GetInt32());
+        Assert.Equal("alpha", rows[0].GetProperty("name").GetString());
+    }
+
+    /// <summary>
+    /// Verifies that a newly created table appears in information_schema.tables,
+    /// which is the same query used by getDatabaseSchema() to build the Monaco
+    /// IntelliSense schema after a file is loaded.
+    /// </summary>
+    [Fact]
+    public async Task DuckDb_NewTable_AppearsInInformationSchema_ForIntelliSense()
+    {
+        await Exec("DROP TABLE IF EXISTS LoadedFile");
+        await Exec("CREATE TABLE LoadedFile (col1 VARCHAR, col2 INTEGER)");
+
+        var rows = await Query(
+            "SELECT table_name FROM information_schema.tables " +
+            "WHERE table_schema = 'main' AND table_name = 'LoadedFile'");
+
+        Assert.Single(rows);
+        Assert.Equal("LoadedFile", rows[0].GetProperty("table_name").GetString());
+    }
+
+    /// <summary>
+    /// Verifies that KQL queries work against a dynamically loaded table,
+    /// representing the end-to-end flow: load file → convert KQL → execute SQL.
+    /// </summary>
+    [Fact]
+    public async Task DuckDb_KqlQuery_WorksAgainstDynamicallyLoadedTable()
+    {
+        await Exec("DROP TABLE IF EXISTS SalesData");
+        await Exec("CREATE TABLE SalesData (region VARCHAR, amount DOUBLE)");
+        await Exec("INSERT INTO SalesData VALUES ('NORTH', 100.0), ('SOUTH', 200.0), ('NORTH', 150.0)");
+
+        var kql = "SalesData | where region == 'NORTH' | summarize total = sum(amount) by region";
+        var sql = _converter.Convert(kql);
+
+        var rows = await Query(sql);
+
+        Assert.Single(rows);
+        Assert.Equal("NORTH", rows[0].GetProperty("region").GetString());
+        Assert.Equal(250.0, rows[0].GetProperty("total").GetDouble());
+    }
+
     private async Task<List<JsonElement>> Query(string sql)
     {
         var json = await _fixture.NodeJS.InvokeFromFileAsync<string>(

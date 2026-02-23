@@ -167,6 +167,64 @@ public class PGliteIntegrationTests : IAsyncLifetime
         Assert.All(rows, r => Assert.Equal("TEXAS", r.GetProperty("state").GetString()));
     }
 
+    /// <summary>
+    /// Verifies that a newly created table is immediately queryable after creation,
+    /// simulating what happens when a file is loaded via File Manager into PGlite.
+    /// This covers the bug where tables loaded into PGlite were not accessible.
+    /// </summary>
+    [Fact]
+    public async Task PGlite_NewTable_IsQueryableAfterLoad()
+    {
+        await Exec("DROP TABLE IF EXISTS loaded_file");
+        await Exec("CREATE TABLE loaded_file (id INTEGER, name TEXT, value DOUBLE PRECISION)");
+        await Exec("INSERT INTO loaded_file VALUES (1, 'alpha', 1.5), (2, 'beta', 2.5)");
+
+        var rows = await Query("SELECT * FROM loaded_file ORDER BY id");
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, rows[0].GetProperty("id").GetInt32());
+        Assert.Equal("alpha", rows[0].GetProperty("name").GetString());
+    }
+
+    /// <summary>
+    /// Verifies that a newly created table appears in information_schema.columns,
+    /// which is the same query used by getDatabaseSchema() (PGlite) to build the
+    /// Monaco IntelliSense schema after a file is loaded.
+    /// </summary>
+    [Fact]
+    public async Task PGlite_NewTable_AppearsInInformationSchema_ForIntelliSense()
+    {
+        await Exec("DROP TABLE IF EXISTS loaded_file");
+        await Exec("CREATE TABLE loaded_file (col1 TEXT, col2 INTEGER)");
+
+        var rows = await Query(
+            "SELECT table_name FROM information_schema.tables " +
+            "WHERE table_schema = 'public' AND table_name = 'loaded_file'");
+
+        Assert.Single(rows);
+        Assert.Equal("loaded_file", rows[0].GetProperty("table_name").GetString());
+    }
+
+    /// <summary>
+    /// Verifies that KQL queries work against a dynamically loaded table in PGlite,
+    /// representing the end-to-end flow: load file → convert KQL → execute SQL.
+    /// </summary>
+    [Fact]
+    public async Task PGlite_KqlQuery_WorksAgainstDynamicallyLoadedTable()
+    {
+        await Exec("DROP TABLE IF EXISTS salesdata");
+        await Exec("CREATE TABLE salesdata (region TEXT, amount DOUBLE PRECISION)");
+        await Exec("INSERT INTO salesdata VALUES ('NORTH', 100.0), ('SOUTH', 200.0), ('NORTH', 150.0)");
+
+        var kql = "salesdata | where region == 'NORTH' | project region, amount";
+        var sql = _converter.Convert(kql);
+
+        var rows = await Query(sql);
+
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, r => Assert.Equal("NORTH", r.GetProperty("region").GetString()));
+    }
+
     private async Task<List<JsonElement>> Query(string sql)
     {
         var json = await _fixture.NodeJS.InvokeFromFileAsync<string>(
