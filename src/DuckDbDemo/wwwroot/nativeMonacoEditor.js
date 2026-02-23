@@ -544,8 +544,12 @@ window.setDuckDbTables = async function(tables) {
 
 window.refreshEditorSchema = async function() {
     try {
+        if (window.nativeMonacoEditor.editors.size === 0) {
+            console.log('ℹ️ No active editors to refresh schema');
+            return;
+        }
         const schema = await window.nativeMonacoEditor.getDuckDbSchema();
-        await window.nativeMonacoEditor.updateSchema(schema);
+        await window.nativeMonacoEditor.updateSchema(schema, 'https://help.kusto.windows.net', 'DuckDB');
         console.log('✅ Editor schema refreshed');
     } catch (error) {
         console.error('❌ Failed to refresh editor schema:', error);

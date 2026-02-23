@@ -365,9 +365,13 @@ class FileManager {
             let file = this.files.get(fileId);
             if (!file) throw new Error('File not found in memory for PGlite load');
 
-            if (!window.PGliteInterop || !window.pg) {
+            // window.pg is set lazily by pgliteInterop.js when the first query runs.
+            // If it hasn't been initialized yet, trigger init via a no-op query.
+            if (!window.pg) {
+                if (!window.PGliteInterop) {
+                    throw new Error('PGlite is not available. Please refresh the page and try again.');
+                }
                 console.log('Initializing PGlite for file load...');
-                // Trigger init via a no-op query
                 await window.PGliteInterop.queryJson('SELECT 1');
             }
 
