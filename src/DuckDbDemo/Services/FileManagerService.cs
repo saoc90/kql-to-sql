@@ -44,28 +44,54 @@ namespace DuckDbDemo.Services
 
         public async Task<object> LoadFileIntoDatabaseAsync(string fileId, string backend)
         {
+            JsonElement primaryResult;
             try
             {
-                JsonElement result;
                 if (backend == "pglite")
                 {
-                    // Use alternate JS function that loads into PGlite
-                    result = await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabasePglite", fileId);
+                    // Load into PGlite as the primary engine
+                    primaryResult = await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabasePglite", fileId);
                 }
                 else
                 {
-                    result = await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabase", fileId);
+                    // Load into DuckDB as the primary engine
+                    primaryResult = await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabase", fileId);
                 }
-                
-                // Update local metadata
-                await RefreshMetadataAsync();
-                
-                return result;
             }
             catch (Exception ex)
             {
                 return new { success = false, error = ex.Message };
             }
+
+            // Also load into the secondary engine so the table is available in both engines.
+            // Failures here are non-critical (e.g. Parquet files are not supported by PGlite).
+            var secondaryEngine = backend == "pglite" ? "DuckDB" : "PGlite";
+            try
+            {
+                if (backend == "pglite")
+                    await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabase", fileId);
+                else
+                    await _jsRuntime.InvokeAsync<JsonElement>("FileManagerInterop.loadFileIntoDatabasePglite", fileId);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Cross-engine load to {secondaryEngine} failed (non-critical): {ex.Message}");
+            }
+
+            // Refresh Monaco editor IntelliSense with the updated schema
+            try
+            {
+                await _jsRuntime.InvokeVoidAsync("refreshEditorSchema");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Monaco schema refresh failed (non-critical): {ex.Message}");
+            }
+
+            // Update local metadata
+            await RefreshMetadataAsync();
+
+            return primaryResult;
         }
 
         public async Task RemoveFileAsync(string fileId)
