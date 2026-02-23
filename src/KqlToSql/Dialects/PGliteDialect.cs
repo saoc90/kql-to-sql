@@ -143,11 +143,11 @@ public class PGliteDialect : ISqlDialect
         var parts = jsonPath.Split('.');
         if (parts.Length == 1)
         {
-            return $"({baseSql}->>'{parts[0]}')";
+            return $"({baseSql}::jsonb->>'{parts[0]}')";
         }
-        // For nested access: col->'a'->>'b'
+        // For nested access: col::jsonb->'a'->>'b'
         var intermediate = string.Join("", parts.Take(parts.Length - 1).Select(p => $"->'{p}'"));
-        return $"({baseSql}{intermediate}->>'{parts.Last()}')";
+        return $"({baseSql}::jsonb{intermediate}->>'{parts.Last()}')";
     }
 
     public string SelectExclude(string[] columns)
