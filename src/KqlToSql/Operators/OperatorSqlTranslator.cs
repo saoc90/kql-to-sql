@@ -324,7 +324,9 @@ internal class OperatorSqlTranslator
                 ? "ASC" : "DESC";
 
             var qualifyCondition = $"ROW_NUMBER() OVER ({partition}ORDER BY {extremumExpr} {direction}) = 1";
-            return $"SELECT * FROM {fromSql} {Dialect.Qualify(qualifyCondition)}";
+            // fromSql may already be wrapped like "(subquery)" or just a table name
+            var innerSql = fromSql.StartsWith("(") ? fromSql.Substring(1, fromSql.Length - 2) : $"SELECT * FROM {fromSql}";
+            return Dialect.Qualify(innerSql, qualifyCondition);
         }
 
         var aggregates = new List<string>();
@@ -510,12 +512,21 @@ internal class OperatorSqlTranslator
 
         if (kind is null or "innerunique")
         {
-            var qualifyCondition = $"ROW_NUMBER() OVER (PARTITION BY {string.Join(", ", leftKeys)}) = 1";
-            leftSql = $"SELECT * FROM ({leftSql}) {Dialect.Qualify(qualifyCondition)}";
+            var partitionBy = string.Join(", ", leftKeys);
+            leftSql = Dialect.Qualify(leftSql, $"ROW_NUMBER() OVER (PARTITION BY {partitionBy}) = 1");
         }
 
         var rightSql = _converter.ConvertNode(join.Expression);
-        return $"SELECT * FROM ({leftSql}) AS L {joinType} ({rightSql}) AS R ON {string.Join(" AND ", conditions)}";
+
+        // KQL join semantics: drop duplicate key columns from the right side.
+        // DuckDB supports EXCLUDE syntax natively to avoid duplicate column names
+        // (which cause 'ownKeys' proxy errors). PGlite handles duplicates in results.
+        var rightColumns = Dialect.SelectExclude(leftKeys.ToArray());
+        var selectClause = rightColumns.Contains("/*")
+            ? "*"  // Dialect doesn't support EXCLUDE (e.g., PGlite) — fall back to SELECT *
+            : $"L.*, R.{rightColumns}";
+
+        return $"SELECT {selectClause} FROM ({leftSql}) AS L {joinType} ({rightSql}) AS R ON {string.Join(" AND ", conditions)}";
     }
 
     private IEnumerable<string> ConvertAggregate(SyntaxNode node)

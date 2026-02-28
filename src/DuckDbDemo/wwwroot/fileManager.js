@@ -286,9 +286,16 @@ class FileManager {
             const arrayBuffer = await file.arrayBuffer();
             const bytes = new Uint8Array(arrayBuffer);
 
-            // Ensure DuckDB is initialized
+            // Ensure DuckDB is initialized (lazy init – triggers on first query)
             if (!window.db) {
-                throw new Error('Database not initialized');
+                if (!window.DuckDbInterop) {
+                    throw new Error('DuckDB is not available. Please refresh the page and try again.');
+                }
+                console.log('Initializing DuckDB for file load...');
+                await window.DuckDbInterop.queryJson('SELECT 1');
+            }
+            if (!window.db) {
+                throw new Error('DuckDB failed to initialize');
             }
 
             // Register file with DuckDB

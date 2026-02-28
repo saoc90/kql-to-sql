@@ -256,54 +256,21 @@
             // Ensure the Monaco Editor exists (creates if needed, reuses if exists)
             var initResult = await JSRuntime.InvokeAsync<Dictionary<string, object>>("ensureMonacoEditor", EditorContainerId);
             
-            // Safely check if success is true (handle both boolean and string types)
             bool isSuccess = false;
-            if (initResult != null && initResult.ContainsKey("success"))
+            if (initResult != null && initResult.TryGetValue("success", out var successValue))
             {
-                var successValue = initResult["success"];
-                Console.WriteLine($"🔍 Success value type: {successValue?.GetType()}, value: {successValue}");
-                
-                if (successValue is bool boolValue)
+                isSuccess = successValue switch
                 {
-                    isSuccess = boolValue;
-                    Console.WriteLine($"🔍 Parsed as boolean: {isSuccess}");
-                }
-                else if (successValue is string stringValue)
-                {
-                    isSuccess = stringValue.Equals("true", StringComparison.OrdinalIgnoreCase);
-                    Console.WriteLine($"🔍 Parsed as string: {isSuccess}");
-                }
-                else
-                {
-                    // Try to convert whatever it is
-                    try
-                    {
-                        isSuccess = Convert.ToBoolean(successValue);
-                        Console.WriteLine($"🔍 Converted to boolean: {isSuccess}");
-                    }
-                    catch (Exception convertEx)
-                    {
-                        Console.WriteLine($"🔍 Failed to convert: {convertEx.Message}");
-                        isSuccess = false;
-                    }
-                }
+                    bool b => b,
+                    JsonElement je => je.ValueKind == JsonValueKind.True,
+                    string s => s.Equals("true", StringComparison.OrdinalIgnoreCase),
+                    _ => false
+                };
             }
-            else
-            {
-                Console.WriteLine($"🔍 initResult is null or doesn't contain 'success' key");
-                Console.WriteLine($"🔍 initResult: {JsonSerializer.Serialize(initResult)}");
-            }
-            
-            if (isSuccess)
-            {
-                var message = (initResult?.ContainsKey("message") == true) ? initResult["message"]?.ToString() : "Editor initialized";
-                Console.WriteLine($"✅ Monaco Editor initialized successfully: {message}");
-            }
-            else
+
+            if (!isSuccess)
             {
                 var errorMsg = initResult?.ContainsKey("message") == true ? initResult["message"]?.ToString() : "Unknown error";
-                Console.WriteLine($"❌ Editor initialization failed: {errorMsg}");
-                Console.WriteLine($"🔍 Debug info - initResult: {JsonSerializer.Serialize(initResult)}");
                 throw new Exception($"Editor initialization failed: {errorMsg}");
             }
         }

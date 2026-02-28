@@ -168,18 +168,33 @@ window.nativeMonacoEditor = {
                 
                 if (dbSchema && dbSchema.database && dbSchema.database.tables && dbSchema.database.tables.length > 0) {
                     console.log(`✅ Found ${dbSchema.database.tables.length} tables in live DuckDB schema`);
-                    
-                    // Convert DuckDB schema format to our internal format, then to Kusto
-                    const tables = dbSchema.database.tables.map(table => ({
-                        name: table.name,
-                        columns: table.columns.map(col => ({
-                            name: col.name,
-                            type: this.kustoTypeToDuckDbType(col.type), // Convert back to DuckDB format for consistency
-                            description: `Column: ${col.name} (${col.type})`
-                        }))
-                    }));
-                    
-                    return this.convertDuckDbToKustoSchema(tables);
+
+                    // Build Kusto schema directly from the already-mapped Kusto types
+                    // (getDatabaseSchema already converts DuckDB types to Kusto types)
+                    const kustoTables = {};
+                    dbSchema.database.tables.forEach(table => {
+                        kustoTables[table.name] = {
+                            Name: table.name,
+                            DocString: `Table: ${table.name}`,
+                            OrderedColumns: table.columns.map(col => ({
+                                Name: col.name,
+                                Type: this.duckDbTypeToSystemType(this.kustoTypeToDuckDbType(col.type)),
+                                CslType: col.type, // Already a Kusto type from getDatabaseSchema
+                                DocString: `Column: ${col.name} (${col.type})`
+                            }))
+                        };
+                    });
+
+                    return {
+                        Plugins: [],
+                        Databases: {
+                            Samples: {
+                                Name: 'Samples',
+                                Tables: kustoTables,
+                                Functions: {}
+                            }
+                        }
+                    };
                 }
             }
             
@@ -243,8 +258,8 @@ window.nativeMonacoEditor = {
         return {
             Plugins: [],
             Databases: {
-                DuckDB: {
-                    Name: 'DuckDB',
+                Samples: {
+                    Name: 'Samples',
                     Tables: kustoTables,
                     Functions: {}
                 }
@@ -354,7 +369,7 @@ window.nativeMonacoEditor = {
         
         // Get and apply DuckDB schema
         const schema = await this.getDuckDbSchema();
-        await this.setSchemaForEditor(editor, schema, 'https://help.kusto.windows.net', 'DuckDB');
+        await this.setSchemaForEditor(editor, schema, 'https://help.kusto.windows.net', 'Samples');
         
         return editor;
     },
@@ -535,7 +550,7 @@ window.setDuckDbTables = async function(tables) {
         
         // Convert to Kusto schema and update all editors
         const schema = window.nativeMonacoEditor.convertDuckDbToKustoSchema(tables);
-        await window.nativeMonacoEditor.updateSchema(schema, 'https://help.kusto.windows.net', 'DuckDB');
+        await window.nativeMonacoEditor.updateSchema(schema, 'https://help.kusto.windows.net', 'Samples');
         console.log('✅ DuckDB schema updated from Blazor');
     } catch (error) {
         console.error('❌ Failed to set DuckDB tables from Blazor:', error);
@@ -544,12 +559,15 @@ window.setDuckDbTables = async function(tables) {
 
 window.refreshEditorSchema = async function() {
     try {
+        const schema = await window.nativeMonacoEditor.getDuckDbSchema();
+        // Cache the schema so the next editor creation picks it up even if no editors exist right now
+        window.duckDbSchemaCache = null; // Invalidate cache so getDuckDbSchema fetches live data next time
+        window._latestKustoSchema = schema;
         if (window.nativeMonacoEditor.editors.size === 0) {
-            console.log('ℹ️ No active editors to refresh schema');
+            console.log('ℹ️ No active editors – schema cached for next editor creation');
             return;
         }
-        const schema = await window.nativeMonacoEditor.getDuckDbSchema();
-        await window.nativeMonacoEditor.updateSchema(schema, 'https://help.kusto.windows.net', 'DuckDB');
+        await window.nativeMonacoEditor.updateSchema(schema, 'https://help.kusto.windows.net', 'Samples');
         console.log('✅ Editor schema refreshed');
     } catch (error) {
         console.error('❌ Failed to refresh editor schema:', error);
@@ -567,7 +585,7 @@ window.ensureMonacoEditor = async function(containerId) {
             // Refresh schema even if editor exists
             try {
                 const schema = await window.nativeMonacoEditor.getDuckDbSchema();
-                await window.nativeMonacoEditor.setSchemaForEditor(existingEditor, schema, 'https://help.kusto.windows.net', 'DuckDB');
+                await window.nativeMonacoEditor.setSchemaForEditor(existingEditor, schema, 'https://help.kusto.windows.net', 'Samples');
                 console.log('✅ Schema refreshed for existing editor');
             } catch (schemaError) {
                 console.warn('⚠️ Failed to refresh schema:', schemaError);
