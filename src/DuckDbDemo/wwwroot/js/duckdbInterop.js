@@ -55,7 +55,40 @@ export async function queryJson(sql) {
     const c = await db.connect();
     const res = await c.query(sql);    // ArrowTable
     c.close();
-    const data = res.toArray();
+
+    // Handle duplicate column names (e.g. from self-joins) by renaming them
+    // before calling toArray(), which fails on duplicate keys in JS proxies.
+    const schema = res.schema;
+    const names = schema.fields.map(f => f.name);
+    const seen = {};
+    let hasDuplicates = false;
+    for (const name of names) {
+        seen[name] = (seen[name] || 0) + 1;
+        if (seen[name] > 1) hasDuplicates = true;
+    }
+
+    let data;
+    if (hasDuplicates) {
+        // Build rows manually with deduplicated column names
+        const uniqueNames = [];
+        const counts = {};
+        for (const name of names) {
+            counts[name] = (counts[name] || 0) + 1;
+            uniqueNames.push(counts[name] > 1 ? `${name}${counts[name] - 1}` : name);
+        }
+        const numRows = res.numRows;
+        data = [];
+        for (let r = 0; r < numRows; r++) {
+            const row = {};
+            for (let col = 0; col < uniqueNames.length; col++) {
+                row[uniqueNames[col]] = res.getChildAt(col)?.get(r);
+            }
+            data.push(row);
+        }
+    } else {
+        data = res.toArray();
+    }
+
     // Convert any BigInt values to numbers before serialization
     const convertedData = convertBigIntToNumber(data);
     return JSON.stringify(convertedData);   // plain JSON for easy marshalling

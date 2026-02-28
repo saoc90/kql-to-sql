@@ -36,8 +36,8 @@ public interface ISqlDialect
     /// <summary>Generates a SELECT clause that renames specific columns (e.g. "* RENAME (old AS new)").</summary>
     string SelectRename(string[] mappings);
 
-    /// <summary>Generates a window-filter clause (e.g. DuckDB QUALIFY).</summary>
-    string Qualify(string condition);
+    /// <summary>Wraps a query with a window-filter condition (e.g. DuckDB QUALIFY, PGlite subquery).</summary>
+    string Qualify(string innerSql, string condition);
 
     /// <summary>Generates a series generation query.</summary>
     string GenerateSeries(string alias, string start, string end, string step);

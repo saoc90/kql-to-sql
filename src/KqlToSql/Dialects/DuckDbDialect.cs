@@ -155,9 +155,9 @@ public class DuckDbDialect : ISqlDialect
         return $"* RENAME ({string.Join(", ", mappings)})";
     }
 
-    public string Qualify(string condition)
+    public string Qualify(string innerSql, string condition)
     {
-        return $"QUALIFY {condition}";
+        return $"SELECT * FROM ({innerSql}) QUALIFY {condition}";
     }
 
     public string GenerateSeries(string alias, string start, string end, string step)

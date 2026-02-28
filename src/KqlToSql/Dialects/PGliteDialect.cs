@@ -165,11 +165,20 @@ public class PGliteDialect : ISqlDialect
         return $"* /* RENAME ({string.Join(", ", mappings)}) */";
     }
 
-    public string Qualify(string condition)
+    public string Qualify(string innerSql, string condition)
     {
-        // PostgreSQL does not support QUALIFY. Use a subquery wrapper pattern.
-        // The caller wraps in: SELECT * FROM (...) WHERE condition
-        return $"/* QUALIFY */ WHERE {condition}";
+        // PostgreSQL does not support QUALIFY. Wrap in a subquery with the
+        // window function computed in a subquery, then filter in the outer query.
+        // condition is like "ROW_NUMBER() OVER (...) = 1"
+        var eqIdx = condition.LastIndexOf("= ");
+        if (eqIdx > 0)
+        {
+            var windowExpr = condition.Substring(0, eqIdx).TrimEnd();
+            var value = condition.Substring(eqIdx + 2).Trim();
+            return $"SELECT * FROM (SELECT *, {windowExpr} AS _rn FROM ({innerSql}) _q) _ranked WHERE _rn = {value}";
+        }
+        // Fallback — should not happen with well-formed conditions
+        return $"SELECT * FROM ({innerSql}) /* QUALIFY */ WHERE {condition}";
     }
 
     public string GenerateSeries(string alias, string start, string end, string step)

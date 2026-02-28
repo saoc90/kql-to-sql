@@ -152,8 +152,29 @@ async function ensureStormEventsLoaded() {
 export async function queryJson(sql) {
     if (!pg) await init();
     try {
-        const res = await pg.query(sql);
-        return JSON.stringify(res.rows || []);
+        // Use rowMode:'array' to preserve duplicate column values from joins
+        const res = await pg.query(sql, [], { rowMode: 'array' });
+        const fields = res.fields || [];
+
+        // Deduplicate column names (KQL style: col, col1, col2, ...)
+        const names = [];
+        const counts = {};
+        for (const f of fields) {
+            const name = f.name;
+            counts[name] = (counts[name] || 0) + 1;
+            names.push(counts[name] > 1 ? `${name}${counts[name] - 1}` : name);
+        }
+
+        // Build row objects with deduplicated names
+        const rows = (res.rows || []).map(row => {
+            const obj = {};
+            for (let i = 0; i < names.length; i++) {
+                obj[names[i]] = row[i];
+            }
+            return obj;
+        });
+
+        return JSON.stringify(rows);
     } catch (e) {
         console.error('❌ PGlite query failed:', e);
         throw e;

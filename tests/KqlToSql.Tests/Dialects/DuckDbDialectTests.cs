@@ -228,7 +228,7 @@ public class DuckDbDialectTests
     public void DuckDb_Qualify_Returns_Correct_Syntax()
     {
         var dialect = new DuckDbDialect();
-        Assert.Equal("QUALIFY x = 1", dialect.Qualify("x = 1"));
+        Assert.Equal("SELECT * FROM (SELECT 1) QUALIFY x = 1", dialect.Qualify("SELECT 1", "x = 1"));
     }
 
     [Fact]

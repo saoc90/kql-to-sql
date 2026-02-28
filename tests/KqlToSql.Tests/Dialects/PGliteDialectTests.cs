@@ -309,11 +309,13 @@ public class PGliteDialectTests
     }
 
     [Fact]
-    public void PGlite_Qualify_Uses_Where_Workaround()
+    public void PGlite_Qualify_Uses_Subquery_Workaround()
     {
         var dialect = new PGliteDialect();
-        var result = dialect.Qualify("ROW_NUMBER() OVER (PARTITION BY state) = 1");
-        Assert.Contains("WHERE ROW_NUMBER() OVER (PARTITION BY state) = 1", result);
+        var result = dialect.Qualify("SELECT * FROM my_table", "ROW_NUMBER() OVER (PARTITION BY state) = 1");
+        Assert.Contains("ROW_NUMBER() OVER (PARTITION BY state) AS _rn", result);
+        Assert.Contains("WHERE _rn = 1", result);
+        Assert.Contains("my_table", result);
     }
 
     [Fact]
