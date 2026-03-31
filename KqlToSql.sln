@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KqlToSql.DuckDbExtension.Te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KqlToSql.DuckDbExtension", "src\KqlToSql.DuckDbExtension\KqlToSql.DuckDbExtension.csproj", "{ED4D3FFC-0337-4B07-AAE9-9B59F380B97C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KqlWasmBridge", "src\KqlWasmBridge\KqlWasmBridge.csproj", "{4266912B-936A-463C-8FAF-BEF875F29F1C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -137,6 +139,18 @@ Global
 		{ED4D3FFC-0337-4B07-AAE9-9B59F380B97C}.Release|x64.Build.0 = Release|Any CPU
 		{ED4D3FFC-0337-4B07-AAE9-9B59F380B97C}.Release|x86.ActiveCfg = Release|Any CPU
 		{ED4D3FFC-0337-4B07-AAE9-9B59F380B97C}.Release|x86.Build.0 = Release|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Debug|x64.Build.0 = Debug|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Debug|x86.Build.0 = Debug|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Release|x64.ActiveCfg = Release|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Release|x64.Build.0 = Release|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Release|x86.ActiveCfg = Release|Any CPU
+		{4266912B-936A-463C-8FAF-BEF875F29F1C}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -150,6 +164,7 @@ Global
 		{FDD873FD-8C9C-437F-89B7-53A0962918A3} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{2877161D-67FA-45EF-89C0-8F1AF5EE340E} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{ED4D3FFC-0337-4B07-AAE9-9B59F380B97C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{4266912B-936A-463C-8FAF-BEF875F29F1C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {4BEED7E6-D6FE-4E8F-AE40-48AC413301CD}
