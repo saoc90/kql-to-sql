@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <title>KQL to SQL Converter</title>
+
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="css/editor.css" />
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading-overlay">
+    <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-3 text-muted">Initializing KQL-to-SQL engine...</p>
+</div>
+
+<div id="app" class="d-none">
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand d-flex align-items-center" href="#">
+                <span class="material-icons me-2">transform</span>
+                KQL to SQL
+            </a>
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link active" href="#/" data-nav="editor">
+                        <span class="material-icons" style="font-size:18px;vertical-align:middle;">code</span>
+                        <span class="d-none d-sm-inline ms-1">Query Editor</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#/files" data-nav="files">
+                        <span class="material-icons" style="font-size:18px;vertical-align:middle;">folder</span>
+                        <span class="d-none d-sm-inline ms-1">File Manager</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- ===================== QUERY EDITOR PAGE ===================== -->
+    <div id="page-editor" class="container-fluid px-2 px-sm-4 py-3">
+        <h4 class="mb-2 d-flex align-items-center">
+            <span class="material-icons me-2 text-primary">transform</span>
+            KQL to SQL Query Editor
+        </h4>
+        <p class="text-muted mb-3 d-none d-sm-block">
+            Convert Kusto Query Language (KQL) to SQL and execute queries against your data using DuckDB or PGlite (Postgres WASM).
+        </p>
+
+        <div class="card mb-3">
+            <div class="card-body">
+                <!-- Toolbar -->
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <h6 class="mb-0">Query Workspace</h6>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <!-- Mode toggle -->
+                        <div class="btn-group" role="group" aria-label="Query mode">
+                            <input type="radio" class="btn-check" name="queryMode" id="mode-kql" value="kql" checked />
+                            <label class="btn btn-outline-primary btn-sm" for="mode-kql">KQL</label>
+                            <input type="radio" class="btn-check" name="queryMode" id="mode-sql" value="sql" />
+                            <label class="btn btn-outline-primary btn-sm" for="mode-sql">SQL</label>
+                        </div>
+                        <!-- Backend selector -->
+                        <select id="backend-select" class="form-select form-select-sm" style="min-width:130px;width:auto;">
+                            <option value="duckdb" selected>DuckDB</option>
+                            <option value="pglite">PGlite</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Data load alert (dismissible) -->
+                <div id="data-load-alert" class="alert alert-info alert-dismissible d-none mb-3" role="alert">
+                    <span id="data-load-alert-text"></span>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+
+                <!-- Monaco editor container -->
+                <div class="editor-wrapper mb-3">
+                    <div id="monaco-editor-container" style="height:100%; border:1px solid #ccc; border-radius:4px;"></div>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <button id="btn-execute" class="btn btn-primary">
+                        <span class="material-icons" style="font-size:18px;vertical-align:middle;">play_arrow</span>
+                        Execute <span id="btn-execute-mode">KQL</span>
+                    </button>
+                    <button id="btn-convert" class="btn btn-outline-secondary">
+                        <span class="material-icons" style="font-size:18px;vertical-align:middle;">transform</span>
+                        Convert to SQL
+                    </button>
+                    <button id="btn-show-tables" class="btn btn-outline-info">
+                        <span class="material-icons" style="font-size:18px;vertical-align:middle;">table_view</span>
+                        Show Tables
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error alert -->
+        <div id="error-alert" class="alert alert-danger alert-dismissible d-none" role="alert">
+            <span id="error-alert-text"></span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+
+        <!-- Conversion message -->
+        <div id="conversion-alert" class="alert alert-success alert-dismissible d-none" role="alert">
+            <span id="conversion-alert-text"></span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+
+        <!-- Generated SQL -->
+        <div id="converted-sql-panel" class="card mb-3 d-none">
+            <div class="card-body">
+                <h6 class="d-flex align-items-center mb-3">
+                    <span class="material-icons me-2 text-primary">code</span>
+                    Generated SQL
+                </h6>
+                <pre class="bg-light p-3 rounded"><code id="converted-sql-code"></code></pre>
+                <div class="d-flex gap-2 mt-2">
+                    <button id="btn-copy-sql" class="btn btn-sm btn-outline-primary">
+                        <span class="material-icons" style="font-size:16px;vertical-align:middle;">content_copy</span>
+                        Copy SQL
+                    </button>
+                    <button id="btn-use-sql" class="btn btn-sm btn-outline-secondary">
+                        <span class="material-icons" style="font-size:16px;vertical-align:middle;">swap_horiz</span>
+                        Use as SQL Query
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results table -->
+        <div id="results-panel" class="card d-none">
+            <div class="card-body">
+                <h6 class="d-flex align-items-center mb-3">
+                    <span class="material-icons me-2 text-primary">table_chart</span>
+                    Query Results (<span id="results-count">0</span> rows)
+                </h6>
+                <div class="table-responsive" style="max-height:400px; overflow:auto;">
+                    <table id="results-table" class="table table-striped table-hover table-sm mb-0">
+                        <thead id="results-thead" class="table-light sticky-top"></thead>
+                        <tbody id="results-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Raw result fallback -->
+        <div id="raw-result-panel" class="card d-none">
+            <div class="card-body">
+                <h6 class="d-flex align-items-center mb-3">
+                    <span class="material-icons me-2 text-primary">data_object</span>
+                    Raw Result
+                </h6>
+                <pre class="bg-light p-3 rounded"><code id="raw-result-code"></code></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== FILE MANAGER PAGE ===================== -->
+    <div id="page-files" class="container-fluid px-2 px-sm-4 py-3 d-none">
+        <h4 class="mb-2 d-flex align-items-center">
+            <span class="material-icons me-2 text-primary">folder</span>
+            Data File Manager
+        </h4>
+        <p class="text-muted mb-3 d-none d-sm-block">
+            Upload and manage your data files. Supported formats include CSV, JSON, Parquet, and TXT files.
+        </p>
+
+        <!-- Upload section -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <h6 class="mb-3">Upload Files</h6>
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                    <select id="file-backend-select" class="form-select form-select-sm" style="min-width:150px;width:auto;">
+                        <option value="duckdb" selected>DuckDB</option>
+                        <option value="pglite">PGlite</option>
+                    </select>
+                    <span class="text-muted small d-none d-sm-inline">Choose which in-browser database to load new datasets into.</span>
+                </div>
+
+                <div id="file-drop-zone" class="drop-zone d-flex flex-column align-items-center justify-content-center rounded p-4">
+                    <span class="material-icons text-primary mb-2" style="font-size:48px;">cloud_upload</span>
+                    <h6 class="mb-1">Drag and drop files here</h6>
+                    <p class="text-muted mb-2">or</p>
+                    <input type="file" id="file-input" multiple accept=".csv,.json,.parquet,.txt,.gz" class="d-none" />
+                    <button id="btn-browse-files" class="btn btn-primary">
+                        <span class="material-icons" style="font-size:18px;vertical-align:middle;">folder_open</span>
+                        Browse Files
+                    </button>
+                    <small class="text-muted mt-2">Supported formats: CSV, JSON, Parquet, TXT (Max 500MB per file)</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload progress -->
+        <div id="upload-progress" class="card mb-3 d-none">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                <div>
+                    <p class="mb-0">Uploading files...</p>
+                    <small id="upload-status-text" class="text-muted"></small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status messages -->
+        <div id="file-status-alert" class="alert alert-dismissible d-none mb-3" role="alert">
+            <span id="file-status-text"></span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+
+        <!-- Clear all button -->
+        <div id="clear-all-row" class="d-flex justify-content-end mb-2 d-none">
+            <button id="btn-clear-all" class="btn btn-sm btn-outline-secondary">
+                <span class="material-icons" style="font-size:16px;vertical-align:middle;">clear</span>
+                Clear All Files
+            </button>
+        </div>
+
+        <!-- Files list -->
+        <div id="files-list-panel" class="card d-none">
+            <div class="card-body">
+                <h6 class="d-flex align-items-center mb-3">
+                    <span class="material-icons me-2 text-primary">list</span>
+                    Uploaded Files (<span id="files-count">0</span>)
+                </h6>
+                <div class="table-responsive" style="max-height:400px;overflow:auto;">
+                    <table class="table table-striped table-hover table-sm mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Name</th>
+                                <th>Size</th>
+                                <th>Type</th>
+                                <th>Upload Date</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="files-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty state -->
+        <div id="files-empty" class="card">
+            <div class="card-body text-center py-5">
+                <span class="material-icons text-secondary mb-3" style="font-size:48px;">file_upload</span>
+                <h5>No files uploaded yet</h5>
+                <p class="text-muted">Upload CSV, JSON, Parquet, or TXT files to load them into the database.<br/>Files can then be queried using KQL or SQL in the Query Editor.</p>
+            </div>
+        </div>
+
+        <!-- Preview modal -->
+        <div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h6 class="modal-title d-flex align-items-center">
+                            <span class="material-icons me-2">visibility</span>
+                            Preview: <span id="preview-file-name" class="ms-1"></span>
+                        </h6>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="table-responsive" style="max-height:400px;overflow:auto;">
+                            <table class="table table-striped table-hover table-sm mb-0">
+                                <thead id="preview-thead" class="table-light sticky-top"></thead>
+                                <tbody id="preview-tbody"></tbody>
+                            </table>
+                        </div>
+                        <small id="preview-row-info" class="text-muted mt-2 d-none"></small>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts in load order -->
+<script src="vs/loader.js"></script>
+<script src="nativeMonacoEditor.js"></script>
+<script>
+    // Wait-for-container helper used by nativeMonacoEditor.js
+    window.waitForContainer = function(containerId, timeout) {
+        timeout = timeout || 10000;
+        return new Promise((resolve, reject) => {
+            const el = document.getElementById(containerId);
+            if (el) { resolve(el); return; }
+            const observer = new MutationObserver(() => {
+                const el = document.getElementById(containerId);
+                if (el) { observer.disconnect(); resolve(el); }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+            setTimeout(() => { observer.disconnect(); reject(new Error('Timeout waiting for ' + containerId)); }, timeout);
+        });
+    };
+</script>
+<script src="fileManager.js"></script>
+<script type="module" src="js/duckdbInterop.js"></script>
+<script type="module" src="js/pgliteInterop.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script type="module" src="js/kqlBridge.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

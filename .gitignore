@@ -8,3 +8,5 @@ libduckdb.so
 .vs
 node_modules/
 package-lock.json
+build-wasm/
+src/WebDemo/wwwroot/_framework/

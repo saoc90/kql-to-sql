@@ -21,21 +21,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
-      # Fix base href before build for GitHub Pages
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      # 1. Publish the WASM bridge (produces _framework/ with dotnet.js + WASM)
+      - name: Publish KqlWasmBridge
+        run: dotnet publish src/KqlWasmBridge/KqlWasmBridge.csproj -c Release -o build-wasm
+
+      # 2. Copy _framework into the static site
+      - name: Copy _framework into WebDemo
+        run: cp -r build-wasm/wwwroot/_framework src/WebDemo/wwwroot/_framework
+
+      # 3. Fix base href for GitHub Pages
       - name: Fix base href for GitHub Pages
-        run: sed -i 's/<base href="\/" \/>/<base href="\/kql-to-sql\/" \/>/g' src/DuckDbDemo/wwwroot/index.html
-      - name: Fix JS import path for GitHub Pages
-        run: sed -i 's|"duckdbInterop\.js"|"/kql-to-sql/duckdbInterop.js"|g' src/DuckDbDemo/Program.cs
-      - name: Publish demo
-        run: dotnet publish src/DuckDbDemo/DuckDbDemo.csproj -c Release -o build
-      # stop Jekyll from filtering _framework
+        run: sed -i 's|<base href="/" />|<base href="/kql-to-sql/" />|g' src/WebDemo/wwwroot/index.html
+
+      # 4. Add .nojekyll to prevent Jekyll filtering _framework
       - name: Add .nojekyll
-        run: touch build/wwwroot/.nojekyll
+        run: touch src/WebDemo/wwwroot/.nojekyll
+
+      # 5. Upload the static site
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: build/wwwroot
+          path: src/WebDemo/wwwroot
 
   deploy:
     environment:

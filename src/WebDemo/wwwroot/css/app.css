@@ -1,0 +1,95 @@
+html, body {
+    font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    height: 100vh;
+    width: 100vw;
+    margin: 0;
+    padding: 0;
+    background-color: #fafafa;
+}
+
+h1:focus { outline: none; }
+
+/* Loading overlay */
+#loading-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    z-index: 9999;
+    transition: opacity 0.3s;
+}
+#loading-overlay.fade-out {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Navbar */
+.navbar-brand { font-weight: 600; }
+.nav-link { font-weight: 500; }
+
+/* Cards */
+.card { border-radius: 8px; }
+
+/* Buttons */
+.btn { text-transform: none; }
+
+/* Drop zone */
+.drop-zone {
+    border: 2px dashed #ccc;
+    background-color: #fafafa;
+    min-height: 150px;
+    transition: border-color 0.2s, background-color 0.2s;
+}
+.drop-zone.drag-over {
+    border-color: #1976d2 !important;
+    background-color: #e3f2fd !important;
+}
+
+/* Status badges */
+.badge-loaded { background-color: #4caf50; }
+.badge-error  { background-color: #f44336; }
+.badge-pending { background-color: #2196f3; }
+
+/* Result table */
+#results-table th,
+#results-table td {
+    white-space: nowrap;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Responsive editor height */
+.editor-wrapper { height: 350px; }
+
+@media (max-width: 600px) {
+    .editor-wrapper { height: 220px; }
+    .container-fluid { padding: 0.5rem !important; }
+}
+
+@media (min-width: 601px) and (max-width: 960px) {
+    .editor-wrapper { height: 280px; }
+}
+
+/* Executing state */
+.btn-executing {
+    pointer-events: none;
+    opacity: 0.7;
+}
+.btn-executing .spinner-border {
+    width: 1rem;
+    height: 1rem;
+    border-width: 0.15em;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    body { background-color: #121212; color: #e0e0e0; }
+    .card { background-color: #1e1e1e; border-color: #333; }
+    .bg-light { background-color: #2a2a2a !important; }
+    .table { color: #e0e0e0; }
+    .drop-zone { background-color: #1e1e1e; border-color: #555; }
+}
