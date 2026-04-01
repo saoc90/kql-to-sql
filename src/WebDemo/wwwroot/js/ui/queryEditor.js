@@ -42,7 +42,7 @@ async function initEditor() {
             const monaco = window.nativeMonacoEditor.monaco;
             editor.addCommand(
                 monaco.KeyMod.Shift | monaco.KeyCode.Enter,
-                () => { run(); }
+                () => { run(true); }
             );
             console.log('[QueryEditor] Shift+Enter shortcut registered');
         }
@@ -135,7 +135,47 @@ function useConvertedSql() {
     showAlert('conversion-alert', 'Converted SQL loaded into editor. You can now execute it.', 'success');
 }
 
-async function run() {
+// Get the statement at the cursor position (blocks separated by blank lines, like ADX).
+// If text is selected, return the selection instead.
+function getActiveStatement() {
+    const editor = window.nativeMonacoEditor.getEditor(EDITOR_ID);
+    if (!editor) return null;
+
+    const selection = editor.getSelection();
+    if (selection && !selection.isEmpty()) {
+        return editor.getModel().getValueInRange(selection);
+    }
+
+    const model = editor.getModel();
+    const position = editor.getPosition();
+    const lineCount = model.getLineCount();
+    const cursorLine = position.lineNumber;
+
+    // Walk up to find the start of the statement block (first blank line above)
+    let startLine = cursorLine;
+    while (startLine > 1 && model.getLineContent(startLine - 1).trim() !== '') {
+        startLine--;
+    }
+
+    // Walk down to find the end of the statement block (first blank line below)
+    let endLine = cursorLine;
+    while (endLine < lineCount && model.getLineContent(endLine + 1).trim() !== '') {
+        endLine++;
+    }
+
+    const range = new window.nativeMonacoEditor.monaco.Range(startLine, 1, endLine, model.getLineMaxColumn(endLine));
+
+    // Briefly highlight the executed block
+    const decorations = editor.createDecorationsCollection([{
+        range,
+        options: { className: 'executed-statement-highlight', isWholeLine: true }
+    }]);
+    setTimeout(() => decorations.clear(), 600);
+
+    return model.getValueInRange(range);
+}
+
+async function run(cursorOnly) {
     if (isExecuting) return;
     isExecuting = true;
 
@@ -149,7 +189,9 @@ async function run() {
     hidePanel('converted-sql-panel');
 
     try {
-        const query = window.nativeMonacoEditor.getValue(EDITOR_ID);
+        const query = cursorOnly
+            ? getActiveStatement()
+            : window.nativeMonacoEditor.getValue(EDITOR_ID);
         if (!query || !query.trim()) {
             showAlert('error-alert', `Please enter some ${selectedMode.toUpperCase()} to execute.`, 'danger');
             return;
