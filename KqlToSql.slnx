@@ -1,0 +1,26 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/Solution Items/">
+    <File Path=".github/copilot-instructions.md" />
+    <File Path=".gitignore" />
+    <File Path="KqlOperatorsChecklist.md" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/DuckDbDemo/DuckDbDemo.csproj" />
+    <Project Path="src/KqlToSql.DuckDbExtension/KqlToSql.DuckDbExtension.csproj" />
+    <Project Path="src/KqlToSql/KqlToSql.csproj" />
+    <Project Path="src/KqlWasmBridge/KqlWasmBridge.csproj" />
+    <Project Path="src/KustoApi/KustoApi.csproj" />
+    <Project Path="tests/KqlToSql.Tests/KqlToSql.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KqlToSql.DuckDbExtension.Tests/KqlToSql.DuckDbExtension.Tests.csproj" />
+    <Project Path="tests/KqlToSql.IntegrationTests/KqlToSql.IntegrationTests.csproj" />
+    <Project Path="tests/KustoApi.Tests/KustoApi.Tests.csproj" />
+  </Folder>
+</Solution>
