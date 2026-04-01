@@ -69,14 +69,16 @@ async function onFileAdded(metadata) {
 
 async function onFileRestored(metadata) {
     refreshFileList();
-    // Auto-load restored files into the database
-    await autoLoadFile(metadata.id);
+    // Restored files only need loading into DuckDB (in-memory, lost on refresh).
+    // PGlite persists its own data via IndexedDB, so skip it here.
+    await autoLoadFile(metadata.id, 'duckdb');
 }
 
-async function autoLoadFile(fileId) {
+async function autoLoadFile(fileId, backendOverride) {
     try {
+        const backend = backendOverride || selectedBackend;
         let result;
-        if (selectedBackend === 'pglite') {
+        if (backend === 'pglite') {
             result = await window.fileManager.loadFileIntoDatabasePglite(fileId);
         } else {
             result = await window.fileManager.loadFileIntoDatabase(fileId);
