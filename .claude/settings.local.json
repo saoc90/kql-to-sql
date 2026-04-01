@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Git/kql-to-sql/src/KustoApi -name \"*.cs\" | xargs ls -la)",
+      "WebSearch",
+      "Bash(find /c/Git/kql-to-sql/src/KustoApi -type f -name \"*.js\" -o -name \"*.ts\" -o -name \"*.jsx\" -o -name \"*.tsx\" 2>/dev/null | head -20)",
+      "Bash(find /c/Git/kql-to-sql -name \"App.razor\" -o -name \"App.razor.css\" -o -name \"*.razor\" 2>/dev/null | head -20)",
+      "Bash(find /c/Git/kql-to-sql/src/DuckDbDemo -name \"*.razor\" -type f | xargs wc -l)",
+      "WebFetch(domain:andrewlock.net)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:devblogs.microsoft.com)",
+      "WebFetch(domain:henrikrxn.github.io)",
+      "Bash(gh issue:*)",
+      "Bash(grep -r \"Diagnostic\" /c/Git/kql-to-sql/src/KqlToSql --include=\"*.cs\" 2>/dev/null | head -20)",
+      "Bash(grep -r \"KustoCode.Parse\\\\|\\\\.Syntax\\\\|\\\\.Diagnostics\" /c/Git/kql-to-sql/src/KqlToSql --include=\"*.cs\" 2>/dev/null | head -30)",
+      "Bash(find /c/Git/kql-to-sql -name \"*.csproj\" -type f 2>/dev/null | grep -i test)",
+      "Bash(ls src/DuckDbDemo/wwwroot/vs/ 2>/dev/null | head -5 && echo \"---\" && ls src/DuckDbDemo/wwwroot/*.csv.gz 2>/dev/null)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet publish:*)",
+      "Bash(cp src/DuckDbDemo/wwwroot/js/duckdbInterop.js src/WebDemo/wwwroot/js/duckdbInterop.js && cp src/DuckDbDemo/wwwroot/js/pgliteInterop.js src/WebDemo/wwwroot/js/pgliteInterop.js && cp src/DuckDbDemo/wwwroot/nativeMonacoEditor.js src/WebDemo/wwwroot/nativeMonacoEditor.js && cp src/DuckDbDemo/wwwroot/StormEvents.csv.gz src/WebDemo/wwwroot/StormEvents.csv.gz && cp -r src/DuckDbDemo/wwwroot/vs src/WebDemo/wwwroot/vs)",
+      "Bash(cp -r build-wasm/wwwroot/_framework src/WebDemo/wwwroot/_framework && echo \"Copied _framework\" && ls src/WebDemo/wwwroot/_framework/dotnet.js)",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__take_screenshot",
+      "Bash(rm -rf src/WebDemo/wwwroot/_framework && cp -r build-wasm/wwwroot/_framework src/WebDemo/wwwroot/_framework && echo \"Done\")",
+      "mcp__chrome-devtools__list_console_messages",
+      "mcp__chrome-devtools__evaluate_script",
+      "mcp__chrome-devtools__take_snapshot",
+      "mcp__chrome-devtools__click",
+      "mcp__chrome-devtools__wait_for",
+      "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/kustoWorker.js | tr ';' '\\\\n' | sed -n '543,560p')",
+      "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/Kusto.Language.Bridge.min.js | tr ';' '\\\\n' | grep -c 'CodeScript')",
+      "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/Kusto.Language.Bridge.min.js | tr ';' '\\\\n' | grep 'CodeScript' | head -4)",
+      "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/Kusto.Language.Bridge.min.js | tr ';' '\\\\n' | grep -A5 'CreateScript:function' | head -20)",
+      "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/Kusto.Language.Bridge.min.js | tr ';' '\\\\n' | grep 'block.v\\\\|blockText\\\\|GetService\\\\|TryGetService\\\\|block={' | head -10)",
+      "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/Kusto.Language.Bridge.min.js | tr ';' '\\\\n' | grep 'GetBlockAtPosition')",
+      "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/Kusto.Language.Bridge.min.js | tr ';' '\\\\n' | grep -A3 'GetBlockAtPosition:function')",
+      "Bash(grep -r \"contains\" /c/Git/kql-to-sql/tests/KqlToSql.IntegrationTests/*.cs -i -l)"
+    ]
+  }
+}

@@ -10,6 +10,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/saoc90/kql-to-sql/</PackageProjectUrl>
     <PackageTags>KQL;Kusto;SQL;Converter</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

@@ -8,7 +8,7 @@ let selectedBackend = 'duckdb';
 let isExecuting = false;
 let convertedSql = '';
 
-export function initQueryEditor() {
+export async function initQueryEditor() {
     // Mode toggle
     document.querySelectorAll('input[name="queryMode"]').forEach(radio => {
         radio.addEventListener('change', (e) => onModeChanged(e.target.value));
@@ -27,8 +27,8 @@ export function initQueryEditor() {
     document.getElementById('btn-copy-sql')?.addEventListener('click', copySql);
     document.getElementById('btn-use-sql')?.addEventListener('click', useConvertedSql);
 
-    // Initialize Monaco editor
-    initEditor();
+    // Initialize Monaco editor — must complete before file manager restores OPFS files
+    await initEditor();
 }
 
 async function initEditor() {

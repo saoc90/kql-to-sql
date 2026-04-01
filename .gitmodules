@@ -1,0 +1,3 @@
+[submodule "lib/DuckDB.ExtensionKit"]
+	path = lib/DuckDB.ExtensionKit
+	url = https://github.com/Giorgi/DuckDB.ExtensionKit.git
