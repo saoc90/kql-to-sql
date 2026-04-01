@@ -63,36 +63,43 @@ function onUploadCompleted(data) {
 
 async function onFileAdded(metadata) {
     refreshFileList();
-    // Auto-load into the database
-    await autoLoadFile(metadata.id);
+    // Load into both backends so the table is available regardless of query engine
+    await loadIntoBothBackends(metadata.id);
 }
 
 async function onFileRestored(metadata) {
     refreshFileList();
-    // Restored files only need loading into DuckDB (in-memory, lost on refresh).
-    // PGlite persists its own data via IndexedDB, so skip it here.
-    await autoLoadFile(metadata.id, 'duckdb');
+    // DuckDB is in-memory — always needs reload. PGlite persists via IndexedDB,
+    // so only attempt it if the table doesn't already exist there.
+    await loadIntoBothBackends(metadata.id, { pgliteOptional: true });
 }
 
-async function autoLoadFile(fileId, backendOverride) {
-    try {
-        const backend = backendOverride || selectedBackend;
-        let result;
-        if (backend === 'pglite') {
-            result = await window.fileManager.loadFileIntoDatabasePglite(fileId);
-        } else {
-            result = await window.fileManager.loadFileIntoDatabase(fileId);
-        }
+async function loadIntoBothBackends(fileId, opts) {
+    const pgliteOptional = opts?.pgliteOptional || false;
 
+    // Always load into DuckDB
+    try {
+        const result = await window.fileManager.loadFileIntoDatabase(fileId);
         if (result?.success) {
             showFileStatus(result.message || 'File loaded successfully', 'success');
-            if (window.refreshEditorSchema) await window.refreshEditorSchema();
         } else {
-            showFileStatus(`Failed to load file: ${result?.error || 'Unknown error'}`, 'danger');
+            showFileStatus(`DuckDB: ${result?.error || 'Unknown error'}`, 'danger');
         }
     } catch (err) {
-        showFileStatus(`Failed to load file: ${err.message}`, 'danger');
+        showFileStatus(`DuckDB: ${err.message}`, 'danger');
     }
+
+    // Also load into PGlite (best-effort — PGlite's CSV parser is stricter)
+    try {
+        const result = await window.fileManager.loadFileIntoDatabasePglite(fileId);
+        if (!result?.success && !pgliteOptional) {
+            console.warn('PGlite load failed (non-fatal):', result?.error);
+        }
+    } catch (err) {
+        if (!pgliteOptional) console.warn('PGlite load failed (non-fatal):', err.message);
+    }
+
+    if (window.refreshEditorSchema) await window.refreshEditorSchema();
     refreshFileList();
 }
 
@@ -166,7 +173,7 @@ function refreshFileList() {
 }
 
 async function loadFile(fileId) {
-    await autoLoadFile(fileId);
+    await loadIntoBothBackends(fileId);
 }
 
 async function previewFile(fileId) {
