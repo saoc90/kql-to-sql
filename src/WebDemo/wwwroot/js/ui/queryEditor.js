@@ -3,21 +3,49 @@ import { showAlert, hideAlert, hideAllAlerts } from './notifications.js';
 import { renderResults, clearResults } from './resultTable.js';
 
 const EDITOR_ID = 'monaco-editor-container';
+const STORAGE_KEY = 'queryEditorState';
 let selectedMode = 'kql';
 let selectedBackend = 'duckdb';
 let isExecuting = false;
 let convertedSql = '';
+let saveTimer = null;
+
+function loadState() {
+    try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+    } catch { return {}; }
+}
+
+function saveState() {
+    const editor = window.nativeMonacoEditor?.getEditor(EDITOR_ID);
+    const query = editor ? editor.getValue() : '';
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ query, mode: selectedMode, backend: selectedBackend }));
+}
+
+function debouncedSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveState, 500);
+}
 
 export async function initQueryEditor() {
-    // Mode toggle
-    document.querySelectorAll('input[name="queryMode"]').forEach(radio => {
-        radio.addEventListener('change', (e) => onModeChanged(e.target.value));
-    });
+    // Restore persisted state
+    const saved = loadState();
+    if (saved.mode) selectedMode = saved.mode;
+    if (saved.backend) selectedBackend = saved.backend;
 
-    // Backend selector
+    // Mode toggle — restore and listen
+    document.querySelectorAll('input[name="queryMode"]').forEach(radio => {
+        if (radio.value === selectedMode) radio.checked = true;
+        radio.addEventListener('change', (e) => { onModeChanged(e.target.value); debouncedSave(); });
+    });
+    document.getElementById('btn-execute-mode').textContent = selectedMode.toUpperCase();
+    document.getElementById('btn-convert')?.classList.toggle('d-none', selectedMode !== 'kql');
+
+    // Backend selector — restore and listen
     const backendSelect = document.getElementById('backend-select');
     if (backendSelect) {
-        backendSelect.addEventListener('change', (e) => { selectedBackend = e.target.value; });
+        backendSelect.value = selectedBackend;
+        backendSelect.addEventListener('change', (e) => { selectedBackend = e.target.value; debouncedSave(); });
     }
 
     // Buttons
@@ -44,6 +72,18 @@ async function initEditor() {
                 monaco.KeyMod.Shift | monaco.KeyCode.Enter,
                 () => { run(true); }
             );
+
+            // Restore persisted query text
+            const saved = loadState();
+            if (saved.query) {
+                editor.setValue(saved.query);
+                const lang = selectedMode === 'kql' ? 'kusto' : 'sql';
+                window.nativeMonacoEditor.setLanguage(EDITOR_ID, lang);
+            }
+
+            // Save on every edit
+            editor.onDidChangeModelContent(() => debouncedSave());
+
             console.log('[QueryEditor] Shift+Enter shortcut registered');
         }
     } catch (err) {
