@@ -6,3 +6,6 @@
 #kql-sql-editor {
     height: 100%;
 }
+.executed-statement-highlight {
+    background-color: rgba(0, 120, 212, 0.1);
+}
