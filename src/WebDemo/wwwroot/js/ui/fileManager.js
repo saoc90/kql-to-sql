@@ -4,17 +4,19 @@ import { renderResults, clearResults } from './resultTable.js';
 
 let selectedBackend = 'duckdb';
 
-export function initFileManagerUI() {
+export async function initFileManagerUI() {
     // Backend selector
     const backendSelect = document.getElementById('file-backend-select');
     if (backendSelect) {
         backendSelect.addEventListener('change', (e) => { selectedBackend = e.target.value; });
     }
 
-    // Browse button triggers hidden file input
-    document.getElementById('btn-browse-files')?.addEventListener('click', () => {
-        document.getElementById('file-input')?.click();
-    });
+    // Browse button triggers hidden file input (fallback when File System Access API unavailable)
+    if (!('showOpenFilePicker' in window)) {
+        document.getElementById('btn-browse-files')?.addEventListener('click', () => {
+            document.getElementById('file-input')?.click();
+        });
+    }
 
     // Clear all
     document.getElementById('btn-clear-all')?.addEventListener('click', clearAllFiles);
@@ -22,17 +24,19 @@ export function initFileManagerUI() {
     // Listen for events from the core FileManager class
     const fm = window.fileManager;
     if (fm) {
-        // Replace Blazor notification with event-driven pattern
         fm.addEventListener('OnUploadStarted', (e) => onUploadStarted(e.detail));
         fm.addEventListener('OnUploadCompleted', (e) => onUploadCompleted(e.detail));
         fm.addEventListener('OnFileAdded', (e) => onFileAdded(e.detail));
+        fm.addEventListener('OnFileRestored', (e) => onFileRestored(e.detail));
         fm.addEventListener('OnFileValidationFailed', (e) => onValidationFailed(e.detail));
         fm.addEventListener('OnFileProcessingFailed', (e) => onProcessingFailed(e.detail));
     }
 
-    // Initialize the core file manager (no dotnetRef needed)
-    window.fileManager.initialize(null);
+    // Set up drag/drop and file input
     window.FileManagerInterop.setupFileHandling('file-input', 'file-drop-zone');
+
+    // Initialize: restores files from OPFS and fires OnFileRestored for each
+    await window.fileManager.initialize();
 
     // Initial render
     refreshFileList();
@@ -50,14 +54,43 @@ function onUploadCompleted(data) {
     if (el) el.classList.add('d-none');
 
     if (data?.success) {
-        showFileStatus(`Successfully processed ${data.count} file(s). Click 'Load' to add them to the database.`, 'success');
+        showFileStatus(`Successfully processed ${data.count} file(s).`, 'success');
     } else {
         showFileStatus(`Failed to process files: ${data?.error || 'Unknown error'}`, 'danger');
     }
     refreshFileList();
 }
 
-function onFileAdded(_metadata) {
+async function onFileAdded(metadata) {
+    refreshFileList();
+    // Auto-load into the database
+    await autoLoadFile(metadata.id);
+}
+
+async function onFileRestored(metadata) {
+    refreshFileList();
+    // Auto-load restored files into the database
+    await autoLoadFile(metadata.id);
+}
+
+async function autoLoadFile(fileId) {
+    try {
+        let result;
+        if (selectedBackend === 'pglite') {
+            result = await window.fileManager.loadFileIntoDatabasePglite(fileId);
+        } else {
+            result = await window.fileManager.loadFileIntoDatabase(fileId);
+        }
+
+        if (result?.success) {
+            showFileStatus(result.message || 'File loaded successfully', 'success');
+            if (window.refreshEditorSchema) await window.refreshEditorSchema();
+        } else {
+            showFileStatus(`Failed to load file: ${result?.error || 'Unknown error'}`, 'danger');
+        }
+    } catch (err) {
+        showFileStatus(`Failed to load file: ${err.message}`, 'danger');
+    }
     refreshFileList();
 }
 
@@ -131,25 +164,7 @@ function refreshFileList() {
 }
 
 async function loadFile(fileId) {
-    try {
-        let result;
-        if (selectedBackend === 'pglite') {
-            result = await window.fileManager.loadFileIntoDatabasePglite(fileId);
-        } else {
-            result = await window.fileManager.loadFileIntoDatabase(fileId);
-        }
-
-        if (result?.success) {
-            showFileStatus(result.message || 'File loaded successfully', 'success');
-            // Refresh Monaco editor schema
-            if (window.refreshEditorSchema) await window.refreshEditorSchema();
-        } else {
-            showFileStatus(`Failed to load file: ${result?.error || 'Unknown error'}`, 'danger');
-        }
-    } catch (err) {
-        showFileStatus(`Failed to load file: ${err.message}`, 'danger');
-    }
-    refreshFileList();
+    await autoLoadFile(fileId);
 }
 
 async function previewFile(fileId) {
@@ -177,7 +192,6 @@ async function previewFile(fileId) {
             info.classList.add('d-none');
         }
 
-        // Show the Bootstrap modal
         const modal = new bootstrap.Modal(document.getElementById('previewModal'));
         modal.show();
     } catch (err) {
@@ -217,7 +231,7 @@ async function clearAllFiles() {
             } catch { /* ignore */ }
         }
     }
-    window.fileManager.clearAllFiles();
+    await window.fileManager.clearAllFiles();
     showFileStatus('All files cleared', 'info');
     refreshFileList();
 }

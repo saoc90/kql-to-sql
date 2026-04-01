@@ -19,8 +19,8 @@ async function boot() {
     }
 
     // 3. Initialize UI modules
-    initQueryEditor();
-    initFileManagerUI();
+    await initQueryEditor();
+    await initFileManagerUI();
 
     // 4. Show the app, hide loading overlay
     document.getElementById('app').classList.remove('d-none');
