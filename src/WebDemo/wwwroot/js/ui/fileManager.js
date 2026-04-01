@@ -2,6 +2,8 @@
 import { showAlert, hideAlert } from './notifications.js';
 import { renderResults, clearResults } from './resultTable.js';
 
+function quoteIdentifier(name) { return '"' + name.replace(/"/g, '""') + '"'; }
+
 let selectedBackend = 'duckdb';
 
 export function initFileManagerUI() {
@@ -28,6 +30,7 @@ export function initFileManagerUI() {
         fm.addEventListener('OnFileAdded', (e) => onFileAdded(e.detail));
         fm.addEventListener('OnFileValidationFailed', (e) => onValidationFailed(e.detail));
         fm.addEventListener('OnFileProcessingFailed', (e) => onProcessingFailed(e.detail));
+        fm.addEventListener('OnFilesRefreshed', () => refreshFileList());
     }
 
     // Initialize the core file manager (no dotnetRef needed)
@@ -160,9 +163,9 @@ async function previewFile(fileId) {
     try {
         let resultJson;
         if (selectedBackend === 'pglite') {
-            resultJson = await window.PGliteInterop.queryJson(`SELECT * FROM ${file.tableName} LIMIT 100`);
+            resultJson = await window.PGliteInterop.queryJson(`SELECT * FROM ${quoteIdentifier(file.tableName)} LIMIT 100`);
         } else {
-            resultJson = await window.DuckDbInterop.queryJson(`SELECT * FROM ${file.tableName} LIMIT 100`);
+            resultJson = await window.DuckDbInterop.queryJson(`SELECT * FROM ${quoteIdentifier(file.tableName)} LIMIT 100`);
         }
 
         const data = JSON.parse(resultJson);
@@ -191,15 +194,14 @@ async function removeFile(fileId) {
 
     if (file?.isLoaded && file?.tableName) {
         try {
-            if (selectedBackend === 'pglite') {
-                await window.PGliteInterop.queryJson(`DROP TABLE IF EXISTS ${file.tableName}`);
-            } else {
-                await window.DuckDbInterop.queryJson(`DROP TABLE IF EXISTS ${file.tableName}`);
-            }
+            await window.PGliteInterop.queryJson(`DROP TABLE IF EXISTS ${quoteIdentifier(file.tableName)}`);
+        } catch { /* ignore */ }
+        try {
+            await window.DuckDbInterop.queryJson(`DROP TABLE IF EXISTS ${quoteIdentifier(file.tableName)}`);
         } catch { /* ignore */ }
     }
 
-    window.fileManager.removeFile(fileId);
+    await window.fileManager.removeFile(fileId);
     showFileStatus(`Removed ${file?.name || 'file'}`, 'info');
     refreshFileList();
 }
@@ -209,15 +211,14 @@ async function clearAllFiles() {
     for (const file of metadata) {
         if (file.isLoaded && file.tableName) {
             try {
-                if (selectedBackend === 'pglite') {
-                    await window.PGliteInterop.queryJson(`DROP TABLE IF EXISTS ${file.tableName}`);
-                } else {
-                    await window.DuckDbInterop.queryJson(`DROP TABLE IF EXISTS ${file.tableName}`);
-                }
+                await window.PGliteInterop.queryJson(`DROP TABLE IF EXISTS ${quoteIdentifier(file.tableName)}`);
+            } catch { /* ignore */ }
+            try {
+                await window.DuckDbInterop.queryJson(`DROP TABLE IF EXISTS ${quoteIdentifier(file.tableName)}`);
             } catch { /* ignore */ }
         }
     }
-    window.fileManager.clearAllFiles();
+    await window.fileManager.clearAllFiles();
     showFileStatus('All files cleared', 'info');
     refreshFileList();
 }
@@ -231,9 +232,13 @@ function getFileIcon(contentType) {
 }
 
 function getStatusBadge(file) {
-    if (file.isLoaded) return `<span class="badge badge-loaded">Loaded (${file.rowCount} rows)</span>`;
+    if (file.isLoaded) {
+        const persistIcon = file.isPersistent ? ' <span class="material-icons" style="font-size:12px;vertical-align:middle;" title="Persisted in OPFS">cloud_done</span>' : '';
+        return `<span class="badge badge-loaded">Loaded (${file.rowCount} rows)${persistIcon}</span>`;
+    }
     if (file.hasError) return '<span class="badge badge-error">Error</span>';
-    return '<span class="badge badge-pending">Uploaded</span>';
+    const persistNote = file.isPersistent ? ' (persisted)' : '';
+    return `<span class="badge badge-pending">Uploaded${persistNote}</span>`;
 }
 
 function getActionButtons(file) {
@@ -259,7 +264,7 @@ function formatFileSize(bytes) {
 function formatDate(dateStr) {
     if (!dateStr) return '';
     const d = new Date(dateStr);
-    return d.toISOString().slice(0, 16).replace('T', ' ');
+    return d.toLocaleString();
 }
 
 function escapeHtml(str) {

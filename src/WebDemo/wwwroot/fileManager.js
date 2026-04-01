@@ -1,5 +1,9 @@
 // Enhanced file manager that handles files entirely in JavaScript
-// Modified from DuckDbDemo version: uses EventTarget instead of Blazor callbacks
+// Uses OPFS for persistent file storage, with localStorage for metadata
+
+// SQL helpers
+function escapeSqlString(value) { return value.replace(/'/g, "''"); }
+function quoteIdentifier(name) { return '"' + name.replace(/"/g, '""') + '"'; }
 
 class FileManager extends EventTarget {
     constructor() {
@@ -8,15 +12,183 @@ class FileManager extends EventTarget {
         this.fileHandles = new Map(); // Store File System Access API handles
         this.storageKey = 'fileManagerMetadata';
         this.fileHandlesKey = 'fileManagerHandles';
+        this.opfsDirectoryName = 'kql-to-sql-files';
         this.maxFileSize = 500 * 1024 * 1024; // 500MB
         this.supportedTypes = ['.csv', '.gz', '.json', '.parquet', '.txt'];
         this.supportsFileSystemAccess = 'showOpenFilePicker' in window;
+        this._opfsRoot = null;
+        this._initialized = false; // BUG-021: guard against double initialization
+    }
+
+    // Get the OPFS directory for file storage
+    async _getOpfsDir() {
+        if (this._opfsRoot) return this._opfsRoot;
+        try {
+            if (!navigator.storage || !navigator.storage.getDirectory) return null;
+            const root = await navigator.storage.getDirectory();
+            this._opfsRoot = await root.getDirectoryHandle(this.opfsDirectoryName, { create: true });
+            return this._opfsRoot;
+        } catch (err) {
+            console.warn('[FileManager] OPFS not available:', err.message);
+            return null;
+        }
+    }
+
+    // Save file bytes to OPFS
+    async saveFileToOpfs(fileId, bytes) {
+        const dir = await this._getOpfsDir();
+        if (!dir) return false;
+        try {
+            const fileHandle = await dir.getFileHandle(fileId, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(bytes);
+            await writable.close();
+            return true;
+        } catch (err) {
+            console.warn('[FileManager] Failed to save file to OPFS:', err.message);
+            return false;
+        }
+    }
+
+    // Load file bytes from OPFS
+    async loadFileFromOpfs(fileId) {
+        const dir = await this._getOpfsDir();
+        if (!dir) return null;
+        try {
+            const fileHandle = await dir.getFileHandle(fileId);
+            const file = await fileHandle.getFile();
+            return file;
+        } catch {
+            return null;
+        }
+    }
+
+    // Remove file from OPFS
+    async removeFileFromOpfs(fileId) {
+        const dir = await this._getOpfsDir();
+        if (!dir) return;
+        try {
+            await dir.removeEntry(fileId);
+        } catch {
+            // File may not exist
+        }
+    }
+
+    // Clear all files from OPFS
+    async clearOpfsFiles() {
+        const dir = await this._getOpfsDir();
+        if (!dir) return;
+        try {
+            for await (const [name] of dir.entries()) {
+                await dir.removeEntry(name);
+            }
+        } catch (err) {
+            console.warn('[FileManager] Failed to clear OPFS files:', err.message);
+        }
     }
 
     // Initialize the file manager (dotnetRef kept for API compat but unused)
+    // BUG-021: guard against double initialization
     initialize(_dotnetRef) {
+        if (this._initialized) return;
+        this._initialized = true;
         this.loadMetadataFromStorage();
         this.loadFileHandlesFromStorage();
+        this._syncPersistedFilesOnReload();
+    }
+
+    // On reload, sync metadata with what DuckDB actually has persisted
+    async _syncPersistedFilesOnReload() {
+        // Wait for DuckDB to be ready
+        if (!window.db) {
+            await new Promise(resolve => {
+                // BUG-005: add 30-second timeout so we don't hang forever
+                const timeoutId = setTimeout(() => {
+                    window.removeEventListener('duckdb-ready', handler);
+                    resolve();
+                }, 30000);
+
+                const handler = () => {
+                    clearTimeout(timeoutId);
+                    window.removeEventListener('duckdb-ready', handler);
+                    resolve();
+                };
+                window.addEventListener('duckdb-ready', handler);
+                // Also resolve if db is already set by the time we check
+                if (window.db) {
+                    clearTimeout(timeoutId);
+                    window.removeEventListener('duckdb-ready', handler);
+                    resolve();
+                }
+            });
+        }
+
+        const metadata = this.getMetadataFromStorage();
+        if (metadata.length === 0) return;
+
+        // BUG-005: null-check window.DuckDbInterop before calling it
+        if (!window.DuckDbInterop) {
+            console.warn('[FileManager] DuckDbInterop not available during sync, skipping.');
+            return;
+        }
+
+        // Get actual tables from DuckDB
+        let existingTables = [];
+        try {
+            const tablesJson = await window.DuckDbInterop.getAvailableTables();
+            existingTables = JSON.parse(tablesJson);
+        } catch {
+            return;
+        }
+
+        // BUG-020: wrap the entire loop in try/finally to always save metadata at the end
+        let changed = false;
+        try {
+            for (const m of metadata) {
+                if (m.tableName && existingTables.includes(m.tableName)) {
+                    // Table still exists in the persistent DB
+                    if (!m.isLoaded) {
+                        m.isLoaded = true;
+                        m.hasError = false;
+                        changed = true;
+                    }
+                    // Refresh row count
+                    try {
+                        const countJson = await window.DuckDbInterop.queryJson(
+                            `SELECT COUNT(*) as cnt FROM ${quoteIdentifier(m.tableName)}`
+                        );
+                        const countData = JSON.parse(countJson);
+                        if (countData.length > 0) {
+                            const newCount = Number(countData[0].cnt);
+                            if (m.rowCount !== newCount) {
+                                m.rowCount = newCount;
+                                changed = true;
+                            }
+                        }
+                    } catch { /* ignore */ }
+                } else if (m.isLoaded && m.tableName) {
+                    // Table was marked as loaded but doesn't exist anymore
+                    // Check if we have file data in OPFS; if so, mark for lazy reload
+                    const opfsFile = await this.loadFileFromOpfs(m.id);
+                    // BUG-008: don't pre-load bytes into memory; just mark isLoaded=false
+                    // loadFileIntoDatabase() will lazily load from OPFS when needed
+                    m.isLoaded = false;
+                    m.hasError = false;
+                    changed = true;
+                    if (!opfsFile) {
+                        console.warn(`[FileManager] OPFS file missing for ${m.name}, will need re-upload.`);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('[FileManager] Error during sync loop:', err);
+        } finally {
+            // BUG-020: always save metadata at the end, even if an error occurred mid-loop
+            if (changed) {
+                localStorage.setItem(this.storageKey, JSON.stringify(metadata));
+                this.notify('OnFilesRefreshed', {});
+            }
+        }
     }
 
     // Setup file input and drag/drop zones
@@ -120,6 +292,10 @@ class FileManager extends EventTarget {
             this.files.set(fileId, file);
             this.fileHandles.set(fileId, fileHandle);
 
+            // Also save to OPFS for persistence
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            await this.saveFileToOpfs(fileId, bytes);
+
             const metadata = {
                 id: fileId,
                 name: file.name,
@@ -150,20 +326,29 @@ class FileManager extends EventTarget {
     }
 
     // Process multiple files
+    // BUG-018: track successCount and report success: false if no files were actually processed
     async processFiles(files) {
         if (!files || files.length === 0) return;
 
+        let successCount = 0;
         try {
             this.notify('OnUploadStarted', { count: files.length });
 
             for (const file of files) {
+                const before = this.getMetadataFromStorage().length;
                 await this.processFile(file);
+                const after = this.getMetadataFromStorage().length;
+                if (after > before) successCount++;
             }
 
-            this.notify('OnUploadCompleted', { count: files.length, success: true });
+            this.notify('OnUploadCompleted', {
+                count: files.length,
+                success: successCount > 0,
+                successCount
+            });
         } catch (error) {
             console.error('Error processing files:', error);
-            this.notify('OnUploadCompleted', { count: files.length, success: false, error: error.message });
+            this.notify('OnUploadCompleted', { count: files.length, success: false, successCount, error: error.message });
         }
     }
 
@@ -179,6 +364,10 @@ class FileManager extends EventTarget {
             const fileId = this.generateFileId(file.name);
             this.files.set(fileId, file);
 
+            // Save file bytes to OPFS for persistence across reloads
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            const savedToOpfs = await this.saveFileToOpfs(fileId, bytes);
+
             const metadata = {
                 id: fileId,
                 name: file.name,
@@ -188,7 +377,8 @@ class FileManager extends EventTarget {
                 isLoaded: false,
                 hasError: false,
                 tableName: null,
-                rowCount: 0
+                rowCount: 0,
+                isPersistent: savedToOpfs
             };
 
             this.saveMetadataToStorage(metadata);
@@ -200,17 +390,30 @@ class FileManager extends EventTarget {
     }
 
     // Load file into DuckDB database
+    // BUG-017: avoid double arrayBuffer() reads when restoring from OPFS
     async loadFileIntoDatabase(fileId) {
         try {
             let file = this.files.get(fileId);
             console.log(`Loading file with ID: ${fileId}`);
 
             if (!file) {
-                console.log(`File not found in memory, checking file handles...`);
-                file = this.fileHandles[fileId];
+                console.log(`File not found in memory, checking OPFS...`);
+                const opfsFile = await this.loadFileFromOpfs(fileId);
+                if (opfsFile) {
+                    // Retrieve original name from metadata
+                    const metadata = this.getMetadataFromStorage().find(m => m.id === fileId);
+                    const fileName = metadata?.name || opfsFile.name;
+                    const fileType = metadata?.type || opfsFile.type;
+                    // BUG-017: read the buffer once and reuse it for both File construction and DuckDB
+                    const buffer = await opfsFile.arrayBuffer();
+                    file = new File([buffer], fileName, { type: fileType });
+                    this.files.set(fileId, file);
+                    console.log(`Restored file from OPFS: ${fileName}`);
+                }
             }
 
             if (!file) {
+                console.log(`File not found in OPFS, checking file handles...`);
                 const fileHandle = this.fileHandles.get(fileId);
                 if (fileHandle) {
                     console.log(`Found file handle for ID: ${fileId}`);
@@ -229,12 +432,31 @@ class FileManager extends EventTarget {
                         throw new Error(`Cannot access file: ${permError.message}. Please re-select the file.`);
                     }
                 } else {
-                    throw new Error('File not found in memory. Please re-upload the file.');
+                    throw new Error('File not found. Please re-upload the file.');
                 }
             }
 
             const arrayBuffer = await file.arrayBuffer();
-            const bytes = new Uint8Array(arrayBuffer);
+            let bytes = new Uint8Array(arrayBuffer);
+            let registeredName = file.name;
+
+            // Decompress .gz files before registering with DuckDB
+            if (file.name.toLowerCase().endsWith('.gz')) {
+                try {
+                    if (typeof DecompressionStream !== 'undefined') {
+                        const stream = new ReadableStream({
+                            start(controller) { controller.enqueue(bytes); controller.close(); }
+                        });
+                        const decompressed = stream.pipeThrough(new DecompressionStream('gzip'));
+                        const resp = new Response(decompressed);
+                        bytes = new Uint8Array(await resp.arrayBuffer());
+                        registeredName = file.name.replace(/\.gz$/i, '');
+                        console.log(`Decompressed ${file.name} -> ${registeredName}`);
+                    }
+                } catch (err) {
+                    throw new Error(`Gzip decompression failed for ${file.name}: ${err.message}. Your browser may not support DecompressionStream.`);
+                }
+            }
 
             if (!window.db) {
                 if (!window.DuckDbInterop) {
@@ -247,10 +469,12 @@ class FileManager extends EventTarget {
                 throw new Error('DuckDB failed to initialize');
             }
 
-            await window.db.registerFileBuffer(file.name, bytes);
-            console.log(`Registered file: ${file.name}`);
+            await window.db.registerFileBuffer(registeredName, bytes);
+            console.log(`Registered file: ${registeredName}`);
 
-            let tableName = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_');
+            // Derive table name from the registered name (already stripped of .gz)
+            let baseName = registeredName.replace(/\.[^/.]+$/, '');
+            let tableName = baseName.replace(/[^a-zA-Z0-9_]/g, '_');
             if (tableName.match(/^\d/)) {
                 tableName = 'table_' + tableName;
             }
@@ -258,13 +482,13 @@ class FileManager extends EventTarget {
             const connection = await window.db.connect();
 
             try {
-                await connection.query(`DROP TABLE IF EXISTS ${tableName}`);
+                await connection.query(`DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`);
 
-                let sql = this.generateCreateTableSQL(file.name, file.type, tableName);
+                let sql = this.generateCreateTableSQL(registeredName, file.type, tableName);
                 console.log('Executing SQL:', sql);
                 await connection.query(sql);
 
-                const countResult = await connection.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+                const countResult = await connection.query(`SELECT COUNT(*) as count FROM ${quoteIdentifier(tableName)}`);
                 const countData = countResult.toArray();
                 const rowCount = Number(countData[0].count);
 
@@ -312,6 +536,18 @@ class FileManager extends EventTarget {
             let file = this.files.get(fileId);
 
             if (!file) {
+                // Try to restore from OPFS
+                const opfsFile = await this.loadFileFromOpfs(fileId);
+                if (opfsFile) {
+                    const metadata = this.getMetadataFromStorage().find(m => m.id === fileId);
+                    const fileName = metadata?.name || opfsFile.name;
+                    const fileType = metadata?.type || opfsFile.type;
+                    file = new File([await opfsFile.arrayBuffer()], fileName, { type: fileType });
+                    this.files.set(fileId, file);
+                }
+            }
+
+            if (!file) {
                 // Try to re-acquire from persistent file handle (same logic as DuckDB loader)
                 const fileHandle = this.fileHandles.get(fileId);
                 if (fileHandle) {
@@ -326,7 +562,7 @@ class FileManager extends EventTarget {
                         throw new Error('Permission denied to read file');
                     }
                 } else {
-                    throw new Error('File not found in memory. Please re-upload the file.');
+                    throw new Error('File not found. Please re-upload the file.');
                 }
             }
 
@@ -366,12 +602,12 @@ class FileManager extends EventTarget {
             const headers = headerLine.split(',').map(h => h.replace(/"/g,'').trim()).filter(Boolean);
             if (!headers.length) throw new Error('No columns detected');
             const sanitized = headers.map(h => h.replace(/[^A-Za-z0-9_]/g,'_').replace(/^([0-9])/, '_$1').toLowerCase());
-            const colsDef = sanitized.map(c => `"${c}" text`).join(', ');
-            await window.pg.exec(`DROP TABLE IF EXISTS ${tableName}; CREATE TABLE ${tableName} (${colsDef});`);
+            const colsDef = sanitized.map(c => `${quoteIdentifier(c)} text`).join(', ');
+            await window.pg.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}; CREATE TABLE ${quoteIdentifier(tableName)} (${colsDef});`);
 
             const blob = new Blob([bytes], { type: 'text/csv' });
-            await window.pg.query(`COPY ${tableName} FROM '/dev/blob' WITH (FORMAT csv, HEADER true);`, [], { blob });
-            const count = await window.pg.query(`SELECT COUNT(*) AS cnt FROM ${tableName};`);
+            await window.pg.query(`COPY ${quoteIdentifier(tableName)} FROM '/dev/blob' WITH (FORMAT csv, HEADER true);`, [], { blob });
+            const count = await window.pg.query(`SELECT COUNT(*) AS cnt FROM ${quoteIdentifier(tableName)};`);
             const rowCount = count.rows[0].cnt;
 
             const metadata = this.getMetadataFromStorage().find(m => m.id === fileId);
@@ -397,26 +633,34 @@ class FileManager extends EventTarget {
     }
 
     // Generate CREATE TABLE SQL based on file type
+    // BUG-011: support compound extensions; BUG adds .json.gz support
     generateCreateTableSQL(fileName, fileType, tableName) {
         const lowerFileName = fileName.toLowerCase();
+        const quotedTable = quoteIdentifier(tableName);
+        const escapedFile = escapeSqlString(fileName);
 
-        if (fileType === 'text/csv' || lowerFileName.endsWith('.csv') || lowerFileName.endsWith('.csv.gz')) {
-            return `CREATE TABLE ${tableName} AS SELECT * FROM read_csv('${fileName}', header=true, ignore_errors=true, null_padding=true)`;
+        if (lowerFileName.endsWith('.csv.gz') || fileType === 'text/csv' || lowerFileName.endsWith('.csv')) {
+            return `CREATE TABLE ${quotedTable} AS SELECT * FROM read_csv('${escapedFile}', header=true, ignore_errors=true, null_padding=true)`;
+        } else if (lowerFileName.endsWith('.json.gz')) {
+            // BUG-011: decompress then read as JSON
+            return `CREATE TABLE ${quotedTable} AS SELECT * FROM read_json('${escapedFile}')`;
         } else if (fileType === 'application/json' || lowerFileName.endsWith('.json')) {
-            return `CREATE TABLE ${tableName} AS SELECT * FROM read_json('${fileName}')`;
+            return `CREATE TABLE ${quotedTable} AS SELECT * FROM read_json('${escapedFile}')`;
         } else if (lowerFileName.endsWith('.parquet')) {
-            return `CREATE TABLE ${tableName} AS SELECT * FROM read_parquet('${fileName}')`;
+            return `CREATE TABLE ${quotedTable} AS SELECT * FROM read_parquet('${escapedFile}')`;
         } else if (fileType === 'text/plain' || lowerFileName.endsWith('.txt')) {
-            return `CREATE TABLE ${tableName} AS SELECT * FROM read_csv('${fileName}', header=false, ignore_errors=true, columns={'line': 'VARCHAR'})`;
+            return `CREATE TABLE ${quotedTable} AS SELECT * FROM read_csv('${escapedFile}', header=false, ignore_errors=true, columns={'line': 'VARCHAR'})`;
         } else {
             throw new Error('Unsupported file type: ' + fileType);
         }
     }
 
-    // Remove file from memory and storage
-    removeFile(fileId) {
+    // Remove file from memory, OPFS, and storage
+    // BUG-002: make async and await OPFS operations
+    async removeFile(fileId) {
         this.files.delete(fileId);
         this.fileHandles.delete(fileId);
+        await this.removeFileFromOpfs(fileId);
         const metadata = this.getMetadataFromStorage();
         const updatedMetadata = metadata.filter(m => m.id !== fileId);
         localStorage.setItem(this.storageKey, JSON.stringify(updatedMetadata));
@@ -424,9 +668,11 @@ class FileManager extends EventTarget {
     }
 
     // Clear all files
-    clearAllFiles() {
+    // BUG-002: make async and await OPFS operations
+    async clearAllFiles() {
         this.files.clear();
         this.fileHandles.clear();
+        await this.clearOpfsFiles();
         localStorage.removeItem(this.storageKey);
         localStorage.removeItem(this.fileHandlesKey);
     }
@@ -437,30 +683,47 @@ class FileManager extends EventTarget {
     }
 
     // Validate file size and type
+    // BUG-011: handle compound extensions like .csv.gz properly
     validateFile(file) {
         if (file.size > this.maxFileSize) {
             return { isValid: false, error: `File too large: ${file.name} (max 500MB)` };
         }
-        const extension = '.' + file.name.split('.').pop().toLowerCase();
-        if (!this.supportedTypes.includes(extension)) {
-            return { isValid: false, error: `Unsupported file type: ${file.name} (${extension})` };
+        const lowerName = file.name.toLowerCase();
+        // Check compound extensions first
+        const compoundExtensions = ['.csv.gz', '.json.gz'];
+        const hasCompoundExt = compoundExtensions.some(ext => lowerName.endsWith(ext));
+        if (!hasCompoundExt) {
+            const extension = '.' + lowerName.split('.').pop();
+            if (!this.supportedTypes.includes(extension)) {
+                return { isValid: false, error: `Unsupported file type: ${file.name} (${extension})` };
+            }
         }
         return { isValid: true };
     }
 
     // Generate unique file ID
+    // BUG-019: use crypto.randomUUID() if available
     generateFileId(fileName) {
-        return `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${fileName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const uniquePart = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        return `file_${uniquePart}_${fileName.replace(/[^a-zA-Z0-9]/g, '_')}`;
     }
 
     // Get content type from file extension
+    // BUG-024: add .gz -> application/gzip and handle compound extensions
     getContentTypeFromExtension(fileName) {
-        const extension = fileName.toLowerCase().split('.').pop();
+        const lowerName = fileName.toLowerCase();
+        // Handle compound extensions first
+        if (lowerName.endsWith('.csv.gz')) return 'text/csv';
+        if (lowerName.endsWith('.json.gz')) return 'application/json';
+        const extension = lowerName.split('.').pop();
         const typeMap = {
             'csv': 'text/csv',
             'json': 'application/json',
             'parquet': 'application/octet-stream',
-            'txt': 'text/plain'
+            'txt': 'text/plain',
+            'gz': 'application/gzip'
         };
         return typeMap[extension] || 'application/octet-stream';
     }
