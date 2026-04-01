@@ -6,8 +6,8 @@ let initPromise = null;              // BUG-004: guard against concurrent init()
 // Make db available globally for file manager
 window.db = null;
 
-// Track whether OPFS persistence is active
-window.duckdbUsesOpfs = false;
+// Track whether OPFS persistence is active (set to true/false only after init completes)
+// Initially undefined so app.js can distinguish "not yet initialized" from "initialized as in-memory"
 
 // Helper function to safely convert BigInt values to numbers for JSON serialization
 function convertBigIntToNumber(obj) {

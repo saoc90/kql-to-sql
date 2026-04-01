@@ -88,13 +88,15 @@ class FileManager extends EventTarget {
     }
 
     // Initialize the file manager (dotnetRef kept for API compat but unused)
-    // BUG-021: guard against double initialization
     initialize(_dotnetRef) {
         if (this._initialized) return;
         this._initialized = true;
         this.loadMetadataFromStorage();
         this.loadFileHandlesFromStorage();
-        this._syncPersistedFilesOnReload();
+        // Fire-and-forget but catch errors to avoid unhandled rejection
+        this._syncPersistedFilesOnReload().catch(err => {
+            console.error('[FileManager] Sync on reload failed:', err);
+        });
     }
 
     // On reload, sync metadata with what DuckDB actually has persisted
@@ -326,7 +328,6 @@ class FileManager extends EventTarget {
     }
 
     // Process multiple files
-    // BUG-018: track successCount and report success: false if no files were actually processed
     async processFiles(files) {
         if (!files || files.length === 0) return;
 
@@ -335,10 +336,8 @@ class FileManager extends EventTarget {
             this.notify('OnUploadStarted', { count: files.length });
 
             for (const file of files) {
-                const before = this.getMetadataFromStorage().length;
-                await this.processFile(file);
-                const after = this.getMetadataFromStorage().length;
-                if (after > before) successCount++;
+                const ok = await this.processFile(file);
+                if (ok) successCount++;
             }
 
             this.notify('OnUploadCompleted', {
@@ -352,13 +351,13 @@ class FileManager extends EventTarget {
         }
     }
 
-    // Process a single file
+    // Process a single file. Returns true on success.
     async processFile(file) {
         try {
             const validation = this.validateFile(file);
             if (!validation.isValid) {
                 this.notify('OnFileValidationFailed', { fileName: file.name, error: validation.error });
-                return;
+                return false;
             }
 
             const fileId = this.generateFileId(file.name);
@@ -383,9 +382,11 @@ class FileManager extends EventTarget {
 
             this.saveMetadataToStorage(metadata);
             this.notify('OnFileAdded', metadata);
+            return true;
         } catch (error) {
             console.error('Error processing file:', file.name, error);
             this.notify('OnFileProcessingFailed', { fileName: file.name, error: error.message });
+            return false;
         }
     }
 
@@ -535,6 +536,8 @@ class FileManager extends EventTarget {
         try {
             let file = this.files.get(fileId);
 
+            let cachedBuffer = null; // Avoid double arrayBuffer() reads for OPFS files
+
             if (!file) {
                 // Try to restore from OPFS
                 const opfsFile = await this.loadFileFromOpfs(fileId);
@@ -542,7 +545,8 @@ class FileManager extends EventTarget {
                     const metadata = this.getMetadataFromStorage().find(m => m.id === fileId);
                     const fileName = metadata?.name || opfsFile.name;
                     const fileType = metadata?.type || opfsFile.type;
-                    file = new File([await opfsFile.arrayBuffer()], fileName, { type: fileType });
+                    cachedBuffer = await opfsFile.arrayBuffer();
+                    file = new File([cachedBuffer], fileName, { type: fileType });
                     this.files.set(fileId, file);
                 }
             }
@@ -575,7 +579,7 @@ class FileManager extends EventTarget {
             }
 
             const lower = file.name.toLowerCase();
-            const arrayBuffer = await file.arrayBuffer();
+            const arrayBuffer = cachedBuffer || await file.arrayBuffer();
             let bytes = new Uint8Array(arrayBuffer);
             if (lower.endsWith('.gz')) {
                 if (typeof DecompressionStream !== 'undefined') {
@@ -589,11 +593,16 @@ class FileManager extends EventTarget {
                 }
             }
             const text = new TextDecoder().decode(bytes);
-            let tableName = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_');
+            // Strip compound extensions (.csv.gz, .json.gz) then single extension
+            let pgliteBaseName = file.name.replace(/\.(csv|json)\.gz$/i, '').replace(/\.[^/.]+$/, '');
+            let tableName = pgliteBaseName.replace(/[^a-zA-Z0-9_]/g, '_');
             if (/^\d/.test(tableName)) tableName = 'table_' + tableName;
 
             if (lower.endsWith('.parquet')) {
                 throw new Error('Parquet support not implemented for PGlite backend');
+            }
+            if (lower.endsWith('.json') || lower.replace(/\.gz$/, '').endsWith('.json')) {
+                throw new Error('JSON support not implemented for PGlite backend. Use the DuckDB backend for JSON files.');
             }
 
             const firstNewline = text.indexOf('\n');
