@@ -1,6 +1,7 @@
 ﻿import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29/+esm"
 
 let db;                              // singleton per tab
+let initPromise = null;              // guard against concurrent init
 
 // Make db available globally for file manager
 window.db = null;
@@ -336,42 +337,49 @@ export async function getAvailableTables() {
 }
 
 async function init() {
+    // Guard against concurrent calls — all callers share the same promise
+    if (initPromise) return initPromise;
+    initPromise = doInit();
+    return initPromise;
+}
+
+async function doInit() {
     console.log('🚀 Initializing DuckDB...');
-    
+
     const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
     const workerUrl = URL.createObjectURL(
         new Blob([`importScripts("${bundle.mainWorker}")`], { type: "text/javascript" }));
     const worker = new Worker(workerUrl);
 
-    db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
-    
-    await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-    await db.open({ path: ":memory:" });
-    
+    const instance = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+
+    await instance.instantiate(bundle.mainModule, bundle.pthreadWorker);
+    await instance.open({ path: ":memory:" });
+
+    // Only expose after fully initialized
+    db = instance;
+    window.db = instance;
+
     console.log('📂 Loading StormEvents sample data...');
     const res = await fetch('./StormEvents.csv.gz');
-    
+
     if (!res.ok) {
         console.warn('⚠️ StormEvents.csv.gz not found, skipping sample data load');
     } else {
         try {
-            // Get the compressed data as a stream
             const compressedArrayBuffer = await res.arrayBuffer();
             console.log(`📦 Downloaded ${compressedArrayBuffer.byteLength} bytes of compressed data`);
-            
-            // Create a ReadableStream for decompression
+
             const compressedStream = new ReadableStream({
                 start(controller) {
                     controller.enqueue(new Uint8Array(compressedArrayBuffer));
                     controller.close();
                 }
             });
-            
-            // Decompress the data
+
             const decompressedData = await decompressGzip(compressedStream);
             console.log(`📊 Decompressed to ${decompressedData.byteLength} bytes`);
-            
-            // Register the decompressed CSV data with DuckDB
+
             await db.registerFileBuffer('StormEvents.csv', decompressedData);
             const conn = await db.connect();
             await conn.query("CREATE OR REPLACE TABLE StormEvents AS SELECT * FROM read_csv_auto('StormEvents.csv'); ");
@@ -382,11 +390,8 @@ async function init() {
             console.warn('⚠️ Continuing without sample data...');
         }
     }
-    
+
     URL.revokeObjectURL(workerUrl);
-    
-    // Make db available globally for file manager
-    window.db = db;
     console.log('✅ DuckDB initialization complete');
 }
 
