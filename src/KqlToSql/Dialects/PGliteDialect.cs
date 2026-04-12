@@ -68,6 +68,96 @@ public class PGliteDialect : ISqlDialect
             "endofyear" => $"DATE_TRUNC('year', {args[0]}) + INTERVAL '1 year' - INTERVAL '1 microsecond'",
             "min_of" => $"LEAST({string.Join(", ", args)})",
             "max_of" => $"GREATEST({string.Join(", ", args)})",
+
+            // Window functions
+            "row_number" => "ROW_NUMBER() OVER ()",
+            "prev" => $"LAG({args[0]}) OVER ()",
+            "next" => $"LEAD({args[0]}) OVER ()",
+
+            // Date/time functions
+            "dayofweek" => $"EXTRACT(DOW FROM {args[0]})",
+            "dayofmonth" => $"EXTRACT(DAY FROM {args[0]})",
+            "dayofyear" => $"EXTRACT(DOY FROM {args[0]})",
+            "getmonth" => $"EXTRACT(MONTH FROM {args[0]})",
+            "getyear" => $"EXTRACT(YEAR FROM {args[0]})",
+            "monthofyear" => $"EXTRACT(MONTH FROM {args[0]})",
+            "weekofyear" or "week_of_year" => $"EXTRACT(WEEK FROM {args[0]})",
+            "hourofday" => $"EXTRACT(HOUR FROM {args[0]})",
+            "minuteofhour" => $"EXTRACT(MINUTE FROM {args[0]})",
+            "secondofminute" => $"EXTRACT(SECOND FROM {args[0]})",
+            "make_datetime" when args.Length == 6 =>
+                $"MAKE_TIMESTAMP({args[0]}, {args[1]}, {args[2]}, {args[3]}, {args[4]}, {args[5]})",
+            "make_datetime" when args.Length == 1 => $"CAST({args[0]} AS TIMESTAMP)",
+            "make_timespan" when args.Length == 3 =>
+                $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
+            "unixtime_seconds_todatetime" => $"TO_TIMESTAMP({args[0]})",
+            "unixtime_milliseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000)",
+            "unixtime_microseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000000)",
+            "unixtime_nanoseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000000000)",
+            "datetime_part" => $"EXTRACT({args[0].Trim('\'')} FROM {args[1]})",
+            "format_timespan" => $"CAST({args[0]} AS TEXT)",
+
+            // String functions
+            "parse_url" => $"jsonb_build_object('Scheme', split_part({args[0]}, '://', 1), 'Host', split_part(split_part({args[0]}, '://', 2), '/', 1))",
+            "base64_encode_tostring" or "base64_encode_fromarray" => $"ENCODE(CAST({args[0]} AS BYTEA), 'base64')",
+            "base64_decode_tostring" => $"CONVERT_FROM(DECODE({args[0]}, 'base64'), 'UTF8')",
+            "translate" => $"TRANSLATE({args[0]}, {args[1]}, {args[2]})",
+            "strcmp" => $"CASE WHEN {args[0]} < {args[1]} THEN -1 WHEN {args[0]} = {args[1]} THEN 0 ELSE 1 END",
+            "string_size" => $"OCTET_LENGTH({args[0]})",
+            "repeat" => $"REPEAT({args[0]}, {args[1]})",
+            "unicode" => $"ASCII({args[0]})",
+            "make_string" => $"CHR({args[0]})",
+            "parse_path" => $"SUBSTRING({args[0]} FROM '[^/\\\\]+$')",
+            "to_utf8" => $"CAST({args[0]} AS BYTEA)",
+
+            // Hash functions
+            "hash" => $"HASHTEXTEXTENDED({args[0]}, 0)",
+            "hash_md5" => $"MD5({args[0]})",
+            "hash_sha256" => $"ENCODE(SHA256(CAST({args[0]} AS BYTEA)), 'hex')",
+            "hash_sha1" => $"ENCODE(DIGEST(CAST({args[0]} AS BYTEA), 'sha1'), 'hex')",
+
+            // Array/dynamic functions
+            "array_length" => $"ARRAY_LENGTH({args[0]}, 1)",
+            "array_index_of" => $"(ARRAY_POSITION({args[0]}, {args[1]}) - 1)",
+            "array_sort_asc" => $"(SELECT ARRAY_AGG(x ORDER BY x) FROM UNNEST({args[0]}) x)",
+            "array_sort_desc" => $"(SELECT ARRAY_AGG(x ORDER BY x DESC) FROM UNNEST({args[0]}) x)",
+            "array_concat" => $"({string.Join(" || ", args)})",
+            "array_reverse" => $"(SELECT ARRAY_AGG(x) FROM (SELECT UNNEST({args[0]}) x ORDER BY ORDINALITY DESC) t)",
+            "array_slice" when args.Length == 3 => $"{args[0]}[{args[1]}+1:{args[2]}+1]",
+            "bag_keys" => $"(SELECT ARRAY_AGG(key) FROM JSONB_OBJECT_KEYS({args[0]}) key)",
+            "bag_has_key" => $"({args[0]}::jsonb ? {args[1]})",
+            "bag_merge" => $"({args[0]}::jsonb || {args[1]}::jsonb)",
+            "set_difference" => $"(SELECT ARRAY_AGG(x) FROM UNNEST({args[0]}) x WHERE x <> ALL({args[1]}))",
+            "set_intersect" => $"(SELECT ARRAY_AGG(x) FROM UNNEST({args[0]}) x WHERE x = ANY({args[1]}))",
+            "set_union" => $"(SELECT ARRAY_AGG(DISTINCT x) FROM UNNEST({args[0]} || {args[1]}) x)",
+            "zip" => $"(SELECT ARRAY_AGG(ARRAY[a,b]) FROM UNNEST({args[0]}, {args[1]}) AS t(a,b))",
+
+            // Bitwise functions
+            "binary_and" => $"({args[0]} & {args[1]})",
+            "binary_or" => $"({args[0]} | {args[1]})",
+            "binary_xor" => $"({args[0]} # {args[1]})",
+            "binary_not" => $"(~{args[0]})",
+            "binary_shift_left" => $"({args[0]} << {args[1]})",
+            "binary_shift_right" => $"({args[0]} >> {args[1]})",
+
+            // Additional string functions
+            "extract_all" => $"(SELECT ARRAY_AGG(m[1]) FROM REGEXP_MATCHES({args[0]}, {args[1]}, 'g') m)",
+            "replace_regex" => $"REGEXP_REPLACE({args[0]}, {args[1]}, {args[2]}, 'g')",
+            "parse_csv" => $"STRING_TO_ARRAY({args[0]}, ',')",
+            "dynamic_to_json" => $"TO_JSON({args[0]})",
+            "tohex" => $"TO_HEX({args[0]}::bigint)",
+            "bag_remove_keys" => $"({args[0]}::jsonb - ARRAY[{string.Join(", ", args.Skip(1))}]::text[])",
+
+            // Timezone functions
+            "datetime_local_to_utc" => args.Length >= 2 ? $"({args[0]} AT TIME ZONE {args[1]} AT TIME ZONE 'UTC')" : $"({args[0]} AT TIME ZONE 'UTC')",
+            "datetime_utc_to_local" => args.Length >= 2 ? $"({args[0]} AT TIME ZONE 'UTC' AT TIME ZONE {args[1]})" : args[0],
+
+            // Type/conditional functions
+            "gettype" or "typeof" => $"PG_TYPEOF({args[0]})::text",
+            "isnan" => $"({args[0]} = 'NaN'::double precision)",
+            "isinf" => $"({args[0]} = 'Infinity'::double precision OR {args[0]} = '-Infinity'::double precision)",
+            "isfinite" => $"ISFINITE({args[0]}::timestamp)",
+
             _ => null
         };
     }
@@ -167,18 +257,19 @@ public class PGliteDialect : ISqlDialect
 
     public string Qualify(string innerSql, string condition)
     {
-        // PostgreSQL does not support QUALIFY. Wrap in a subquery with the
-        // window function computed in a subquery, then filter in the outer query.
-        // condition is like "ROW_NUMBER() OVER (...) = 1"
+        // PostgreSQL does not support QUALIFY. Use subquery with window function.
         var eqIdx = condition.LastIndexOf("= ");
         if (eqIdx > 0)
         {
             var windowExpr = condition.Substring(0, eqIdx).TrimEnd();
             var value = condition.Substring(eqIdx + 2).Trim();
-            return $"SELECT * FROM (SELECT *, {windowExpr} AS _rn FROM ({innerSql}) _q) _ranked WHERE _rn = {value}";
+            // Avoid double-wrapping: if innerSql is already a SELECT, use it directly
+            var innerWrapped = innerSql.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase)
+                ? $"({innerSql})"
+                : $"(SELECT * FROM {innerSql})";
+            return $"SELECT * FROM (SELECT *, {windowExpr} AS _rn FROM {innerWrapped} _q) _ranked WHERE _rn = {value}";
         }
-        // Fallback — should not happen with well-formed conditions
-        return $"SELECT * FROM ({innerSql}) /* QUALIFY */ WHERE {condition}";
+        return $"SELECT * FROM ({innerSql}) WHERE {condition}";
     }
 
     public string GenerateSeries(string alias, string start, string end, string step)
