@@ -17,20 +17,18 @@
 - [x] !~ (not equals)
 - [x] == (equals)
 - [x] =~ (equals)
-- [ ] Bitwise binary
-- [ ] Graph
-- [ ] Logical or binary
-- [ ] Numerical
-- [ ] Query
-- [ ] Scalar
-- [ ] String
-- [ ] Tabular
+- [x] binary_and()
+- [x] binary_or()
+- [x] binary_xor()
+- [x] binary_not()
+- [x] binary_shift_left()
+- [x] binary_shift_right()
 - [x] arg_max
 - [x] arg_min
-- [ ] as
+- [x] as
 - [x] between
 - [x] bin()
-- [ ] consume
+- [x] consume
 - [x] contains
 - [x] contains_cs
 - [x] count
@@ -38,13 +36,13 @@
 - [x] distinct
 - [x] endswith
 - [x] endswith_cs
-- [ ] evaluate
+- [x] evaluate (pivot, narrow, bag_unpack)
 - [x] extend
-- [ ] externaldata
-- [ ] facet
-- [ ] find
-- [ ] fork
-- [ ] getschema
+- [x] externaldata
+- [ ] ~~facet~~ (not supported — see below)
+- [ ] ~~find~~ (not supported — see below)
+- [ ] ~~fork~~ (not supported — see below)
+- [x] getschema
 - [x] has
 - [x] has_all
 - [x] has_any
@@ -54,42 +52,42 @@
 - [x] hassuffix
 - [x] hassuffix_cs
 - [x] in
-- [ ] invoke
+- [ ] ~~invoke~~ (not supported — see below)
 - [x] in~
 - [x] join
-- [ ] lookup
-- [ ] macro-expand
-- [ ] make-series
-- [ ] matches regex
-- [ ] mv-apply
+- [x] lookup
+- [ ] ~~macro-expand~~ (not supported — see below)
+- [x] make-series
+- [x] matches regex
+- [x] mv-apply
 - [x] mv-expand
-- [ ] parse
-- [ ] parse-kv
-- [ ] parse-where
-- [ ] partition
+- [x] parse
+- [x] parse-kv
+- [x] parse-where
+- [ ] ~~partition~~ (not supported — see below)
 - [x] print
 - [x] project
 - [x] project-away
-- [ ] project-by-names
+- [ ] ~~project-by-names~~ (not supported — see below)
 - [x] project-keep
 - [x] project-rename
 - [x] project-reorder
 - [x] range
-- [ ] reduce
-- [ ] render
-- [ ] sample
-- [ ] sample-distinct
-- [ ] scan
-- [ ] search
-- [ ] serialize
+- [ ] ~~reduce~~ (not supported — see below)
+- [x] render
+- [x] sample
+- [x] sample-distinct
+- [ ] ~~scan~~ (not supported — see below)
+- [x] search
+- [x] serialize
 - [x] sort
 - [x] startswith
 - [x] startswith_cs
 - [x] summarize
 - [x] take
 - [x] top
-- [ ] top-hitters
-- [ ] top-nested
+- [x] top-hitters
+- [x] top-nested
 - [x] union
 - [x] where
 - [x] materialize()
@@ -121,7 +119,7 @@
 - [x] rand()
 - [x] format_datetime()
 - [x] parse_json()
-- [ ] parse_url()
+- [x] parse_url()
 - [x] iif()
 - [x] iff()
 - [x] isnull()
@@ -163,6 +161,70 @@
 - [x] min_of()
 - [x] max_of()
 - [x] todynamic()
+- [x] row_number()
+- [x] prev()
+- [x] next()
+- [x] dayofweek()
+- [x] dayofmonth()
+- [x] dayofyear()
+- [x] getmonth()
+- [x] getyear()
+- [x] monthofyear()
+- [x] weekofyear()
+- [x] hourofday()
+- [x] minuteofhour()
+- [x] secondofminute()
+- [x] make_datetime()
+- [x] make_timespan()
+- [x] unixtime_seconds_todatetime()
+- [x] unixtime_milliseconds_todatetime()
+- [x] unixtime_microseconds_todatetime()
+- [x] unixtime_nanoseconds_todatetime()
+- [x] datetime_part()
+- [x] format_timespan()
+- [x] base64_encode_tostring()
+- [x] base64_decode_tostring()
+- [x] translate()
+- [x] strcmp()
+- [x] string_size()
+- [x] repeat()
+- [x] unicode()
+- [x] make_string()
+- [x] url_encode_component()
+- [x] url_decode_component()
+- [x] parse_path()
+- [x] to_utf8()
+- [x] hash()
+- [x] hash_md5()
+- [x] hash_sha256()
+- [x] hash_sha1()
+- [x] array_length()
+- [x] array_index_of()
+- [x] array_sort_asc()
+- [x] array_sort_desc()
+- [x] array_concat()
+- [x] array_reverse()
+- [x] array_slice()
+- [x] array_sum()
+- [x] bag_keys()
+- [x] bag_has_key()
+- [x] bag_merge()
+- [x] set_difference()
+- [x] set_intersect()
+- [x] set_union()
+- [x] zip()
+- [x] gettype()
+- [x] isnan()
+- [x] isinf()
+- [x] isfinite()
+- [x] extract_all()
+- [x] replace_regex()
+- [x] parse_csv()
+- [x] dynamic_to_json()
+- [x] tohex()
+- [x] bag_remove_keys()
+- [x] datetime_local_to_utc()
+- [x] datetime_utc_to_local()
 
 ## Aggregate functions
 - [x] avg()
@@ -208,3 +270,23 @@
 - [x] varianceif()
 - [x] variancep()
 - [x] variancepif()
+
+## Explicitly not supported
+
+These operators have no SQL equivalent or require capabilities beyond single-query SQL translation:
+
+| Operator | Reason |
+|---|---|
+| `facet` | Produces multiple result sets from a single input — SQL returns one result set per query |
+| `fork` | Branches pipeline into multiple outputs — same limitation as facet |
+| `invoke` | Calls user-defined functions by name — requires a function registry not available at translation time |
+| `macro-expand` | Expands macros — compile-time construct with no SQL equivalent |
+| `partition` | Executes sub-pipelines per partition independently — would require dynamic SQL generation per group |
+| `reduce` | Clusters string patterns using heuristics — algorithmic operation with no SQL equivalent |
+| `scan` | Stateful sequential row processing with match conditions — would require recursive CTEs with complex state, not reliably translatable |
+| `project-by-names` | Selects columns matching a wildcard pattern — requires schema introspection at translation time |
+| `find` | Searches across multiple tables in a database — requires catalog access not available at translation time |
+| `evaluate autocluster()` | Machine-learning clustering plugin — no SQL equivalent |
+| `evaluate basket()` | Market-basket analysis plugin — no SQL equivalent |
+| `evaluate diffpatterns()` | Pattern diffing plugin — no SQL equivalent |
+| `evaluate preview()` | Interactive preview plugin — no SQL equivalent |
