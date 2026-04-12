@@ -67,6 +67,99 @@ public class DuckDbDialect : ISqlDialect
             "endofyear" => $"DATE_TRUNC('year', {args[0]}) + INTERVAL '1 year' - INTERVAL '1 microsecond'",
             "min_of" => $"LEAST({string.Join(", ", args)})",
             "max_of" => $"GREATEST({string.Join(", ", args)})",
+            "row_number" => "ROW_NUMBER() OVER ()",
+            "prev" => $"LAG({args[0]}) OVER ()",
+            "next" => $"LEAD({args[0]}) OVER ()",
+
+            // Date/time functions
+            "dayofweek" => $"EXTRACT(DOW FROM {args[0]})",
+            "dayofmonth" => $"EXTRACT(DAY FROM {args[0]})",
+            "dayofyear" => $"EXTRACT(DOY FROM {args[0]})",
+            "getmonth" => $"EXTRACT(MONTH FROM {args[0]})",
+            "getyear" => $"EXTRACT(YEAR FROM {args[0]})",
+            "monthofyear" => $"EXTRACT(MONTH FROM {args[0]})",
+            "weekofyear" or "week_of_year" => $"EXTRACT(WEEK FROM {args[0]})",
+            "hourofday" => $"EXTRACT(HOUR FROM {args[0]})",
+            "minuteofhour" => $"EXTRACT(MINUTE FROM {args[0]})",
+            "secondofminute" => $"EXTRACT(SECOND FROM {args[0]})",
+            "make_datetime" when args.Length == 6 =>
+                $"MAKE_TIMESTAMP({args[0]}, {args[1]}, {args[2]}, {args[3]}, {args[4]}, {args[5]})",
+            "make_datetime" when args.Length == 1 => $"CAST({args[0]} AS TIMESTAMP)",
+            "make_timespan" when args.Length == 3 =>
+                $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
+            "unixtime_seconds_todatetime" => $"TO_TIMESTAMP({args[0]})",
+            "unixtime_milliseconds_todatetime" => $"TO_TIMESTAMP_MS({args[0]})",
+            "unixtime_microseconds_todatetime" => $"TO_TIMESTAMP_US({args[0]})",
+            "unixtime_nanoseconds_todatetime" => $"TO_TIMESTAMP_NS({args[0]})",
+            "datetime_part" => $"EXTRACT({args[0].Trim('\'')} FROM {args[1]})",
+            "format_timespan" => $"CAST({args[0]} AS VARCHAR)",
+
+            // String functions
+            "parse_url" => $"json_object('Scheme', REGEXP_EXTRACT({args[0]}, '^(\\w+)://', 1), 'Host', REGEXP_EXTRACT({args[0]}, '://([^/:]+)', 1), 'Port', REGEXP_EXTRACT({args[0]}, ':(\\d+)', 1), 'Path', REGEXP_EXTRACT({args[0]}, '://[^/]+([\\/][^?#]*)', 1))",
+            "base64_encode_tostring" or "base64_encode_fromarray" => $"BASE64(CAST({args[0]} AS BLOB))",
+            "base64_decode_tostring" => $"CAST(FROM_BASE64({args[0]}) AS VARCHAR)",
+            "translate" => $"TRANSLATE({args[0]}, {args[1]}, {args[2]})",
+            "strcmp" => $"CASE WHEN {args[0]} < {args[1]} THEN -1 WHEN {args[0]} = {args[1]} THEN 0 ELSE 1 END",
+            "string_size" => $"OCTET_LENGTH({args[0]})",
+            "repeat" => $"REPEAT({args[0]}, {args[1]})",
+            "unicode" => $"UNICODE({args[0]})",
+            "make_string" => $"CHR({args[0]})",
+            "url_encode_component" or "url_encode" => $"URL_ENCODE({args[0]})",
+            "url_decode_component" or "url_decode" => $"URL_DECODE({args[0]})",
+            "parse_path" => $"REGEXP_EXTRACT({args[0]}, '([^/\\\\]+)$', 1)",
+            "to_utf8" => $"CAST({args[0]} AS BLOB)",
+
+            // Hash functions
+            "hash" => $"HASH({args[0]})",
+            "hash_md5" => $"MD5({args[0]})",
+            "hash_sha256" => $"SHA256({args[0]})",
+            "hash_sha1" => $"SHA1({args[0]})",
+
+            // Array/dynamic functions
+            "array_length" => $"LEN({args[0]})",
+            "array_index_of" => $"(LIST_POSITION({args[0]}, {args[1]}) - 1)",
+            "array_sort_asc" => $"LIST_SORT({args[0]})",
+            "array_sort_desc" => $"LIST_REVERSE_SORT({args[0]})",
+            "array_concat" => $"LIST_CONCAT({string.Join(", ", args)})",
+            "array_reverse" => $"LIST_REVERSE({args[0]})",
+            "array_slice" when args.Length == 3 => $"LIST_SLICE({args[0]}, {args[1]} + 1, {args[2]} + 1)",
+            "array_sum" => $"LIST_SUM({args[0]})",
+            "bag_keys" => $"JSON_KEYS({args[0]})",
+            "bag_has_key" => $"(JSON_EXTRACT({args[0]}, '$.' || TRIM({args[1]}, '\"''')) IS NOT NULL)",
+            "bag_merge" => $"JSON_MERGE_PATCH({args[0]}, {args[1]})",
+            "set_difference" => $"LIST_FILTER({args[0]}, x -> NOT LIST_CONTAINS({args[1]}, x))",
+            "set_intersect" => $"LIST_FILTER({args[0]}, x -> LIST_CONTAINS({args[1]}, x))",
+            "set_union" => $"LIST_DISTINCT(LIST_CONCAT({args[0]}, {args[1]}))",
+            "treepath" => $"JSON_KEYS({args[0]})",
+            "zip" => $"LIST_ZIP({string.Join(", ", args)})",
+
+            // Bitwise functions
+            "binary_and" => $"({args[0]} & {args[1]})",
+            "binary_or" => $"({args[0]} | {args[1]})",
+            "binary_xor" => $"XOR({args[0]}, {args[1]})",
+            "binary_not" => $"(~{args[0]})",
+            "binary_shift_left" => $"({args[0]} << {args[1]})",
+            "binary_shift_right" => $"({args[0]} >> {args[1]})",
+
+            // Additional string functions
+            "extract_all" => $"REGEXP_EXTRACT_ALL({args[0]}, {args[1]})",
+            "replace_regex" => $"REGEXP_REPLACE({args[0]}, {args[1]}, {args[2]})",
+            "parse_csv" => $"STRING_SPLIT({args[0]}, ',')",
+            "dynamic_to_json" => $"CAST({args[0]} AS JSON)",
+            "tohex" => $"PRINTF('%x', {args[0]})",
+            "bag_remove_keys" => $"json_merge_patch({args[0]}, json_object({string.Join(", ", args.Skip(1).Select(a => $"{a}, NULL"))}))",
+
+            // Timezone functions
+            "datetime_local_to_utc" => args.Length >= 2 ? $"({args[0]} AT TIME ZONE {args[1]} AT TIME ZONE 'UTC')" : $"({args[0]} AT TIME ZONE 'UTC')",
+            "datetime_utc_to_local" => args.Length >= 2 ? $"({args[0]} AT TIME ZONE 'UTC' AT TIME ZONE {args[1]})" : args[0],
+
+            // Conditional / type functions
+            "iff" => null, // handled structurally in ExpressionSqlBuilder
+            "gettype" or "typeof" => $"TYPEOF({args[0]})",
+            "isnan" => $"ISNAN({args[0]})",
+            "isinf" => $"ISINF({args[0]})",
+            "isfinite" => $"ISFINITE({args[0]})",
+
             _ => null
         };
     }
@@ -78,46 +171,46 @@ public class DuckDbDialect : ISqlDialect
             "count" => "COUNT(*)",
             "sum" => $"SUM({args[0]})",
             "avg" => $"AVG({args[0]})",
-            "avgif" => $"AVG(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "avgif" => $"AVG({args[0]}) FILTER (WHERE {args[1]})",
             "binary_all_and" => $"BIT_AND({args[0]})",
             "binary_all_or" => $"BIT_OR({args[0]})",
             "binary_all_xor" => $"BIT_XOR({args[0]})",
             "buildschema" => $"MIN(typeof({args[0]}))",
             "count_distinct" => $"COUNT(DISTINCT {args[0]})",
-            "count_distinctif" => $"COUNT(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END)",
-            "countif" => $"COUNT(CASE WHEN {args[0]} THEN 1 END)",
+            "count_distinctif" => $"COUNT(DISTINCT {args[0]}) FILTER (WHERE {args[1]})",
+            "countif" => $"COUNT(*) FILTER (WHERE {args[0]})",
             "covariance" => $"COVAR_SAMP({args[0]}, {args[1]})",
-            "covarianceif" => $"COVAR_SAMP(CASE WHEN {args[2]} THEN {args[0]} END, CASE WHEN {args[2]} THEN {args[1]} END)",
+            "covarianceif" => $"COVAR_SAMP({args[0]}, {args[1]}) FILTER (WHERE {args[2]})",
             "covariancep" => $"COVAR_POP({args[0]}, {args[1]})",
-            "covariancepif" => $"COVAR_POP(CASE WHEN {args[2]} THEN {args[0]} END, CASE WHEN {args[2]} THEN {args[1]} END)",
+            "covariancepif" => $"COVAR_POP({args[0]}, {args[1]}) FILTER (WHERE {args[2]})",
             "dcount" => $"APPROX_COUNT_DISTINCT({args[0]})",
-            "dcountif" => $"APPROX_COUNT_DISTINCT(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "dcountif" => $"APPROX_COUNT_DISTINCT({args[0]}) FILTER (WHERE {args[1]})",
             "hll" => $"hll({args[0]})",
-            "hll_if" => $"hll(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "hll_if" => $"hll({args[0]}) FILTER (WHERE {args[1]})",
             "hll_merge" => $"hll_merge({args[0]})",
             "make_bag" => $"histogram({args[0]})",
-            "make_bag_if" => $"histogram(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "make_bag_if" => $"histogram({args[0]}) FILTER (WHERE {args[1]})",
             "make_list" => $"LIST({args[0]})",
-            "make_list_if" => $"LIST(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "make_list_if" => $"LIST({args[0]}) FILTER (WHERE {args[1]})",
             "make_list_with_nulls" => $"LIST({args[0]})",
             "make_set" => $"LIST(DISTINCT {args[0]})",
-            "make_set_if" => $"LIST(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END)",
+            "make_set_if" => $"LIST(DISTINCT {args[0]}) FILTER (WHERE {args[1]})",
             "min" => $"MIN({args[0]})",
-            "minif" => $"MIN(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "minif" => $"MIN({args[0]}) FILTER (WHERE {args[1]})",
             "max" => $"MAX({args[0]})",
-            "maxif" => $"MAX(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "maxif" => $"MAX({args[0]}) FILTER (WHERE {args[1]})",
             "percentile" => $"quantile_cont({args[0]}, {args[1]} / 100.0)",
             "percentilew" => $"quantile_cont({args[0]}, {args[2]} / 100.0)",
             "stdev" => $"STDDEV_SAMP({args[0]})",
-            "stdevif" => $"STDDEV_SAMP(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "stdevif" => $"STDDEV_SAMP({args[0]}) FILTER (WHERE {args[1]})",
             "stdevp" => $"STDDEV_POP({args[0]})",
-            "sumif" => $"SUM(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "sumif" => $"SUM({args[0]}) FILTER (WHERE {args[1]})",
             "take_any" => $"ANY_VALUE({args[0]})",
-            "take_anyif" => $"ANY_VALUE(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "take_anyif" => $"ANY_VALUE({args[0]}) FILTER (WHERE {args[1]})",
             "variance" => $"VAR_SAMP({args[0]})",
-            "varianceif" => $"VAR_SAMP(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "varianceif" => $"VAR_SAMP({args[0]}) FILTER (WHERE {args[1]})",
             "variancep" => $"VAR_POP({args[0]})",
-            "variancepif" => $"VAR_POP(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "variancepif" => $"VAR_POP({args[0]}) FILTER (WHERE {args[1]})",
             _ => null
         };
     }
@@ -157,7 +250,9 @@ public class DuckDbDialect : ISqlDialect
 
     public string Qualify(string innerSql, string condition)
     {
-        return $"SELECT * FROM ({innerSql}) QUALIFY {condition}";
+        if (innerSql.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase))
+            return $"{innerSql} QUALIFY {condition}";
+        return $"SELECT * FROM {innerSql} QUALIFY {condition}";
     }
 
     public string GenerateSeries(string alias, string start, string end, string step)
@@ -168,5 +263,12 @@ public class DuckDbDialect : ISqlDialect
     public string Unnest(string sourceAlias, string column, string unnestAlias)
     {
         return $"CROSS JOIN UNNEST({sourceAlias}.{column}) AS {unnestAlias}(value)";
+    }
+
+    public bool SupportsGroupByAll => true;
+
+    public string? SampleClause(string fromSql, string count)
+    {
+        return $"SELECT * FROM {fromSql} USING SAMPLE {count} ROWS";
     }
 }

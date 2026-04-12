@@ -44,4 +44,10 @@ public interface ISqlDialect
 
     /// <summary>Generates an array expansion clause (e.g. CROSS JOIN UNNEST).</summary>
     string Unnest(string sourceAlias, string column, string unnestAlias);
+
+    /// <summary>Whether this dialect supports GROUP BY ALL (auto group by non-aggregate columns).</summary>
+    bool SupportsGroupByAll => false;
+
+    /// <summary>Generates a random sample clause. Returns null to use ORDER BY RANDOM() LIMIT n fallback.</summary>
+    string? SampleClause(string fromSql, string count) => null;
 }
