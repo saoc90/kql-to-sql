@@ -38,7 +38,9 @@ internal class ExpressionSqlBuilder
         ["todatetime"] = "TIMESTAMP",
         ["datetime"] = "TIMESTAMP",
         ["totimespan"] = "INTERVAL",
-        ["timespan"] = "INTERVAL"
+        ["timespan"] = "INTERVAL",
+        ["toguid"] = "UUID",
+        ["guid"] = "UUID"
     };
     internal string ConvertExpression(Expression expr, string? leftAlias = null, string? rightAlias = null)
     {
@@ -188,6 +190,7 @@ internal class ExpressionSqlBuilder
             case "ago": return ConvertAgo(fce, leftAlias, rightAlias);
             case "iif" or "iff": return ConvertIif(fce, leftAlias, rightAlias);
             case "case": return ConvertCase(fce, leftAlias, rightAlias);
+            case "bin_at": return ConvertBinAt(fce, leftAlias, rightAlias);
             case "trim": return ConvertTrim(fce, leftAlias, rightAlias);
             case "trim_start": return ConvertTrimStart(fce, leftAlias, rightAlias);
             case "trim_end": return ConvertTrimEnd(fce, leftAlias, rightAlias);
@@ -510,6 +513,29 @@ internal class ExpressionSqlBuilder
 
         var size = ConvertExpression(sizeExpr, leftAlias, rightAlias);
         return $"FLOOR(({value})/({size}))*({size})";
+    }
+
+    private string ConvertBinAt(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    {
+        // bin_at(value, bin_size, fixed_point)
+        if (fce.ArgumentList.Expressions.Count != 3)
+            throw new NotSupportedException("bin_at() requires three arguments");
+
+        var value = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
+        var sizeExpr = fce.ArgumentList.Expressions[1].Element;
+        var fixedPoint = ConvertExpression(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
+
+        if (sizeExpr is LiteralExpression lit)
+        {
+            var text = lit.ToString().Trim().Trim('"', '\'');
+            if (TryParseTimespan(text, out var ms))
+            {
+                return $"TO_TIMESTAMP_MS(FLOOR((EPOCH_MS({value}) - EPOCH_MS({fixedPoint}))/{ms})*{ms} + EPOCH_MS({fixedPoint}))";
+            }
+        }
+
+        var size = ConvertExpression(sizeExpr, leftAlias, rightAlias);
+        return $"FLOOR(({value} - {fixedPoint})/({size}))*({size}) + {fixedPoint}";
     }
 
     internal static string ExtractLeftKey(Expression expr)

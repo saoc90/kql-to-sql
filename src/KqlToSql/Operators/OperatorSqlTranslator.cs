@@ -1395,6 +1395,20 @@ internal class OperatorSqlTranslator
                 return results;
             }
 
+            if (name == "percentiles_array")
+            {
+                var percentileList = string.Join(", ", args.Skip(1).Select(p => $"{p} / 100.0"));
+                alias ??= "percentiles_array";
+                return new[] { $"quantile_cont({args[0]}, [{percentileList}]) AS {alias}" };
+            }
+
+            if (name == "percentilesw_array")
+            {
+                var percentileList = string.Join(", ", args.Skip(2).Select(p => $"{p} / 100.0"));
+                alias ??= "percentilesw_array";
+                return new[] { $"quantile_cont({args[0]}, [{percentileList}]) AS {alias}" };
+            }
+
             alias ??= name switch
             {
                 "count" => "count",
