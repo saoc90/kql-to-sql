@@ -19,16 +19,8 @@ internal class OperatorSqlTranslator
         _expr = new ExpressionSqlBuilder(converter.Dialect);
     }
 
-    private static string UnwrapFromSql(string sql)
-    {
-        if (sql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = sql.Substring("SELECT * FROM ".Length);
-            if (!rest.Contains(' '))
-                return rest;
-        }
-        return $"({sql})";
-    }
+    // Delegate to SqlHelper for all SQL string manipulation.
+    private static string UnwrapFromSql(string sql) => SqlHelper.UnwrapFromSql(sql);
 
     internal string ApplyOperator(string leftSql, QueryOperator op, Expression? leftExpression = null)
     {
@@ -214,25 +206,13 @@ internal class OperatorSqlTranslator
     private string ApplyFilter(string leftSql, FilterOperator filter)
     {
         var condition = _expr.ConvertExpression(filter.Condition);
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase) &&
-            !leftSql.Contains(" WHERE ", StringComparison.OrdinalIgnoreCase))
-        {
-            return $"{leftSql} WHERE {condition}";
-        }
 
-        // Only append AND if WHERE is the last clause (no ORDER BY, GROUP BY, LIMIT after it)
-        var whereIdx = leftSql.LastIndexOf(" WHERE ", StringComparison.OrdinalIgnoreCase);
-        if (whereIdx >= 0)
-        {
-            var afterWhere = leftSql[whereIdx..];
-            if (!afterWhere.Contains(" ORDER BY ", StringComparison.OrdinalIgnoreCase) &&
-                !afterWhere.Contains(" GROUP BY ", StringComparison.OrdinalIgnoreCase) &&
-                !afterWhere.Contains(" HAVING ", StringComparison.OrdinalIgnoreCase) &&
-                !afterWhere.Contains(" LIMIT ", StringComparison.OrdinalIgnoreCase))
-            {
-                return $"{leftSql} AND {condition}";
-            }
-        }
+        if (SqlHelper.IsSimpleSelectStar(leftSql) &&
+            !leftSql.Contains(" WHERE ", StringComparison.OrdinalIgnoreCase))
+            return $"{leftSql} WHERE {condition}";
+
+        if (SqlHelper.CanAppendWhereCondition(leftSql))
+            return $"{leftSql} AND {condition}";
 
         return $"SELECT * FROM ({leftSql}) WHERE {condition}";
     }
@@ -242,36 +222,17 @@ internal class OperatorSqlTranslator
         var columns = project.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
-            {
                 return $"{_expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
-            }
             return _expr.ConvertExpression(se.Element);
         }).ToArray();
 
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT {string.Join(", ", columns)} FROM {rest}";
-        }
-        else
-        {
-            return $"SELECT {string.Join(", ", columns)} FROM ({leftSql})";
-        }
+        return SqlHelper.ReplaceSelectStar(leftSql, string.Join(", ", columns));
     }
 
     private string ApplyProjectAway(string leftSql, ProjectAwayOperator projectAway)
     {
         var columns = projectAway.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
-        var excludeClause = Dialect.SelectExclude(columns);
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT {excludeClause} FROM {rest}";
-        }
-        else
-        {
-            return $"SELECT {excludeClause} FROM ({leftSql})";
-        }
+        return SqlHelper.ReplaceSelectStar(leftSql, Dialect.SelectExclude(columns));
     }
 
     private string ApplyProjectRename(string leftSql, ProjectRenameOperator projectRename)
@@ -279,53 +240,23 @@ internal class OperatorSqlTranslator
         var mappings = projectRename.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
-            {
-                var expr = _expr.ConvertExpression(sne.Expression);
-                var name = sne.Name.ToString().Trim();
-                return $"{expr} AS {name}";
-            }
+                return $"{_expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
             throw new NotSupportedException("Unsupported project-rename expression");
         }).ToArray();
 
-        var renameClause = Dialect.SelectRename(mappings);
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT {renameClause} FROM {rest}";
-        }
-        else
-        {
-            return $"SELECT {renameClause} FROM ({leftSql})";
-        }
+        return SqlHelper.ReplaceSelectStar(leftSql, Dialect.SelectRename(mappings));
     }
 
     private string ApplyProjectKeep(string leftSql, ProjectKeepOperator projectKeep)
     {
         var columns = projectKeep.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT {string.Join(", ", columns)} FROM {rest}";
-        }
-        else
-        {
-            return $"SELECT {string.Join(", ", columns)} FROM ({leftSql})";
-        }
+        return SqlHelper.ReplaceSelectStar(leftSql, string.Join(", ", columns));
     }
 
     private string ApplyProjectReorder(string leftSql, ProjectReorderOperator projectReorder)
     {
         var columns = projectReorder.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
-        var excludeClause = Dialect.SelectExclude(columns);
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT {string.Join(", ", columns)}, {excludeClause} FROM {rest}";
-        }
-        else
-        {
-            return $"SELECT {string.Join(", ", columns)}, {excludeClause} FROM ({leftSql})";
-        }
+        return SqlHelper.ReplaceSelectStar(leftSql, $"{string.Join(", ", columns)}, {Dialect.SelectExclude(columns)}");
     }
 
     private string ApplySummarize(string leftSql, SummarizeOperator summarize)
@@ -343,15 +274,8 @@ internal class OperatorSqlTranslator
             fce.ArgumentList.Expressions[1].Element is StarExpression)
         {
             var extremumExpr = _expr.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
-
-            string fromSql;
-            if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
+            var fromSql = SqlHelper.ExtractFromSource(leftSql);
             {
-                fromSql = leftSql.Substring("SELECT * FROM ".Length);
-            }
-            else
-            {
-                fromSql = $"({leftSql})";
             }
 
             var partition = byColumns.Length > 0
@@ -375,17 +299,7 @@ internal class OperatorSqlTranslator
 
         var selectList = string.Join(", ", byColumns.Select(b => b.Select).Concat(aggregates));
 
-        string finalFromSql;
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            finalFromSql = leftSql.Substring("SELECT * FROM ".Length);
-        }
-        else
-        {
-            finalFromSql = $"({leftSql})";
-        }
-
-        var sql = $"SELECT {selectList} FROM {finalFromSql}";
+        var sql = $"SELECT {selectList} FROM {SqlHelper.ExtractFromSource(leftSql)}";
         if (byColumns.Length > 0)
         {
             sql += Dialect.SupportsGroupByAll
@@ -438,28 +352,12 @@ internal class OperatorSqlTranslator
     }
 
     private string ApplyCount(string leftSql, CountOperator count)
-    {
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT COUNT(*) AS Count FROM {rest}";
-        }
-        return $"SELECT COUNT(*) AS Count FROM ({leftSql})";
-    }
+        => SqlHelper.ReplaceSelectStar(leftSql, "COUNT(*) AS Count");
 
     private string ApplyDistinct(string leftSql, DistinctOperator distinct)
     {
-        var columns = distinct.Expressions.Select(e => _expr.ConvertExpression(e.Element)).ToArray();
-        var cols = string.Join(", ", columns);
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT DISTINCT {cols} FROM {rest}";
-        }
-        else
-        {
-            return $"SELECT DISTINCT {cols} FROM ({leftSql})";
-        }
+        var cols = string.Join(", ", distinct.Expressions.Select(e => _expr.ConvertExpression(e.Element)));
+        return SqlHelper.ReplaceSelectStar(leftSql, $"DISTINCT {cols}");
     }
 
     private string ApplyExtend(string leftSql, ExtendOperator extend)
@@ -467,18 +365,11 @@ internal class OperatorSqlTranslator
         var extras = extend.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
-            {
                 return $"{_expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
-            }
             throw new NotSupportedException("Unsupported extend expression");
         }).ToArray();
 
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT *, {string.Join(", ", extras)} FROM {rest}";
-        }
-        return $"SELECT *, {string.Join(", ", extras)} FROM ({leftSql})";
+        return SqlHelper.AppendToSelectStar(leftSql, string.Join(", ", extras));
     }
 
     private string ApplyTake(string leftSql, TakeOperator take)
@@ -597,32 +488,22 @@ internal class OperatorSqlTranslator
     private string ApplySerialize(string leftSql, SerializeOperator serialize)
     {
         if (serialize.Expressions.Count == 0)
-        {
             return leftSql;
-        }
 
         var extras = serialize.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
-            {
                 return $"{_expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
-            }
             return _expr.ConvertExpression(se.Element);
         }).ToArray();
 
-        // When leftSql has ORDER BY + LIMIT, wrap in subquery first so window functions
-        // only run on the limited result set, not the entire table.
-        if (leftSql.Contains(" LIMIT ", StringComparison.OrdinalIgnoreCase))
-        {
-            return $"SELECT *, {string.Join(", ", extras)} FROM ({leftSql})";
-        }
+        var joined = string.Join(", ", extras);
 
-        if (leftSql.StartsWith("SELECT * FROM ", StringComparison.OrdinalIgnoreCase))
-        {
-            var rest = leftSql.Substring("SELECT * FROM ".Length);
-            return $"SELECT *, {string.Join(", ", extras)} FROM {rest}";
-        }
-        return $"SELECT *, {string.Join(", ", extras)} FROM ({leftSql})";
+        // When leftSql has LIMIT, wrap in subquery so window functions run on limited rows only.
+        if (SqlHelper.HasLimit(leftSql))
+            return $"SELECT *, {joined} FROM ({leftSql})";
+
+        return SqlHelper.AppendToSelectStar(leftSql, joined);
     }
 
     private string ApplyLookup(string leftSql, LookupOperator lookup)
