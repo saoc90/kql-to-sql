@@ -153,6 +153,61 @@ public class DuckDbDialect : ISqlDialect
             "datetime_local_to_utc" => args.Length >= 2 ? $"({args[0]} AT TIME ZONE {args[1]} AT TIME ZONE 'UTC')" : $"({args[0]} AT TIME ZONE 'UTC')",
             "datetime_utc_to_local" => args.Length >= 2 ? $"({args[0]} AT TIME ZONE 'UTC' AT TIME ZONE {args[1]})" : args[0],
 
+            // JSON functions
+            "extract_json" or "extractjson" => $"JSON_EXTRACT({args[1]}, {args[0]})",
+
+            // Window functions (beyond row_number/prev/next)
+            "row_cumsum" => $"SUM({args[0]}) OVER (ROWS UNBOUNDED PRECEDING)",
+            "row_rank_dense" => "DENSE_RANK() OVER ()",
+            "row_rank_min" => "RANK() OVER ()",
+            "row_window_session" => $"SUM(CASE WHEN {args[0]} > LAG({args[0]}) OVER () + {args[1]} THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING)",
+
+            // Math functions
+            "degrees" => $"DEGREES({args[0]})",
+            "radians" => $"RADIANS({args[0]})",
+            "cot" => $"(1.0 / TAN({args[0]}))",
+            "gamma" => $"GAMMA({args[0]})",
+            "loggamma" => $"LGAMMA({args[0]})",
+            "bitset_count_ones" => $"BIT_COUNT({args[0]})",
+            "range" when args.Length == 3 => $"GENERATE_SERIES({args[0]}, {args[1]}, {args[2]})",
+
+            // Array/set functions
+            "set_has_element" => $"LIST_CONTAINS({args[0]}, {args[1]})",
+            "array_iff" => $"LIST_TRANSFORM(LIST_ZIP({args[0]}, {args[1]}, {args[2]}), x -> CASE WHEN x[1] THEN x[2] ELSE x[3] END)",
+            "array_rotate_left" => $"LIST_CONCAT(LIST_SLICE({args[0]}, {args[1]} + 1, LEN({args[0]})), LIST_SLICE({args[0]}, 1, {args[1]}))",
+            "array_rotate_right" => $"LIST_CONCAT(LIST_SLICE({args[0]}, LEN({args[0]}) - {args[1]} + 1, LEN({args[0]})), LIST_SLICE({args[0]}, 1, LEN({args[0]}) - {args[1]}))",
+            "array_split" when args.Length == 2 => $"[LIST_SLICE({args[0]}, 1, {args[1]}), LIST_SLICE({args[0]}, {args[1]} + 1, LEN({args[0]}))]",
+            "bag_set_key" => $"JSON_MERGE_PATCH({args[0]}, JSON_OBJECT({args[1]}, {args[2]}))",
+            "pack_dictionary" => $"JSON_OBJECT({string.Join(", ", args)})",
+
+            // String functions (additional)
+            "replace_strings" when args.Length == 3 => $"LIST_REDUCE(LIST_ZIP({args[1]}, {args[2]}), {args[0]}, (acc, pair) -> REPLACE(acc, pair[1], pair[2]))",
+            "strrep" => $"REPEAT({args[0]}, {args[1]})",
+            "has_any_index" => $"LIST_POSITION(LIST_TRANSFORM({args[1]}, term -> CASE WHEN {args[0]} ILIKE '%' || term || '%' THEN 1 ELSE 0 END), 1) - 1",
+            "parse_urlquery" => $"json_object('Query', REGEXP_EXTRACT({args[0]}, '\\?(.+)', 1))",
+
+            // Hash functions (additional)
+            "hash_combine" => $"HASH({args[0]}) # HASH({args[1]})",
+            "hash_many" => $"HASH({string.Join(", ", args)})",
+            "hash_xxhash64" => $"xxhash64({args[0]})",
+
+            // IPv4 functions
+            "parse_ipv4" => $"(SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT)",
+            "parse_ipv4_mask" => $"(SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT) & ((-1::BIGINT) << (32 - {args[1]}))",
+            "ipv4_compare" when args.Length == 2 => $"SIGN((SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT) - (SPLIT_PART({args[1]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[1]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[1]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[1]}, '.', 4)::BIGINT))",
+            "ipv4_is_in_range" => $"((SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT) & ((-1::BIGINT) << (32 - SPLIT_PART({args[1]}, '/', 2)::INT))) = ((SPLIT_PART(SPLIT_PART({args[1]}, '/', 1), '.', 1)::BIGINT * 16777216 + SPLIT_PART(SPLIT_PART({args[1]}, '/', 1), '.', 2)::BIGINT * 65536 + SPLIT_PART(SPLIT_PART({args[1]}, '/', 1), '.', 3)::BIGINT * 256 + SPLIT_PART(SPLIT_PART({args[1]}, '/', 1), '.', 4)::BIGINT) & ((-1::BIGINT) << (32 - SPLIT_PART({args[1]}, '/', 2)::INT)))",
+            "ipv4_is_private" => $"((SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT) BETWEEN 167772160 AND 184549375 OR (SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT) BETWEEN 2886729728 AND 2887778303 OR (SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT) BETWEEN 3232235520 AND 3232301055)",
+            "format_ipv4" when args.Length == 1 => args[0],
+            "format_ipv4" when args.Length == 2 => $"CONCAT(({args[0]}::BIGINT >> 24) & 255, '.', ({args[0]}::BIGINT >> 16) & 255, '.', ({args[0]}::BIGINT >> 8) & 255, '.', {args[0]}::BIGINT & 255)",
+
+            // Base64 GUID variants
+            "base64_encode_fromguid" => $"BASE64(CAST({args[0]} AS BLOB))",
+            "base64_decode_toguid" => $"CAST(FROM_BASE64({args[0]}) AS UUID)",
+            "base64_decode_toarray" => $"LIST_TRANSFORM(GENERATE_SERIES(1, OCTET_LENGTH(FROM_BASE64({args[0]}))), i -> GET_BIT(FROM_BASE64({args[0]}), i - 1))",
+
+            // Parse functions
+            "parse_version" => $"STRING_SPLIT({args[0]}, '.')",
+
             // Conditional / type functions
             "iff" => null, // handled structurally in ExpressionSqlBuilder
             "gettype" or "typeof" => $"TYPEOF({args[0]})",

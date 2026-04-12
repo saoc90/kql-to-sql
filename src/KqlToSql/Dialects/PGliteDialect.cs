@@ -152,6 +152,45 @@ public class PGliteDialect : ISqlDialect
             "datetime_local_to_utc" => args.Length >= 2 ? $"({args[0]} AT TIME ZONE {args[1]} AT TIME ZONE 'UTC')" : $"({args[0]} AT TIME ZONE 'UTC')",
             "datetime_utc_to_local" => args.Length >= 2 ? $"({args[0]} AT TIME ZONE 'UTC' AT TIME ZONE {args[1]})" : args[0],
 
+            // JSON functions
+            "extract_json" or "extractjson" => $"({args[1]}::jsonb #>> string_to_array(TRIM({args[0]}, '$.'), '.'))",
+
+            // Window functions
+            "row_cumsum" => $"SUM({args[0]}) OVER (ROWS UNBOUNDED PRECEDING)",
+            "row_rank_dense" => "DENSE_RANK() OVER ()",
+            "row_rank_min" => "RANK() OVER ()",
+
+            // Math functions
+            "degrees" => $"DEGREES({args[0]})",
+            "radians" => $"RADIANS({args[0]})",
+            "cot" => $"(1.0 / TAN({args[0]}))",
+            "gamma" => $"(EXP(LGAMMA({args[0]})))",
+            "loggamma" => $"LGAMMA({args[0]})",
+            "bitset_count_ones" => $"BIT_COUNT({args[0]}::bit(64))",
+
+            // Array/set functions
+            "set_has_element" => $"({args[1]} = ANY({args[0]}))",
+            "bag_set_key" => $"({args[0]}::jsonb || jsonb_build_object({args[1]}, {args[2]}))",
+            "strrep" => $"REPEAT({args[0]}, {args[1]})",
+            "has_any_index" => $"(SELECT MIN(i) - 1 FROM UNNEST({args[1]}) WITH ORDINALITY AS t(term, i) WHERE {args[0]} ILIKE '%' || term || '%')",
+            "parse_urlquery" => $"jsonb_build_object('Query', SUBSTRING({args[0]} FROM '\\?(.+)'))",
+
+            // Hash functions (additional)
+            "hash_combine" => $"(HASHTEXTEXTENDED({args[0]}::text, 0) # HASHTEXTEXTENDED({args[1]}::text, 0))",
+            "hash_many" => $"HASHTEXTEXTENDED(CONCAT({string.Join(", ", args)}), 0)",
+
+            // IPv4 functions
+            "parse_ipv4" => $"(SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT)",
+            "ipv4_is_in_range" => $"(INET({args[0]}) <<= INET({args[1]}))",
+            "ipv4_is_private" => $"(INET({args[0]}) <<= INET('10.0.0.0/8') OR INET({args[0]}) <<= INET('172.16.0.0/12') OR INET({args[0]}) <<= INET('192.168.0.0/16'))",
+
+            // Base64 GUID variants
+            "base64_encode_fromguid" => $"ENCODE(CAST({args[0]} AS BYTEA), 'base64')",
+            "base64_decode_toguid" => $"CAST(DECODE({args[0]}, 'base64') AS UUID)",
+
+            // Parse functions
+            "parse_version" => $"STRING_TO_ARRAY({args[0]}, '.')",
+
             // Type/conditional functions
             "gettype" or "typeof" => $"PG_TYPEOF({args[0]})::text",
             "isnan" => $"({args[0]} = 'NaN'::double precision)",
