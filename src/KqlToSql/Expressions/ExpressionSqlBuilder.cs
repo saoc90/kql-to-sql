@@ -151,9 +151,17 @@ internal class ExpressionSqlBuilder
                 $"{ConvertExpression(pe.Expression, leftAlias, rightAlias)}.{pe.Selector}",
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression =>
                 ConvertDateTimeLiteral(lit),
+            LiteralExpression lit when lit.Kind == SyntaxKind.TimespanLiteralExpression =>
+                ConvertTimespanLiteral(lit),
             LiteralExpression lit when lit.Kind == SyntaxKind.StringLiteralExpression =>
                 ConvertStringLiteral(lit),
+            LiteralExpression lit when lit.Kind == SyntaxKind.NullLiteralExpression => "NULL",
             LiteralExpression lit => lit.ToString().Trim(),
+            CompoundStringLiteralExpression cs => ConvertCompoundString(cs),
+            PrefixUnaryExpression pu when pu.Kind == SyntaxKind.UnaryMinusExpression =>
+                $"(-{ConvertExpression(pu.Expression, leftAlias, rightAlias)})",
+            PrefixUnaryExpression pu when pu.Kind == SyntaxKind.UnaryPlusExpression =>
+                ConvertExpression(pu.Expression, leftAlias, rightAlias),
             FunctionCallExpression fce =>
                 ConvertFunctionCall(fce, leftAlias, rightAlias),
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
@@ -166,6 +174,24 @@ internal class ExpressionSqlBuilder
         var text = lit.ToString().Trim().Trim('"', '\'');
         text = text.Replace("'", "''");
         return $"'{text}'";
+    }
+
+    private static string ConvertCompoundString(CompoundStringLiteralExpression cs)
+    {
+        // KQL escaped quotes: 'O''Brien' is parsed as CompoundStringLiteralExpression
+        var text = cs.ToString().Trim().Trim('\'', '"');
+        text = text.Replace("''", "'").Replace("'", "''");
+        return $"'{text}'";
+    }
+
+    private static string ConvertTimespanLiteral(LiteralExpression lit)
+    {
+        var text = lit.ToString().Trim();
+        if (TryParseTimespan(text, out var ms))
+        {
+            return $"{ms} * INTERVAL '1 millisecond'";
+        }
+        return $"INTERVAL '{text}'";
     }
 
     private string ConvertFunctionCall(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
@@ -661,7 +687,9 @@ internal class ExpressionSqlBuilder
             LiteralExpression lit when lit.Kind == SyntaxKind.StringLiteralExpression => ConvertStringLiteral(lit),
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression => ConvertDateTimeLiteral(lit),
             LiteralExpression lit when lit.Kind == SyntaxKind.BooleanLiteralExpression => lit.ToString().Trim().ToLowerInvariant() == "true" ? "TRUE" : "FALSE",
+            LiteralExpression lit when lit.Kind == SyntaxKind.NullLiteralExpression => "NULL",
             LiteralExpression lit => lit.ToString().Trim(),
+            CompoundStringLiteralExpression cs => ConvertCompoundString(cs),
             _ => ConvertExpression(expr)
         };
     }
