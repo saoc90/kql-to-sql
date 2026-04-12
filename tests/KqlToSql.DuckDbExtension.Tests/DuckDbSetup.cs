@@ -32,6 +32,10 @@ internal static class DuckDbSetup
         {
             EnsureDuckDbLinux();
         }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            EnsureDuckDbMacOS();
+        }
         else
         {
             throw new PlatformNotSupportedException("DuckDB is not supported on this platform.");
@@ -48,6 +52,12 @@ internal static class DuckDbSetup
     {
         const string url = "https://github.com/duckdb/duckdb/releases/download/v1.3.2/libduckdb-linux-amd64.zip";
         LoadNativeLibrary(url, "libduckdb.so");
+    }
+
+    private static void EnsureDuckDbMacOS()
+    {
+        const string url = "https://github.com/duckdb/duckdb/releases/download/v1.3.2/libduckdb-osx-universal.zip";
+        LoadNativeLibrary(url, "libduckdb.dylib");
     }
 
     private static void LoadNativeLibrary(string url, string filename)

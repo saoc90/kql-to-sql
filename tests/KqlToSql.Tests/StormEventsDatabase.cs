@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
 using DuckDB.NET.Data;
 
@@ -29,15 +30,32 @@ internal static class StormEventsDatabase
                 return;
             }
 
-            const string csvUrl = "https://www1.ncdc.noaa.gov/pub/data/swdi/stormevents/csvfiles/StormEvents_details-ftp_v1.0_d1950_c20250520.csv.gz";
             var csvPath = Path.Combine(AppContext.BaseDirectory, "StormEvents1950.csv");
             if (!File.Exists(csvPath))
             {
-                using var client = new HttpClient();
-                using var stream = client.GetStreamAsync(csvUrl).Result;
-                using var gzip = new GZipStream(stream, CompressionMode.Decompress);
-                using var file = File.Create(csvPath);
-                gzip.CopyTo(file);
+                // Try bundled CSV from the demo projects first
+                var bundledPaths = new[]
+                {
+                    Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "WebDemo", "wwwroot", "StormEvents.csv.gz")),
+                    Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "DuckDbDemo", "wwwroot", "StormEvents.csv.gz")),
+                };
+                var bundledGz = bundledPaths.FirstOrDefault(File.Exists);
+                if (bundledGz != null)
+                {
+                    using var gzStream = File.OpenRead(bundledGz);
+                    using var gzip = new GZipStream(gzStream, CompressionMode.Decompress);
+                    using var file = File.Create(csvPath);
+                    gzip.CopyTo(file);
+                }
+                else
+                {
+                    const string csvUrl = "https://www1.ncdc.noaa.gov/pub/data/swdi/stormevents/csvfiles/StormEvents_details-ftp_v1.0_d1950_c20250520.csv.gz";
+                    using var client = new HttpClient();
+                    using var stream = client.GetStreamAsync(csvUrl).Result;
+                    using var gzipStream = new GZipStream(stream, CompressionMode.Decompress);
+                    using var file = File.Create(csvPath);
+                    gzipStream.CopyTo(file);
+                }
             }
 
             var path = csvPath.Replace("\\", "/");
