@@ -183,6 +183,7 @@ public class KqlToSqlConverter
             ExpressionStatement exprStmt => ConvertNode(exprStmt.Expression),
             PrintOperator print => _operators.ConvertPrint(print),
             DataTableExpression dt => _operators.ConvertDataTable(dt),
+            ExternalDataExpression ed => _operators.ConvertExternalData(ed),
             FunctionBody fb => ConvertFunctionBody(fb),
             _ => throw new NotSupportedException($"Unsupported node type {node.Kind}")
         };

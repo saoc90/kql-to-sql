@@ -79,6 +79,9 @@ internal class ExpressionSqlBuilder
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} AND {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.OrExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} OR {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+            BinaryExpression bin when bin.Kind == SyntaxKind.MatchesRegexExpression =>
+                TryConvertRegexToLike(bin, leftAlias, rightAlias)
+                ?? $"REGEXP_MATCHES({ConvertExpression(bin.Left, leftAlias, rightAlias)}, {ConvertExpression(bin.Right, leftAlias, rightAlias)})",
             BinaryExpression bin when bin.Kind == SyntaxKind.HasExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
             BinaryExpression bin when bin.Kind == SyntaxKind.HasCsExpression =>
@@ -366,6 +369,30 @@ internal class ExpressionSqlBuilder
         }
         var sep = negated ? " OR " : " AND ";
         return string.Join(sep, conditions);
+    }
+
+    private string? TryConvertRegexToLike(BinaryExpression bin, string? leftAlias, string? rightAlias)
+    {
+        if (bin.Right is not LiteralExpression lit) return null;
+        var pattern = lit.ToString().Trim().Trim('"', '\'');
+        var col = ConvertExpression(bin.Left, leftAlias, rightAlias);
+
+        var branches = pattern.Split('|');
+        var likeClauses = new List<string>();
+        foreach (var branch in branches)
+        {
+            var b = branch.Trim();
+            if (!b.StartsWith("^")) return null;
+            var body = b[1..];
+            // Bail if the body contains regex metacharacters
+            if (System.Text.RegularExpressions.Regex.IsMatch(body.TrimEnd('$'), @"[.*+?\[\](){}\\|^$]"))
+                return null;
+            if (body.EndsWith("$"))
+                likeClauses.Add($"{col} = '{body[..^1]}'");
+            else
+                likeClauses.Add($"{col} LIKE '{body}%'");
+        }
+        return likeClauses.Count == 1 ? likeClauses[0] : $"({string.Join(" OR ", likeClauses)})";
     }
 
     private string ConvertLike(BinaryExpression bin, string? leftAlias, string? rightAlias, string prefix, string suffix, bool caseSensitive, bool negated = false)
