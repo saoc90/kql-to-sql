@@ -222,6 +222,7 @@ internal class ExpressionSqlBuilder
             case "trim_end": return ConvertTrimEnd(fce, leftAlias, rightAlias);
             case "strcat_delim": return ConvertStrcatDelim(fce, leftAlias, rightAlias);
             case "extract": return ConvertExtract(fce, leftAlias, rightAlias);
+            case "toscalar": return ConvertToscalar(fce, leftAlias, rightAlias);
             case "round": return ConvertRound(fce, leftAlias, rightAlias);
             case "datetime_add": return ConvertDatetimeAdd(fce, leftAlias, rightAlias);
             case "datetime_diff": return ConvertDatetimeDiff(fce, leftAlias, rightAlias);
@@ -647,6 +648,14 @@ internal class ExpressionSqlBuilder
         var group = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
         var text = ConvertExpression(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
         return $"REGEXP_EXTRACT({text}, {regex}, {group})";
+    }
+
+    private string ConvertToscalar(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+    {
+        if (fce.ArgumentList.Expressions.Count != 1)
+            throw new NotSupportedException("toscalar() expects exactly one argument");
+        var inner = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
+        return $"({inner} LIMIT 1)";
     }
 
     private string ConvertRound(FunctionCallExpression fce, string? leftAlias, string? rightAlias)

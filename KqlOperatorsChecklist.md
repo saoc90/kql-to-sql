@@ -263,6 +263,13 @@
 - [x] pack_dictionary()
 - [x] range() (scalar)
 - [x] row_window_session()
+- [x] array_shift_left()
+- [x] array_shift_right()
+- [x] ipv4_is_match()
+- [x] ipv4_netmask_suffix()
+- [x] format_ipv4_mask()
+- [x] jaccard_index()
+- [x] toscalar()
 
 ## Aggregate functions
 - [x] avg()
@@ -332,3 +339,8 @@ These operators have no SQL equivalent or require capabilities beyond single-que
 | `evaluate basket()` | Market-basket analysis plugin — no SQL equivalent |
 | `evaluate diffpatterns()` | Pattern diffing plugin — no SQL equivalent |
 | `evaluate preview()` | Interactive preview plugin — no SQL equivalent |
+| `make-graph` | Graph analytics — creates graph objects, no SQL equivalent |
+| `graph-match` | Graph analytics — pattern matching on graph structures |
+| `graph-to-table` | Graph analytics — converts graph back to tabular form |
+| `graph-shortest-paths` | Graph analytics — shortest path algorithms |
+| `graph-mark-components` | Graph analytics — connected component detection |

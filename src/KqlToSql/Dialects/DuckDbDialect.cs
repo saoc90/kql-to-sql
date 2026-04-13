@@ -208,6 +208,23 @@ public class DuckDbDialect : ISqlDialect
             // Parse functions
             "parse_version" => $"STRING_SPLIT({args[0]}, '.')",
 
+            // Array shift functions
+            "array_shift_left" when args.Length >= 2 => args.Length >= 3
+                ? $"LIST_CONCAT(LIST_SLICE({args[0]}, {args[1]} + 1, LEN({args[0]})), LIST_TRANSFORM(GENERATE_SERIES(1, {args[1]}), x -> {args[2]}))"
+                : $"LIST_CONCAT(LIST_SLICE({args[0]}, {args[1]} + 1, LEN({args[0]})), LIST_TRANSFORM(GENERATE_SERIES(1, {args[1]}), x -> NULL))",
+            "array_shift_right" when args.Length >= 2 => args.Length >= 3
+                ? $"LIST_CONCAT(LIST_TRANSFORM(GENERATE_SERIES(1, {args[1]}), x -> {args[2]}), LIST_SLICE({args[0]}, 1, LEN({args[0]}) - {args[1]}))"
+                : $"LIST_CONCAT(LIST_TRANSFORM(GENERATE_SERIES(1, {args[1]}), x -> NULL), LIST_SLICE({args[0]}, 1, LEN({args[0]}) - {args[1]}))",
+
+            // IPv4 additional
+            "ipv4_is_match" when args.Length == 2 => $"((SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT) = (SPLIT_PART({args[1]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[1]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[1]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[1]}, '.', 4)::BIGINT))",
+            "ipv4_is_match" when args.Length == 3 => $"(((SPLIT_PART({args[0]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[0]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[0]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[0]}, '.', 4)::BIGINT) & ((-1::BIGINT) << (32 - {args[2]}))) = ((SPLIT_PART({args[1]}, '.', 1)::BIGINT * 16777216 + SPLIT_PART({args[1]}, '.', 2)::BIGINT * 65536 + SPLIT_PART({args[1]}, '.', 3)::BIGINT * 256 + SPLIT_PART({args[1]}, '.', 4)::BIGINT) & ((-1::BIGINT) << (32 - {args[2]}))))",
+            "ipv4_netmask_suffix" => $"SPLIT_PART({args[0]}, '/', 2)::INT",
+            "format_ipv4_mask" when args.Length == 2 => $"CONCAT(({args[0]}::BIGINT >> 24) & 255, '.', ({args[0]}::BIGINT >> 16) & 255, '.', ({args[0]}::BIGINT >> 8) & 255, '.', {args[0]}::BIGINT & 255, '/', {args[1]})",
+
+            // Set functions
+            "jaccard_index" => $"(LEN(LIST_FILTER({args[0]}, x -> LIST_CONTAINS({args[1]}, x)))::DOUBLE / LEN(LIST_DISTINCT(LIST_CONCAT({args[0]}, {args[1]})))::DOUBLE)",
+
             // Conditional / type functions
             "iff" => null, // handled structurally in ExpressionSqlBuilder
             "gettype" or "typeof" => $"TYPEOF({args[0]})",
