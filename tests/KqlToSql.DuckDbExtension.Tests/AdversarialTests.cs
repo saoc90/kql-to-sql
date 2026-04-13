@@ -142,11 +142,10 @@ StormEvents
     }
 
     [Fact]
-    public void EdgeCase_LetWithSameNameAsTable_GeneratesCircularCTE()
+    public void EdgeCase_LetWithSameNameAsTable_ShadowsCTE()
     {
-        // Known limitation: when a let binding uses the same name as the source table,
-        // the converter produces a CTE that references itself, which DuckDB rejects.
-        // The converter itself succeeds but the resulting SQL is invalid.
+        // let binding with same name as table produces a CTE that shadows the table.
+        // DuckDB 1.5.0+ handles this as a non-recursive CTE referencing the base table.
         var kql = @"
 let StormEvents = StormEvents | where State == 'TEXAS';
 StormEvents | count";
@@ -156,7 +155,8 @@ StormEvents | count";
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
-        Assert.ThrowsAny<Exception>(() => cmd.ExecuteScalar());
+        var count = (long)cmd.ExecuteScalar()!;
+        Assert.True(count > 0);
     }
 
     [Fact]

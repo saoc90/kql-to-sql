@@ -44,19 +44,19 @@ internal static class DuckDbSetup
 
     private static void EnsureDuckDbWindows()
     {
-        const string url = "https://github.com/duckdb/duckdb/releases/download/v1.3.2/libduckdb-windows-amd64.zip";
+        const string url = "https://github.com/duckdb/duckdb/releases/download/v1.5.0/libduckdb-windows-amd64.zip";
         LoadNativeLibrary(url, "duckdb.dll");
     }
 
     private static void EnsureDuckDbLinux()
     {
-        const string url = "https://github.com/duckdb/duckdb/releases/download/v1.3.2/libduckdb-linux-amd64.zip";
+        const string url = "https://github.com/duckdb/duckdb/releases/download/v1.5.0/libduckdb-linux-amd64.zip";
         LoadNativeLibrary(url, "libduckdb.so");
     }
 
     private static void EnsureDuckDbMacOS()
     {
-        const string url = "https://github.com/duckdb/duckdb/releases/download/v1.3.2/libduckdb-osx-universal.zip";
+        const string url = "https://github.com/duckdb/duckdb/releases/download/v1.5.0/libduckdb-osx-universal.zip";
         LoadNativeLibrary(url, "libduckdb.dylib");
     }
 

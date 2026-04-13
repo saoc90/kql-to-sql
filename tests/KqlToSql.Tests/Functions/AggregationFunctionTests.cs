@@ -285,7 +285,7 @@ public class AggregationFunctionTests
         var kql = "StormEvents | summarize hll(State)";
         var sql = converter.Convert(kql);
         Assert.Equal("SELECT hll(State) AS hll_State FROM StormEvents", sql);
-        // DuckDB 1.3.2 doesn't have hll() — SQL generation verified above
+        // hll() is a KQL intermediate sketch function with no DuckDB equivalent
     }
 
     [Fact]
@@ -304,7 +304,6 @@ public class AggregationFunctionTests
         var kql = "StormEvents | summarize hll(State) | summarize hll_merge(hll_State)";
         var sql = converter.Convert(kql);
         Assert.Equal("SELECT hll_merge(hll_State) AS hll_merge_hll_State FROM (SELECT hll(State) AS hll_State FROM StormEvents)", sql);
-        // DuckDB 1.3.2 doesn't have hll()/hll_merge() — SQL generation verified above
     }
 
     [Fact]
