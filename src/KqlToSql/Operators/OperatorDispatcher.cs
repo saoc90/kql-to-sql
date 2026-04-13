@@ -16,15 +16,17 @@ internal sealed class OperatorDispatcher
     private readonly ParseHandlers _parse;
     private readonly AdvancedHandlers _advanced;
 
+    internal ExpressionSqlBuilder ExpressionBuilder { get; }
+
     internal OperatorDispatcher(KqlToSqlConverter converter)
     {
-        var expr = new ExpressionSqlBuilder(converter.Dialect);
-        expr.SetNodeConverter(node => converter.ConvertNode(node));
-        _tabular = new TabularHandlers(converter, expr);
-        _joins = new JoinHandlers(converter, expr);
-        _aggregation = new AggregationHandlers(converter, expr);
-        _parse = new ParseHandlers(converter, expr);
-        _advanced = new AdvancedHandlers(converter, expr);
+        ExpressionBuilder = new ExpressionSqlBuilder(converter.Dialect);
+        ExpressionBuilder.SetNodeConverter(node => converter.ConvertNode(node));
+        _tabular = new TabularHandlers(converter, ExpressionBuilder);
+        _joins = new JoinHandlers(converter, ExpressionBuilder);
+        _aggregation = new AggregationHandlers(converter, ExpressionBuilder);
+        _parse = new ParseHandlers(converter, ExpressionBuilder);
+        _advanced = new AdvancedHandlers(converter, ExpressionBuilder);
     }
 
     internal string ApplyOperator(string leftSql, QueryOperator op, Expression? leftExpression = null)

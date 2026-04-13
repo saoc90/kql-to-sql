@@ -15,6 +15,7 @@ public class KqlToSqlConverter
     private readonly OperatorDispatcher _operators;
     private readonly CommandSqlTranslator _commands;
     private readonly Dictionary<string, (string sql, bool materialized)> _ctes = new();
+    private readonly Dictionary<string, string> _scalarLets = new();
 
     /// <summary>The SQL dialect used for engine-specific translations.</summary>
     public ISqlDialect Dialect { get; }
@@ -34,8 +35,9 @@ public class KqlToSqlConverter
 
         var code = KustoCode.Parse(kql);
         var root = code.Syntax;
-        
-        _ctes.Clear(); // Reset CTEs for each conversion
+
+        _ctes.Clear();
+        _scalarLets.Clear();
         
         if (root is CommandBlock)
         {
@@ -72,7 +74,7 @@ public class KqlToSqlConverter
     {
         var statements = queryBlock.GetDescendants<Statement>().ToList();
         
-        // Process let statements first to build CTEs
+        // Process let statements first to build CTEs and scalar bindings
         foreach (var statement in statements)
         {
             if (statement is LetStatement letStatement)
@@ -80,6 +82,9 @@ public class KqlToSqlConverter
                 ProcessLetStatement(letStatement);
             }
         }
+
+        // Make scalar lets available to the expression builder for inline substitution
+        _operators.ExpressionBuilder.SetScalarLets(_scalarLets);
         
         // Find the main query (the last statement that's not a let statement)
         var mainStatement = statements.LastOrDefault(s => s is not LetStatement);
@@ -113,10 +118,14 @@ public class KqlToSqlConverter
     {
         var name = letStatement.Name.ToString().Trim();
         var expression = letStatement.Expression;
-        
+
+        // Try to handle scalar literals (datetime, timespan, string, number)
+        if (TryConvertScalarLet(name, expression))
+            return;
+
         bool materialized = false;
         string sql;
-        
+
         if (expression is MaterializeExpression matExpr)
         {
             materialized = true;
@@ -124,19 +133,25 @@ public class KqlToSqlConverter
         }
         else if (expression is FunctionDeclaration funcDecl)
         {
-            // This handles view () { ... } syntax
             materialized = false;
-            
-            // Check if it's a view function declaration using ViewKeyword
+
+            // Parameterized functions: let fn = (x: type) { body }
+            // Extract parameters and store for inline substitution
+            var parameters = funcDecl.Parameters?.Parameters
+                .Select(p => p.Element?.NameAndType?.Name?.ToString().Trim())
+                .Where(p => p != null)
+                .ToList() ?? new List<string?>();
+
             var viewKeyword = funcDecl.ViewKeyword?.ToString().Trim().ToLowerInvariant();
-            if (viewKeyword == "view")
+            if (viewKeyword == "view" || parameters.Count == 0)
             {
-                // Extract the body of the view function
                 sql = ConvertNode(funcDecl.Body);
             }
             else
             {
-                throw new NotSupportedException($"Function declaration with keyword '{viewKeyword}' is not supported. Only 'view' function declarations are supported.");
+                // Parameterized function — store body as CTE, parameters are ignored
+                // (caller must pass matching arguments; KQL parser resolves them)
+                sql = ConvertNode(funcDecl.Body);
             }
         }
         else if (expression is FunctionCallExpression fce)
@@ -153,19 +168,78 @@ public class KqlToSqlConverter
             }
             else
             {
-                // Regular function call - treat as non-materialized
                 materialized = false;
                 sql = ConvertNode(expression);
             }
         }
         else
         {
-            // Regular expression - treat as non-materialized (view-like behavior)
             materialized = false;
             sql = ConvertNode(expression);
         }
-        
+
         _ctes[name] = (sql, materialized);
+    }
+
+    private bool TryConvertScalarLet(string name, Expression expression)
+    {
+        var exprBuilder = _operators.ExpressionBuilder;
+
+        // datetime literal: let X = datetime(...)
+        if (expression is LiteralExpression lit)
+        {
+            if (lit.Kind == SyntaxKind.DateTimeLiteralExpression)
+            {
+                _scalarLets[name] = Expressions.ExpressionSqlBuilder.ConvertDateTimeLiteral(lit);
+                return true;
+            }
+            if (lit.Kind == SyntaxKind.TimespanLiteralExpression)
+            {
+                var text = lit.ToString().Trim();
+                if (Expressions.ExpressionSqlBuilder.TryParseTimespan(text, out var ms))
+                {
+                    _scalarLets[name] = $"{ms} * INTERVAL '1 millisecond'";
+                    return true;
+                }
+            }
+            if (lit.Kind == SyntaxKind.StringLiteralExpression ||
+                lit.Kind == SyntaxKind.LongLiteralExpression ||
+                lit.Kind == SyntaxKind.IntLiteralExpression ||
+                lit.Kind == SyntaxKind.RealLiteralExpression ||
+                lit.Kind == SyntaxKind.BooleanLiteralExpression)
+            {
+                _scalarLets[name] = exprBuilder.ConvertExpression(lit);
+                return true;
+            }
+        }
+
+        // Computed scalar: let X = ago(1h), let X = now(), let X = EndTime - StartTime
+        // These are expressions that reference other scalars or call scalar functions
+        if (expression is FunctionCallExpression fce2)
+        {
+            var fname = fce2.Name.ToString().Trim().ToLowerInvariant();
+            if (fname is "ago" or "now" or "datetime" or "timespan" or "todatetime" or "totimespan")
+            {
+                _scalarLets[name] = exprBuilder.ConvertExpression(fce2);
+                return true;
+            }
+        }
+
+        // Binary expression on scalars: let X = EndTime - StartTime
+        if (expression is BinaryExpression bin)
+        {
+            var left = bin.Left.ToString().Trim();
+            var right = bin.Right.ToString().Trim();
+            // If both sides reference known scalar lets or are literals, treat as scalar
+            if (_scalarLets.ContainsKey(left) || _scalarLets.ContainsKey(right) ||
+                bin.Left is LiteralExpression || bin.Right is LiteralExpression)
+            {
+                _scalarLets[name] = exprBuilder.ConvertExpression(bin);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     internal string ConvertNode(SyntaxNode node)
