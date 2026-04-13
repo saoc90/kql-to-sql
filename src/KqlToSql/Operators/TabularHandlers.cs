@@ -73,14 +73,38 @@ internal class TabularHandlers : OperatorHandlerBase
 
     internal string ApplyExtend(string leftSql, ExtendOperator extend)
     {
-        var extras = extend.Expressions.Select(se =>
+        var extras = new List<(string Expr, string Name)>();
+        foreach (var se in extend.Expressions)
         {
             if (se.Element is SimpleNamedExpression sne)
-                return $"{Expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
-            throw new NotSupportedException("Unsupported extend expression");
-        }).ToArray();
+            {
+                var name = sne.Name.ToString().Trim();
+                extras.Add(($"{Expr.ConvertExpression(sne.Expression)} AS {name}", name));
+            }
+            else
+            {
+                throw new NotSupportedException("Unsupported extend expression");
+            }
+        }
 
-        return AppendToSelectStar(leftSql, string.Join(", ", extras));
+        // KQL extend replaces columns with the same name.
+        // Check if any extended column name already exists in the left SQL (from a prior extend).
+        var columnsToExclude = extras
+            .Where(e => leftSql.Contains($" AS {e.Name}", StringComparison.OrdinalIgnoreCase)
+                     || leftSql.Contains($" AS {e.Name},", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.Name)
+            .ToArray();
+
+        var joined = string.Join(", ", extras.Select(e => e.Expr));
+
+        if (columnsToExclude.Length > 0)
+        {
+            var exclude = Dialect.SelectExclude(columnsToExclude);
+            var from = ExtractFrom(leftSql);
+            return $"SELECT {exclude}, {joined} FROM {from}";
+        }
+
+        return AppendToSelectStar(leftSql, joined);
     }
 
     internal string ApplySort(string leftSql, SortOperator sort)
