@@ -12,7 +12,7 @@ namespace KqlToSql;
 
 public class KqlToSqlConverter
 {
-    private readonly OperatorSqlTranslator _operators;
+    private readonly OperatorDispatcher _operators;
     private readonly CommandSqlTranslator _commands;
     private readonly Dictionary<string, (string sql, bool materialized)> _ctes = new();
 
@@ -24,7 +24,7 @@ public class KqlToSqlConverter
     public KqlToSqlConverter(ISqlDialect dialect)
     {
         Dialect = dialect;
-        _operators = new OperatorSqlTranslator(this);
+        _operators = new OperatorDispatcher(this);
         _commands = new CommandSqlTranslator(this);
     }
 
