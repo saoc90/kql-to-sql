@@ -29,6 +29,12 @@ internal sealed class DatabaseCommandHandler
         if (text.StartsWith(".execute database script", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateExecuteScript(text); return true; }
 
+        if (text.StartsWith(".show running queries", StringComparison.OrdinalIgnoreCase))
+        { sql = "SELECT * FROM pg_stat_activity WHERE state = 'active'"; return true; }
+
+        if (text.StartsWith(".show queries", StringComparison.OrdinalIgnoreCase))
+        { sql = "SELECT * FROM pg_stat_activity"; return true; }
+
         return false;
     }
 

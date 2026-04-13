@@ -84,7 +84,7 @@ KQL and SQL have different terminology for similar concepts:
 |---|---|---|---|
 | [x] | `.view Name <\| Query` | `CREATE VIEW Name AS ...` | `CREATE VIEW Name AS ...` |
 | [x] | `.create function Name() { Query }` (with `view=true`) | `CREATE VIEW Name AS ...` | `CREATE VIEW Name AS ...` |
-| [ ] | `.create function Name() { Query }` (with `view=false`) | `CREATE MACRO Name() AS TABLE ...` | `CREATE FUNCTION Name() RETURNS TABLE ... LANGUAGE SQL` |
+| [-] | `.create function Name() { Query }` (with `view=false`) | `CREATE MACRO Name() AS TABLE ...` | `CREATE FUNCTION Name() RETURNS TABLE ... LANGUAGE SQL` |
 | [x] | `.create-or-alter function Name() { Query }` | `CREATE OR REPLACE VIEW Name AS ...` | `CREATE OR REPLACE VIEW Name AS ...` |
 | [x] | `.alter function Name() { Query }` | `CREATE OR REPLACE VIEW/MACRO` | `CREATE OR REPLACE FUNCTION/VIEW` |
 | [x] | `.drop function Name` | `DROP VIEW Name` / `DROP MACRO Name` | `DROP VIEW Name` / `DROP FUNCTION Name` |
@@ -95,10 +95,10 @@ KQL and SQL have different terminology for similar concepts:
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.create materialized-view V on table T { Q }` | — (not supported) | `CREATE MATERIALIZED VIEW V AS ...` |
-| [ ] | `.alter materialized-view V on table T { Q }` | — | `DROP + CREATE MATERIALIZED VIEW` |
-| [ ] | `.drop materialized-view V` | — | `DROP MATERIALIZED VIEW V` |
-| [ ] | `.show materialized-views` | — | `SELECT * FROM pg_matviews` |
+| [x] | `.create materialized-view V on table T { Q }` | — (not supported) | `CREATE MATERIALIZED VIEW V AS ...` |
+| [x] | `.alter materialized-view V on table T { Q }` | — | `DROP + CREATE MATERIALIZED VIEW` |
+| [x] | `.drop materialized-view V` | — | `DROP MATERIALIZED VIEW V` |
+| [x] | `.show materialized-views` | — | `SELECT * FROM pg_matviews` |
 | [-] | `.enable materialized-view V` | — | — (Postgres refreshes manually) |
 | [-] | `.disable materialized-view V` | — | — |
 | [-] | `.rename materialized-view Old to New` | — | `ALTER MATERIALIZED VIEW Old RENAME TO New` |
@@ -144,8 +144,8 @@ KQL and SQL have different terminology for similar concepts:
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.show queries` | — | `SELECT * FROM pg_stat_activity` |
-| [ ] | `.show running queries` | — | `SELECT * FROM pg_stat_activity WHERE state = 'active'` |
+| [x] | `.show queries` | — | `SELECT * FROM pg_stat_activity` |
+| [x] | `.show running queries` | — | `SELECT * FROM pg_stat_activity WHERE state = 'active'` |
 | [-] | `.cancel query "id"` | — | `SELECT pg_cancel_backend(pid)` |
 | [-] | `.show commands` | — | — (no equivalent) |
 | [-] | `.show journal` | — | — (no equivalent) |
@@ -157,7 +157,7 @@ KQL and SQL have different terminology for similar concepts:
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
 | [x] | `.alter table T docstring "desc"` | `COMMENT ON TABLE T IS 'desc'` | `COMMENT ON TABLE T IS 'desc'` |
-| [ ] | `.alter table T folder "path"` | — (no equivalent) | — (no equivalent) |
+| [x] | `.alter table T folder "path"` | — (no equivalent) | — (no equivalent) |
 | [x] | `.alter function F docstring "desc"` | `COMMENT ON VIEW F IS 'desc'` | `COMMENT ON VIEW F IS 'desc'` |
 | [x] | `.alter column T.C docstring "desc"` | `COMMENT ON COLUMN T.C IS 'desc'` | `COMMENT ON COLUMN T.C IS 'desc'` |
 
@@ -165,9 +165,9 @@ KQL and SQL have different terminology for similar concepts:
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.alter table T policy partitioning '{...}'` | Hive partitioning via `COPY ... (PARTITION_BY ...)` | `ALTER TABLE T PARTITION BY RANGE/LIST/HASH (col)` (at create time) |
-| [ ] | `.show table T policy partitioning` | — (inspect Parquet file layout) | `SELECT * FROM pg_partitioned_table WHERE ...` |
-| [ ] | `.delete table T policy partitioning` | — | — (requires recreating table) |
+| [-] | `.alter table T policy partitioning '{...}'` | Hive partitioning via `COPY ... (PARTITION_BY ...)` | `ALTER TABLE T PARTITION BY RANGE/LIST/HASH (col)` (at create time) |
+| [-] | `.show table T policy partitioning` | — (inspect Parquet file layout) | `SELECT * FROM pg_partitioned_table WHERE ...` |
+| [-] | `.delete table T policy partitioning` | — | — (requires recreating table) |
 
 > [!NOTE]
 > ADX partitioning rearranges data within extents for query pruning. DuckDB uses Hive-style partitioning
