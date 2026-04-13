@@ -176,6 +176,10 @@ internal class ExpressionSqlBuilder
             DynamicExpression de => ConvertDynamic(de, leftAlias, rightAlias),
             SimpleNamedExpression sne2 => $"{ConvertExpression(sne2.Expression, leftAlias, rightAlias)} AS {sne2.Name.ToString().Trim()}",
             PipeExpression pe2 when _nodeConverter != null => $"({_nodeConverter(pe2)})",
+            ElementExpression ee => ConvertElementAccess(ee, leftAlias, rightAlias),
+            BracketedExpression be => ConvertExpression(be.Expression, leftAlias, rightAlias),
+            JsonArrayExpression jae => $"LIST_VALUE({string.Join(", ", jae.Values.Select(v => ConvertExpression(v.Element, leftAlias, rightAlias)))})",
+            JsonObjectExpression joe => $"'{joe}'::JSON",
             _ => throw new NotSupportedException($"Unsupported expression {expr.Kind}")
         };
     }
@@ -196,11 +200,33 @@ internal class ExpressionSqlBuilder
         "datetime_part", "format_timespan", "parse_url", "hash", "hash_md5",
         "toreal", "todouble", "toint", "tolong", "tostring", "tobool",
         "binary_and", "binary_or", "binary_xor", "binary_not",
+        "totimespan", "timespan", "todecimal", "tofloat",
+        "format_datetime", "format_timespan", "datetime_add", "datetime_diff", "datetime_part",
+        "startofday", "startofweek", "startofmonth", "startofyear",
+        "endofday", "endofweek", "endofmonth", "endofyear",
+        "replace_string", "replace_regex", "indexof", "countof", "split", "extract", "extract_all",
+        "strcat", "strcat_delim", "substring", "trim", "trim_start", "trim_end",
+        "coalesce", "isnull", "isempty", "isnotempty", "isnotnull",
+        "parse_json", "todynamic", "parse_url", "parse_csv",
+        "array_length", "array_index_of", "array_sort_asc", "array_sort_desc",
+        "bag_keys", "bag_has_key", "set_has_element",
+        "hash", "hash_md5", "hash_sha256",
     };
 
     internal bool IsKnownScalarFunction(string name) =>
         KnownScalarFunctions.Contains(name) ||
         (_userFunctions != null && _userFunctions.ContainsKey(name));
+
+    private string ConvertElementAccess(ElementExpression ee, string? leftAlias, string? rightAlias)
+    {
+        var baseExpr = ConvertExpression(ee.Expression, leftAlias, rightAlias);
+        // The selector is a BracketedExpression wrapping the index
+        var indexExpr = ee.Selector is BracketedExpression be
+            ? ConvertExpression(be.Expression, leftAlias, rightAlias)
+            : ConvertExpression(ee.Selector, leftAlias, rightAlias);
+        // KQL uses 0-based indexing, DuckDB LIST uses 1-based
+        return $"{baseExpr}[{indexExpr} + 1]";
+    }
 
     private string ConvertDynamic(DynamicExpression de, string? leftAlias, string? rightAlias)
     {
