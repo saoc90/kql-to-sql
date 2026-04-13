@@ -20,9 +20,20 @@ KQL and SQL have different terminology for similar concepts:
 | Materialized view | — | Materialized view (`CREATE MATERIALIZED VIEW`) | DuckDB has no native materialized views |
 | Database | Database / Schema | Database / Schema | Direct mapping |
 | External table | External table (`read_parquet`, `read_csv`) | Foreign table (`CREATE FOREIGN TABLE`) | Different mechanisms, same idea |
-| Extent (data shard) | — | — | ADX storage internals, no SQL equivalent |
-| Ingestion mapping | — | — | ADX-specific format mapping |
-| Policy | — | — | ADX engine configuration, no direct SQL equivalent |
+| Extent (data shard) | Row group (Parquet) / block | Page / block | ADX extents ≈ immutable data chunks; similar to Parquet row groups in DuckDB or Postgres pages/blocks |
+| Sharding policy | — | — | Controls extent (chunk) sizing; conceptually similar to Parquet row group size settings |
+| Partitioning policy | Hive partitioning (`PARTITION BY`) | Table partitioning (`PARTITION BY RANGE/LIST/HASH`) | Both ADX and SQL partition data for query pruning, different mechanisms |
+| Retention policy | — | `pg_cron` + `DELETE` / TTL extensions | ADX auto-deletes old data; Postgres requires manual or extension-based TTL |
+| Caching policy | — | — | ADX hot/cold tiering; no direct equivalent in single-node SQL engines |
+| Merge policy | — | `VACUUM` / `autovacuum` | ADX merges extents for compaction; Postgres reclaims space via vacuum |
+| Row order policy | `ORDER BY` in `COPY ... (ORDER BY)` | `CLUSTER ON index` | ADX sorts data within extents; similar to clustered indexes or sorted writes |
+| Update policy | — | Trigger (`CREATE TRIGGER`) | ADX runs a query on ingest to populate derived tables; Postgres triggers are the closest match |
+| Encoding policy | — | Column compression / `TOAST` | ADX per-column encoding profiles; Postgres uses TOAST and optional compression |
+| Row-level security | — | `CREATE POLICY` + `ENABLE ROW LEVEL SECURITY` | Different mechanisms but same goal |
+| Ingestion mapping | — | — | ADX-specific format mapping for ingestion |
+| Ingestion batching | — | — | ADX queued ingestion tuning; no SQL equivalent |
+| Streaming ingestion | — | — | ADX low-latency ingest mode |
+| Auto delete policy | — | `pg_cron` + `DROP TABLE` | ADX auto-drops tables at expiry; Postgres requires scheduled jobs |
 | `docstring` / `folder` | `COMMENT ON` | `COMMENT ON` | Metadata annotations |
 | `.ingest inline` | `INSERT INTO ... VALUES` | `INSERT INTO ... VALUES` | Direct mapping |
 | `.ingest into` (from file) | `COPY ... FROM` | `COPY ... FROM` / `\copy` | File-based bulk load |
@@ -147,18 +158,165 @@ KQL and SQL have different terminology for similar concepts:
 | [ ] | `.alter function F docstring "desc"` | `COMMENT ON VIEW F IS 'desc'` | `COMMENT ON VIEW F IS 'desc'` |
 | [ ] | `.alter column T.C docstring "desc"` | `COMMENT ON COLUMN T.C IS 'desc'` | `COMMENT ON COLUMN T.C IS 'desc'` |
 
+## Policies — partitioning
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [ ] | `.alter table T policy partitioning '{...}'` | Hive partitioning via `COPY ... (PARTITION_BY ...)` | `ALTER TABLE T PARTITION BY RANGE/LIST/HASH (col)` (at create time) |
+| [ ] | `.show table T policy partitioning` | — (inspect Parquet file layout) | `SELECT * FROM pg_partitioned_table WHERE ...` |
+| [ ] | `.delete table T policy partitioning` | — | — (requires recreating table) |
+
+> [!NOTE]
+> ADX partitioning rearranges data within extents for query pruning. DuckDB uses Hive-style partitioning
+> on Parquet files. PostgreSQL uses declarative partitioning at table creation. The concepts align
+> (skip irrelevant data during scans) but the mechanisms differ significantly.
+
+## Policies — retention and auto-delete
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.alter table T policy retention '{...}'` | — | — (use `pg_cron` + `DELETE WHERE ts < now() - interval`) |
+| [-] | `.show table T policy retention` | — | — |
+| [-] | `.delete table T policy retention` | — | — |
+| [-] | `.alter table T policy auto_delete '{...}'` | — | — (use `pg_cron` + `DROP TABLE`) |
+| [-] | `.show table T policy auto_delete` | — | — |
+
+> [!NOTE]
+> ADX automatically garbage-collects data older than the retention period. SQL engines don't have built-in
+> TTL — this requires application-level scheduling (e.g. `pg_cron`, cron jobs).
+
+## Policies — row order and sharding
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.alter table T policy roworder (Col asc)` | `COPY ... (ORDER BY col)` (sorted Parquet writes) | `CLUSTER T USING index_name` |
+| [-] | `.show table T policy roworder` | — | — |
+| [-] | `.alter table T policy sharding '{...}'` | — (Parquet row group size settings) | — (page/block size is system-level) |
+| [-] | `.show table T policy sharding` | — | — |
+
+> [!NOTE]
+> ADX extents are immutable columnar data chunks (typically 1M rows). The **sharding policy** controls
+> their size. This is conceptually similar to Parquet **row groups** in DuckDB or **pages/blocks** in
+> PostgreSQL — all are the unit of I/O and compression. The **row order policy** controls sort order
+> within these chunks, similar to sorted Parquet writes or PostgreSQL `CLUSTER`.
+
+## Policies — merge and encoding
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.alter table T policy merge '{...}'` | — | `VACUUM` / `autovacuum` settings (conceptually similar) |
+| [-] | `.show table T policy merge` | — | — |
+| [-] | `.alter column T.C policy encoding type=...` | — | — (Postgres uses TOAST + compression internally) |
+| [-] | `.show table T policy encoding` | — | — |
+
+> [!NOTE]
+> ADX **merge policy** controls how small extents are compacted into larger ones (background compaction).
+> PostgreSQL's `VACUUM`/`autovacuum` serves a similar purpose — reclaiming dead tuple space and
+> reorganizing data. DuckDB's columnar storage handles this transparently.
+>
+> ADX **encoding policy** controls per-column compression profiles (`Identifier`, `BigObject`, `Vector16`).
+> This is similar to PostgreSQL TOAST strategies or DuckDB's automatic columnar compression, but ADX
+> exposes it as an explicit user-controlled setting.
+
+## Policies — update (triggers)
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.alter table T policy update '[{...}]'` | — | `CREATE TRIGGER` + trigger function |
+| [-] | `.show table T policy update` | — | `SELECT * FROM information_schema.triggers` |
+| [-] | `.delete table T policy update` | — | `DROP TRIGGER` |
+
+> [!NOTE]
+> ADX **update policies** run a transformation query whenever new data arrives in a source table,
+> writing results to a target table. This is the ADX equivalent of PostgreSQL `AFTER INSERT` triggers.
+> DuckDB does not support triggers.
+
+## Policies — row-level security
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.alter table T policy row_level_security enable "fn"` | — | `ALTER TABLE T ENABLE ROW LEVEL SECURITY` + `CREATE POLICY` |
+| [-] | `.show table T policy row_level_security` | — | `SELECT * FROM pg_policies WHERE tablename = 'T'` |
+| [-] | `.delete table T policy row_level_security` | — | `DROP POLICY ... ON T` + `ALTER TABLE T DISABLE ROW LEVEL SECURITY` |
+
+> [!NOTE]
+> Both ADX and PostgreSQL support row-level security but with different models. ADX uses a KQL function
+> that replaces all access to the table. PostgreSQL uses policies with `USING` clauses attached to roles.
+> DuckDB does not support RLS.
+
+## Policies — caching, streaming ingestion, ingestion batching
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.alter table T policy caching hot = 30d` | — | — |
+| [-] | `.alter table T policy streamingingestion '{...}'` | — | — |
+| [-] | `.alter table T policy ingestionbatching '{...}'` | — | — |
+
+> [!NOTE]
+> These are ADX-specific engine tuning policies with no SQL equivalent:
+> - **Caching** controls hot (SSD) vs cold (remote storage) tiering
+> - **Streaming ingestion** enables sub-second ingest latency
+> - **Ingestion batching** tunes how queued ingestion groups small chunks
+
+## Extents (data shards)
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.show table T extents` | — | `SELECT * FROM pg_stat_user_tables WHERE relname = 'T'` (block-level stats) |
+| [-] | `.show database Db extents` | — | `SELECT * FROM pg_stat_user_tables` |
+| [-] | `.drop extents from T where ...` | — | — |
+| [-] | `.move extents from T1 to T2` | — | — |
+| [-] | `.replace extents in table T <\| ...` | — | — |
+
+> [!NOTE]
+> ADX **extents** are immutable columnar data shards — the fundamental unit of storage and query.
+> Each extent is a self-contained chunk of compressed, sorted columnar data (similar to a Parquet file).
+>
+> | ADX concept | DuckDB analogy | PostgreSQL analogy |
+> |---|---|---|
+> | Extent | Parquet row group | Heap page / block (8KB) |
+> | Extent creation | Writing a new Parquet file/row group | Inserting rows into new pages |
+> | Extent merge | — (transparent) | `VACUUM FULL` / `CLUSTER` |
+> | Extent tagging | — | — |
+> | Extent drop | Deleting a Parquet file | `VACUUM` (reclaims dead pages) |
+>
+> SQL engines don't expose individual storage shards as first-class objects the way ADX does.
+> Extent-level operations (drop, move, replace) have no direct SQL equivalent.
+
+## Ingestion mappings
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.create table T ingestion csv mapping 'Name' '[...]'` | — (handled in `read_csv` options) | — (handled in `COPY` options) |
+| [-] | `.show table T ingestion csv mappings` | — | — |
+| [-] | `.drop table T ingestion csv mapping 'Name'` | — | — |
+
+> [!NOTE]
+> ADX ingestion mappings define how source file columns/fields map to table columns during ingestion,
+> supporting CSV, JSON, Parquet, Avro, and ORC formats. In SQL engines this is handled inline:
+> DuckDB uses `read_csv(columns=...)` / `read_json(columns=...)` parameters, PostgreSQL uses
+> `COPY ... WITH (FORMAT ..., HEADER ...)` options and column lists.
+
+## Access control
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.add database Db admins ('user')` | — | `GRANT ALL ON DATABASE Db TO user` |
+| [-] | `.drop database Db admins ('user')` | — | `REVOKE ALL ON DATABASE Db FROM user` |
+| [-] | `.show database Db principals` | — | `SELECT * FROM information_schema.role_table_grants` |
+
+> [!NOTE]
+> ADX uses a role-based principal model (`admins`, `viewers`, `ingestors`, etc.) tied to AAD identities.
+> PostgreSQL uses `GRANT`/`REVOKE` with roles. DuckDB has no built-in access control (single-user engine).
+
 ## Explicitly not translatable
 
-These commands are deeply tied to ADX cluster infrastructure and have no SQL equivalent:
+These commands have no meaningful SQL equivalent in any dialect:
 
 | KQL command | Reason |
 |---|---|
-| `.show extents` / `.drop extents` / `.move extents` | ADX storage shard management — no concept in SQL engines |
-| `.alter table policy *` (retention, caching, merge, partitioning, etc.) | ADX engine policies — SQL engines configure this differently |
-| `.alter table policy row_level_security` | ADX-specific RLS — Postgres has `CREATE POLICY`, but the mechanism is fundamentally different |
-| `.alter table policy update` | ADX ingest-time triggers — no direct SQL mapping |
-| `.create ingestion mapping` | ADX format-mapping for ingestion — SQL engines handle format in `COPY`/`read_*` options |
-| `.add database principals` / `.drop database principals` | ADX access control — SQL uses `GRANT`/`REVOKE` |
-| `.create entity_group` | ADX cross-database grouping — no equivalent |
-| `.undo drop table` | ADX soft-delete recovery — no equivalent in DuckDB/PGlite |
-| `.show capacity` | ADX cluster capacity metrics |
+| `.undo drop table` | ADX soft-delete recovery with versioning — SQL `DROP` is permanent |
+| `.show capacity` | ADX cluster resource capacity metrics |
+| `.show journal` | ADX metadata change audit log |
+| `.show operations` | ADX async operation tracking |
+| `.create entity_group` | ADX cross-database table grouping |
