@@ -53,7 +53,8 @@ The full feature matrix is in [`KqlOperatorsChecklist.md`](./KqlOperatorsCheckli
 
 ## Translation examples
 
-**KQL** — self-join, `iif()`, percentage change, `project`
+> `join`, `iif()`, `round()`, `project`, `sort`
+
 ```kql
 Events
 | where Year == 2021
@@ -71,7 +72,10 @@ Events
 | project State, Events2020, Events2021, Trend, Damage2020, Damage2021, DamageChangePct
 | sort by DamageChangePct desc
 ```
-**Generated SQL**
+
+<details>
+<summary>Generated SQL</summary>
+
 ```sql
 SELECT State, Events2020, Events2021, Trend, Damage2020, Damage2021, DamageChangePct
 FROM (SELECT *,
@@ -93,9 +97,12 @@ FROM (SELECT *,
 ORDER BY DamageChangePct DESC
 ```
 
+</details>
+
 ---
 
-**KQL** — `let`, `datatable`, `join`, `case()`, `countif`
+> `let`, `datatable`, `join`, `case()`, `countif`, `top`
+
 ```kql
 let severity_lookup = datatable(EventType:string, SeverityWeight:long) [
     'Tornado', 5, 'Hurricane', 5, 'Flash Flood', 3, 'Hail', 2, 'Thunderstorm Wind', 1
@@ -115,7 +122,10 @@ enriched
 | extend CatastrophicPct = round(CatastrophicCount * 100.0 / EventCount, 1)
 | top 5 by TotalInjuries
 ```
-**Generated SQL**
+
+<details>
+<summary>Generated SQL</summary>
+
 ```sql
 WITH severity_lookup AS NOT MATERIALIZED (
   SELECT * FROM (VALUES
@@ -140,9 +150,12 @@ FROM (SELECT State, COUNT(*) AS EventCount, SUM(Injuries) AS TotalInjuries,
 ORDER BY TotalInjuries DESC LIMIT 5
 ```
 
+</details>
+
 ---
 
-**KQL** — `lookup`, `between`, `case()`, nested `iif()`
+> `lookup`, `between`, `case()`, nested `iif()`, `summarize`
+
 ```kql
 Events
 | lookup StateInfo on State
@@ -156,7 +169,10 @@ Events
     iif(TotalInjuries >= 5, 'Warning', 'Normal'))
 | sort by Region asc, Quarter asc
 ```
-**Generated SQL**
+
+<details>
+<summary>Generated SQL</summary>
+
 ```sql
 SELECT *,
   CASE WHEN TotalInjuries >= 10 THEN 'Critical'
@@ -176,6 +192,8 @@ FROM (SELECT Region, Quarter,
   GROUP BY ALL)
 ORDER BY Region ASC, Quarter ASC
 ```
+
+</details>
 
 ## Contributing
 
