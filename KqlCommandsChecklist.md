@@ -297,6 +297,99 @@ KQL and SQL have different terminology for similar concepts:
 > DuckDB uses `read_csv(columns=...)` / `read_json(columns=...)` parameters, PostgreSQL uses
 > `COPY ... WITH (FORMAT ..., HEADER ...)` options and column lists.
 
+## Data purge and soft delete
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [ ] | `.purge table T records <\| where Predicate` | `DELETE FROM T WHERE ...` | `DELETE FROM T WHERE ...` |
+| [ ] | `.delete table T records <\| where Predicate` | `DELETE FROM T WHERE ...` | `DELETE FROM T WHERE ...` |
+| [-] | `.show purges` | — | — |
+
+> [!NOTE]
+> ADX distinguishes between **purge** (GDPR-compliant permanent erasure, audited, slow) and **soft delete**
+> (fast logical deletion). Both translate to SQL `DELETE FROM ... WHERE ...` since SQL engines don't
+> have this distinction — `DELETE` is always permanent once committed.
+
+## Stored query results
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [ ] | `.set stored_query_result Name <\| Query` | `CREATE TEMP TABLE Name AS (SELECT ...)` | `CREATE TEMP TABLE Name AS (SELECT ...)` |
+| [ ] | `.show stored_query_result Name` | `SELECT * FROM Name` | `SELECT * FROM Name` |
+| [ ] | `.drop stored_query_result Name` | `DROP TABLE Name` | `DROP TABLE Name` |
+
+> [!NOTE]
+> ADX stored query results persist query output for later retrieval. The closest SQL equivalent is
+> temporary tables. ADX stored results have a TTL and are scoped to the database; SQL temp tables
+> are scoped to the session.
+
+## Table creation variants
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [ ] | `.create table T based-on OtherT` | `CREATE TABLE T AS SELECT * FROM OtherT LIMIT 0` | `CREATE TABLE T (LIKE OtherT INCLUDING ALL)` |
+
+## Ingestion time policy
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.alter table T policy ingestiontime true` | `ALTER TABLE T ADD COLUMN _ingestion_time TIMESTAMP DEFAULT NOW()` | `ALTER TABLE T ADD COLUMN _ingestion_time TIMESTAMP DEFAULT NOW()` |
+| [-] | `.show table T policy ingestiontime` | — | — |
+
+> [!NOTE]
+> ADX **ingestion time policy** automatically adds a hidden `ingestion_time()` column to every row.
+> In SQL this can be approximated with a `DEFAULT NOW()` column, though the semantics differ slightly
+> (ADX timestamps the entire extent, not individual rows).
+
+## Restricted view access
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.alter table T policy restricted_view_access true` | — | `REVOKE SELECT ON T FROM PUBLIC` |
+| [-] | `.show table T policy restricted_view_access` | — | — |
+| [-] | `.delete table T policy restricted_view_access` | — | `GRANT SELECT ON T TO PUBLIC` |
+
+> [!NOTE]
+> ADX restricted view access prevents non-admin users from querying a table. In PostgreSQL this maps
+> to revoking `SELECT` privileges. DuckDB has no access control.
+
+## Database scripts
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [ ] | `.execute database script <\| .create table ...; .create function ...` | Execute multiple SQL statements | Execute multiple SQL statements |
+
+> [!NOTE]
+> ADX `.execute database script` runs multiple management commands atomically. In SQL this is simply
+> executing multiple DDL statements in a transaction.
+
+## Continuous export
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.create-or-alter continuous-export Name ...` | — | — (use `pg_cron` + `COPY`) |
+| [-] | `.drop continuous-export Name` | — | — |
+| [-] | `.show continuous-export Name` | — | — |
+| [-] | `.enable continuous-export Name` | — | — |
+| [-] | `.disable continuous-export Name` | — | — |
+| [-] | `.show continuous-export failures` | — | — |
+
+> [!NOTE]
+> ADX continuous export periodically exports query results to external storage. SQL engines don't have
+> built-in scheduled exports — this requires external scheduling (`pg_cron`, cron jobs, application layer).
+
+## Plugins and extensions
+
+| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
+|---|---|---|---|
+| [-] | `.show plugins` | `SELECT * FROM duckdb_extensions()` | `SELECT * FROM pg_extension` |
+| [-] | `.enable plugin Name` | `INSTALL Name; LOAD Name` | `CREATE EXTENSION Name` |
+| [-] | `.disable plugin Name` | — | `DROP EXTENSION Name` |
+
+> [!NOTE]
+> ADX plugins provide evaluate operators (e.g. `evaluate python()`, `evaluate R()`). DuckDB extensions
+> and PostgreSQL extensions serve a similar purpose — adding functions, types, or operators to the engine.
+
 ## Access control
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
@@ -304,14 +397,26 @@ KQL and SQL have different terminology for similar concepts:
 | [-] | `.add database Db admins ('user')` | — | `GRANT ALL ON DATABASE Db TO user` |
 | [-] | `.drop database Db admins ('user')` | — | `REVOKE ALL ON DATABASE Db FROM user` |
 | [-] | `.show database Db principals` | — | `SELECT * FROM information_schema.role_table_grants` |
+| [-] | `.add table T admins ('user')` | — | `GRANT ALL ON TABLE T TO user` |
+| [-] | `.add table T viewers ('user')` | — | `GRANT SELECT ON TABLE T TO user` |
+| [-] | `.add table T ingestors ('user')` | — | `GRANT INSERT ON TABLE T TO user` |
 
 > [!NOTE]
-> ADX uses a role-based principal model (`admins`, `viewers`, `ingestors`, etc.) tied to AAD identities.
-> PostgreSQL uses `GRANT`/`REVOKE` with roles. DuckDB has no built-in access control (single-user engine).
+> ADX uses a role-based principal model (`admins`, `viewers`, `ingestors`, `monitors`,
+> `unrestrictedviewers`) tied to AAD identities. PostgreSQL uses `GRANT`/`REVOKE` with roles
+> and privileges. DuckDB has no built-in access control (single-user engine).
+>
+> | ADX role | PostgreSQL privilege |
+> |---|---|
+> | `admins` | `ALL` (or role membership) |
+> | `viewers` | `SELECT` |
+> | `unrestrictedviewers` | `SELECT` (bypasses RLS) |
+> | `ingestors` | `INSERT` |
+> | `monitors` | Access to `pg_stat_*` views |
 
 ## Explicitly not translatable
 
-These commands have no meaningful SQL equivalent in any dialect:
+These commands are deeply tied to ADX cluster infrastructure and have no SQL equivalent:
 
 | KQL command | Reason |
 |---|---|
@@ -320,3 +425,15 @@ These commands have no meaningful SQL equivalent in any dialect:
 | `.show journal` | ADX metadata change audit log |
 | `.show operations` | ADX async operation tracking |
 | `.create entity_group` | ADX cross-database table grouping |
+| `.alter cluster policy sandbox` | ADX compute sandbox configuration |
+| `.alter cluster policy callout` | ADX external API allowlisting |
+| `.alter cluster policy capacity` | ADX cluster resource limits |
+| `.alter policy managed_identity` | Azure managed identity configuration |
+| `.alter query acceleration policy` | ADX query acceleration for external tables |
+| `.alter cluster policy query_weak_consistency` | ADX distributed query consistency settings |
+| `.create-or-alter workload_group` | ADX workload group resource governance |
+| `.alter cluster policy request_classification` | ADX request routing to workload groups |
+| `.create-or-alter graph_model` / `.make graph_snapshot` | ADX persistent graph analytics |
+| `.alter follower database` | ADX database replication |
+| `.alter database/table policy mirroring` | ADX data mirroring to external stores |
+| `.alter database/table policy extent_tags_retention` | ADX extent tag lifecycle management |
