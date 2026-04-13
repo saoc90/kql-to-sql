@@ -53,10 +53,7 @@ The full feature matrix is in [`KqlOperatorsChecklist.md`](./KqlOperatorsCheckli
 
 ## Translation examples
 
-KQL input and the generated DuckDB SQL.
-
----
-
+**KQL** — self-join, `iif()`, percentage change, `project`
 ```kql
 Events
 | where Year == 2021
@@ -74,7 +71,7 @@ Events
 | project State, Events2020, Events2021, Trend, Damage2020, Damage2021, DamageChangePct
 | sort by DamageChangePct desc
 ```
-
+**Generated SQL**
 ```sql
 SELECT State, Events2020, Events2021, Trend, Damage2020, Damage2021, DamageChangePct
 FROM (SELECT *,
@@ -98,6 +95,7 @@ ORDER BY DamageChangePct DESC
 
 ---
 
+**KQL** — `let`, `datatable`, `join`, `case()`, `countif`
 ```kql
 let severity_lookup = datatable(EventType:string, SeverityWeight:long) [
     'Tornado', 5, 'Hurricane', 5, 'Flash Flood', 3, 'Hail', 2, 'Thunderstorm Wind', 1
@@ -117,7 +115,7 @@ enriched
 | extend CatastrophicPct = round(CatastrophicCount * 100.0 / EventCount, 1)
 | top 5 by TotalInjuries
 ```
-
+**Generated SQL**
 ```sql
 WITH severity_lookup AS NOT MATERIALIZED (
   SELECT * FROM (VALUES
@@ -144,6 +142,7 @@ ORDER BY TotalInjuries DESC LIMIT 5
 
 ---
 
+**KQL** — `lookup`, `between`, `case()`, nested `iif()`
 ```kql
 Events
 | lookup StateInfo on State
@@ -157,7 +156,7 @@ Events
     iif(TotalInjuries >= 5, 'Warning', 'Normal'))
 | sort by Region asc, Quarter asc
 ```
-
+**Generated SQL**
 ```sql
 SELECT *,
   CASE WHEN TotalInjuries >= 10 THEN 'Critical'
