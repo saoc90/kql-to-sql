@@ -10,6 +10,7 @@ internal class ExpressionSqlBuilder
 {
     private readonly ISqlDialect _dialect;
     private Func<SyntaxNode, string>? _nodeConverter;
+    private Dictionary<string, string>? _scalarLets;
 
     internal ExpressionSqlBuilder(ISqlDialect dialect)
     {
@@ -18,6 +19,9 @@ internal class ExpressionSqlBuilder
 
     /// <summary>Sets the callback used to convert full KQL sub-expressions (e.g. toscalar pipelines).</summary>
     internal void SetNodeConverter(Func<SyntaxNode, string> converter) => _nodeConverter = converter;
+
+    /// <summary>Sets the scalar let bindings for inline substitution.</summary>
+    internal void SetScalarLets(Dictionary<string, string> scalarLets) => _scalarLets = scalarLets;
 
     private static readonly Dictionary<string, string> CastFunctionMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -145,12 +149,7 @@ internal class ExpressionSqlBuilder
             BetweenExpression be when be.Kind == SyntaxKind.NotBetweenExpression =>
                 ConvertBetween(be, leftAlias, rightAlias, true),
             InExpression inExpr => ConvertInExpression(inExpr, leftAlias, rightAlias),
-            NameReference nr => nr.Name.ToString().Trim() switch
-            {
-                "$left" => leftAlias ?? "$left",
-                "$right" => rightAlias ?? "$right",
-                var name => name
-            },
+            NameReference nr => ResolveNameReference(nr, leftAlias, rightAlias),
             PathExpression pe =>
                 $"{ConvertExpression(pe.Expression, leftAlias, rightAlias)}.{pe.Selector}",
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression =>
@@ -172,6 +171,16 @@ internal class ExpressionSqlBuilder
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
             _ => throw new NotSupportedException($"Unsupported expression {expr.Kind}")
         };
+    }
+
+    private string ResolveNameReference(NameReference nr, string? leftAlias, string? rightAlias)
+    {
+        var name = nr.Name.ToString().Trim();
+        if (name == "$left") return leftAlias ?? "$left";
+        if (name == "$right") return rightAlias ?? "$right";
+        if (_scalarLets != null && _scalarLets.TryGetValue(name, out var scalarSql))
+            return scalarSql;
+        return name;
     }
 
     private static string ConvertStringLiteral(LiteralExpression lit)
@@ -540,7 +549,7 @@ internal class ExpressionSqlBuilder
             var text = lit.ToString().Trim().Trim('"', '\'');
             if (TryParseTimespan(text, out var ms))
             {
-                return $"TO_TIMESTAMP_MS(FLOOR(EPOCH_MS({value})/{ms})*{ms})";
+                return $"TO_TIMESTAMP_MS(FLOOR(EPOCH_MS(CAST({value} AS TIMESTAMP))/{ms})*{ms})";
             }
         }
 
@@ -563,7 +572,7 @@ internal class ExpressionSqlBuilder
             var text = lit.ToString().Trim().Trim('"', '\'');
             if (TryParseTimespan(text, out var ms))
             {
-                return $"TO_TIMESTAMP_MS(FLOOR((EPOCH_MS({value}) - EPOCH_MS({fixedPoint}))/{ms})*{ms} + EPOCH_MS({fixedPoint}))";
+                return $"TO_TIMESTAMP_MS(FLOOR((EPOCH_MS(CAST({value} AS TIMESTAMP)) - EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP)))/{ms})*{ms} + EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP)))";
             }
         }
 
