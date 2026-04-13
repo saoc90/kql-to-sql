@@ -73,6 +73,9 @@ internal sealed class OperatorDispatcher
             SerializeOperator serialize => _advanced.ApplySerialize(leftSql, serialize),
             GetSchemaOperator => _advanced.ApplyGetSchema(leftSql),
 
+            // Invoke: calls a stored function on the current result set
+            InvokeOperator invoke => ApplyInvoke(leftSql, invoke),
+
             // Pass-through operators
             AsOperator => leftSql,
             ConsumeOperator => leftSql,
@@ -80,6 +83,23 @@ internal sealed class OperatorDispatcher
 
             _ => throw new NotSupportedException($"Unsupported operator {op.Kind}")
         };
+    }
+
+    private string ApplyInvoke(string leftSql, InvokeOperator invoke)
+    {
+        // invoke calls a stored function on the current result set.
+        // If the function is a known CTE, the CTE body already contains the query logic.
+        // The invoke just pipes leftSql as the input — return the CTE reference since it
+        // already encapsulates the transformation.
+        if (invoke.Function is FunctionCallExpression fce)
+        {
+            var funcName = fce.Name.ToString().Trim();
+            // The function body (stored as CTE) already has the full pipeline.
+            // Invoke is essentially: use leftSql as input, apply funcName's pipeline.
+            // Since CTEs are self-contained, just SELECT from the CTE.
+            return $"SELECT * FROM {funcName}";
+        }
+        return leftSql;
     }
 
     // Standalone converters (not piped from a left expression)

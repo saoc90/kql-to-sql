@@ -91,19 +91,27 @@ public class KqlToSqlConverter
         
         // Find the main query (the last statement that's not a let statement)
         var mainStatement = statements.LastOrDefault(s => s is not LetStatement);
-        if (mainStatement == null)
-        {
-            throw new NotSupportedException("No main query found in query block");
-        }
-        
         string mainSql;
-        if (mainStatement is ExpressionStatement exprStatement)
+
+        if (mainStatement != null)
         {
-            mainSql = ConvertNode(exprStatement.Expression);
+            mainSql = mainStatement is ExpressionStatement exprStatement
+                ? ConvertNode(exprStatement.Expression)
+                : ConvertNode(mainStatement);
         }
         else
         {
-            mainSql = ConvertNode(mainStatement);
+            // All statements are let — use the last CTE as the main query
+            if (_ctes.Any())
+            {
+                var lastCte = _ctes.Last();
+                _ctes.Remove(lastCte.Key);
+                mainSql = $"SELECT * FROM ({lastCte.Value.sql})";
+            }
+            else
+            {
+                throw new NotSupportedException("No main query found in query block");
+            }
         }
         
         // If we have CTEs, wrap the main query
@@ -235,13 +243,21 @@ public class KqlToSqlConverter
             // Scalar functions: time, type casts, math
             if (fnameLower is "ago" or "now" or "datetime" or "timespan" or "todatetime" or "totimespan"
                 or "toreal" or "todouble" or "toint" or "tolong" or "tostring" or "tobool" or "toboolean"
-                or "int" or "long" or "real" or "double" or "bool" or "string"
+                or "todecimal" or "tofloat"
+                or "int" or "long" or "real" or "double" or "bool" or "string" or "decimal" or "float"
                 or "strlen" or "tolower" or "toupper" or "abs" or "floor" or "ceiling" or "round"
                 or "min_of" or "max_of" or "iif" or "iff" or "coalesce" or "strcat")
             {
                 _scalarLets[name] = exprBuilder.ConvertExpression(fce2);
                 return true;
             }
+        }
+
+        // toscalar(): let X = toscalar(query) → (SELECT ... LIMIT 1)
+        if (expression is ToScalarExpression tse)
+        {
+            _scalarLets[name] = exprBuilder.ConvertExpression(tse);
+            return true;
         }
 
         // Binary expression on scalars: let X = EndTime - StartTime
@@ -284,18 +300,24 @@ public class KqlToSqlConverter
 
     private string ConvertFunctionCall(FunctionCallExpression fce)
     {
-        var functionName = fce.Name.ToString().Trim().ToLowerInvariant();
-        
-        if (functionName == "view")
+        var functionName = fce.Name.ToString().Trim();
+        var functionNameLower = functionName.ToLowerInvariant();
+
+        if (functionNameLower == "view")
         {
-            // Direct view function call without let statement
             if (fce.ArgumentList.Expressions.Count != 1)
             {
                 throw new NotSupportedException($"{functionName}() expects exactly one argument");
             }
             return ConvertNode(fce.ArgumentList.Expressions[0].Element);
         }
-        
+
+        // CTE reference: let myFunc = view() { ... }; ... myFunc() → SELECT * FROM myFunc
+        if (_ctes.ContainsKey(functionName) && fce.ArgumentList.Expressions.Count == 0)
+        {
+            return $"SELECT * FROM {functionName}";
+        }
+
         throw new NotSupportedException($"Unsupported function {functionName}");
     }
 
