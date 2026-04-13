@@ -6,16 +6,6 @@ Supports two SQL dialects: **DuckDB** and **PGlite** (Postgres).
 
 - Live demo: https://saoc90.github.io/kql-to-sql/
 
-## What's in the repo
-
-| Project | Description |
-|---------|-------------|
-| `src/KqlToSql` | Core library — parses KQL and emits SQL for the selected dialect |
-| `src/KqlToSql.DuckDbExtension` | Native DuckDB extension exposing `kql_to_sql()` as a built-in function |
-| `src/DuckDbDemo` | Blazor WASM demo — runs KQL queries client-side against DuckDB in the browser |
-| `tests/KqlToSql.Tests` | Unit tests against DuckDB with the StormEvents dataset |
-| `tests/KqlToSql.IntegrationTests` | Integration tests executing converted SQL against DuckDB WASM and PGlite |
-
 ## Usage
 
 ### As a library
@@ -26,7 +16,6 @@ using KqlToSql.Dialects;
 
 var converter = new KqlToSqlConverter(new DuckDbDialect());
 var sql = converter.Convert("StormEvents | where State == 'TEXAS' | summarize count() by EventType");
-// SELECT EventType, COUNT(*) AS count FROM StormEvents WHERE State = 'TEXAS' GROUP BY ALL
 ```
 
 ### As a DuckDB extension
@@ -62,21 +51,56 @@ The full feature matrix is in [`KqlOperatorsChecklist.md`](./KqlOperatorsCheckli
 - **40+ aggregate functions** — `count`, `sum`, `avg`, `percentile`, `dcount`, `make_list`, `make_set`, `arg_max`, `countif`, `sumif`, `stdev`, `variance`, `hll`, and more
 - **Control commands** — `create table`, view declarations
 
-## Query showcases
+## Translation examples
 
-Complex KQL that translates and executes correctly. Each is a passing integration test.
+KQL input and the generated DuckDB SQL.
 
-### Risk score dashboard
+---
 
-`let` with `datatable`, `join`, `case()`, multi-aggregate `summarize`, `countif`, computed ranking:
+```kql
+Events
+| where Year == 2021
+| summarize Events2021 = count(), Damage2021 = sum(DamageProperty + DamageCrops),
+    AvgInjuries = avg(toreal(Injuries)) by State
+| join kind=inner (
+    Events
+    | where Year == 2020
+    | summarize Events2020 = count(), Damage2020 = sum(DamageProperty + DamageCrops) by State
+) on State
+| extend AvgInjuries = round(AvgInjuries, 1)
+| extend DamageChangePct = round((Damage2021 - Damage2020) * 100.0 / Damage2020, 1)
+| extend Trend = iif(Events2021 > Events2020, 'Increasing',
+    iif(Events2021 < Events2020, 'Decreasing', 'Stable'))
+| project State, Events2020, Events2021, Trend, Damage2020, Damage2021, DamageChangePct
+| sort by DamageChangePct desc
+```
+
+```sql
+SELECT State, Events2020, Events2021, Trend, Damage2020, Damage2021, DamageChangePct
+FROM (SELECT *,
+    CASE WHEN Events2021 > Events2020 THEN 'Increasing'
+         ELSE CASE WHEN Events2021 < Events2020 THEN 'Decreasing' ELSE 'Stable' END
+    END AS Trend
+  FROM (SELECT *, ROUND((Damage2021 - Damage2020) * 100.0 / Damage2020, 1) AS DamageChangePct
+    FROM (SELECT *, ROUND(AvgInjuries, 1) AS AvgInjuries
+      FROM (SELECT L.*, R.* EXCLUDE (State)
+        FROM (SELECT State, COUNT(*) AS Events2021,
+              SUM(DamageProperty + DamageCrops) AS Damage2021,
+              AVG(TRY_CAST(Injuries AS DOUBLE)) AS AvgInjuries
+            FROM Events WHERE Year = 2021 GROUP BY ALL) AS L
+        INNER JOIN
+          (SELECT State, COUNT(*) AS Events2020,
+              SUM(DamageProperty + DamageCrops) AS Damage2020
+            FROM Events WHERE Year = 2020 GROUP BY ALL) AS R
+        ON L.State = R.State))))
+ORDER BY DamageChangePct DESC
+```
+
+---
 
 ```kql
 let severity_lookup = datatable(EventType:string, SeverityWeight:long) [
-    'Tornado', 5,
-    'Hurricane', 5,
-    'Flash Flood', 3,
-    'Hail', 2,
-    'Thunderstorm Wind', 1
+    'Tornado', 5, 'Hurricane', 5, 'Flash Flood', 3, 'Hail', 2, 'Thunderstorm Wind', 1
 ];
 let enriched = Events
     | join kind=inner (severity_lookup) on EventType
@@ -86,69 +110,39 @@ let enriched = Events
         TotalDamage >= 10000,  'Severe',
         'Moderate');
 enriched
-| summarize
-    EventCount = count(),
-    TotalInjuries = sum(Injuries),
-    TotalDeaths = sum(Deaths),
+| summarize EventCount = count(), TotalInjuries = sum(Injuries),
     AvgSeverity = avg(toreal(SeverityWeight)),
-    MaxDamage = max(TotalDamage),
     CatastrophicCount = countif(DamageCategory == 'Catastrophic')
   by State
-| extend AvgSeverity = round(AvgSeverity, 2)
 | extend CatastrophicPct = round(CatastrophicCount * 100.0 / EventCount, 1)
-| extend RiskScore = round(AvgSeverity * EventCount + TotalInjuries * 2 + TotalDeaths * 10, 1)
-| project State, EventCount, TotalInjuries, TotalDeaths, AvgSeverity, CatastrophicPct, RiskScore
-| top 5 by RiskScore
+| top 5 by TotalInjuries
 ```
 
-### Year-over-year comparison
-
-Self-join, `iif()` trend labels, percentage change:
-
-```kql
-Events
-| where Year == 2021
-| summarize Events2021 = count(), Damage2021 = sum(DamageProperty + DamageCrops), AvgInjuries = avg(toreal(Injuries)) by State
-| join kind=inner (
-    Events
-    | where Year == 2020
-    | summarize Events2020 = count(), Damage2020 = sum(DamageProperty + DamageCrops) by State
-) on State
-| extend AvgInjuries = round(AvgInjuries, 1)
-| extend DamageChangePct = round((Damage2021 - Damage2020) * 100.0 / Damage2020, 1)
-| extend Trend = iif(Events2021 > Events2020, 'Increasing', iif(Events2021 < Events2020, 'Decreasing', 'Stable'))
-| project State, Events2020, Events2021, Trend, Damage2020, Damage2021, DamageChangePct, AvgInjuries
-| sort by DamageChangePct desc
+```sql
+WITH severity_lookup AS NOT MATERIALIZED (
+  SELECT * FROM (VALUES
+    ('Tornado', 5), ('Hurricane', 5), ('Flash Flood', 3),
+    ('Hail', 2), ('Thunderstorm Wind', 1)
+  ) AS t(EventType, SeverityWeight)
+),
+enriched AS NOT MATERIALIZED (
+  SELECT *, CASE WHEN TotalDamage >= 100000 THEN 'Catastrophic'
+                 WHEN TotalDamage >= 10000 THEN 'Severe'
+                 ELSE 'Moderate' END AS DamageCategory
+  FROM (SELECT *, DamageProperty + DamageCrops AS TotalDamage
+    FROM (SELECT L.*, R.* EXCLUDE (EventType)
+      FROM Events AS L
+      INNER JOIN severity_lookup AS R ON L.EventType = R.EventType))
+)
+SELECT *, ROUND(CatastrophicCount * 100.0 / EventCount, 1) AS CatastrophicPct
+FROM (SELECT State, COUNT(*) AS EventCount, SUM(Injuries) AS TotalInjuries,
+    AVG(TRY_CAST(SeverityWeight AS DOUBLE)) AS AvgSeverity,
+    COUNT(*) FILTER (WHERE DamageCategory = 'Catastrophic') AS CatastrophicCount
+  FROM enriched GROUP BY ALL)
+ORDER BY TotalInjuries DESC LIMIT 5
 ```
 
-### Source reliability analysis
-
-`case()`, `countif`, `dcount`, `strcat`, `tostring`:
-
-```kql
-Events
-| extend TotalDamage = DamageProperty + DamageCrops
-| extend DamageBucket = case(
-    TotalDamage >= 100000, 'High',
-    TotalDamage >= 10000,  'Medium',
-    'Low')
-| summarize
-    Reports = count(),
-    AvgMagnitude = avg(Magnitude),
-    HighDamageReports = countif(DamageBucket == 'High'),
-    TotalInjuries = sum(Injuries),
-    StatesAffected = dcount(State)
-  by Source
-| extend AvgMagnitude = round(AvgMagnitude, 2)
-| extend HighDamagePct = round(HighDamageReports * 100.0 / Reports, 1)
-| extend SourceLabel = strcat(Source, ' (', tostring(Reports), ' reports)')
-| project SourceLabel, Reports, AvgMagnitude, HighDamagePct, TotalInjuries, StatesAffected
-| sort by Reports desc
-```
-
-### Regional impact with lookup
-
-`lookup` enrichment, `between`, per-capita metrics, nested `iif`:
+---
 
 ```kql
 Events
@@ -156,15 +150,32 @@ Events
 | where Injuries between (1 .. 10)
 | extend ImpactPerCapita = round(Injuries * 1000000.0 / Population, 2)
 | extend Quarter = case(Month <= 3, 'Q1', Month <= 6, 'Q2', Month <= 9, 'Q3', 'Q4')
-| summarize
-    IncidentCount = count(),
-    TotalInjuries = sum(Injuries),
+| summarize IncidentCount = count(), TotalInjuries = sum(Injuries),
     AvgImpactPerCapita = avg(ImpactPerCapita)
   by Region, Quarter
-| extend AvgImpactPerCapita = round(AvgImpactPerCapita, 4)
-| extend Severity = iif(TotalInjuries >= 10, 'Critical', iif(TotalInjuries >= 5, 'Warning', 'Normal'))
-| project Region, Quarter, IncidentCount, TotalInjuries, AvgImpactPerCapita, Severity
+| extend Severity = iif(TotalInjuries >= 10, 'Critical',
+    iif(TotalInjuries >= 5, 'Warning', 'Normal'))
 | sort by Region asc, Quarter asc
+```
+
+```sql
+SELECT *,
+  CASE WHEN TotalInjuries >= 10 THEN 'Critical'
+       ELSE CASE WHEN TotalInjuries >= 5 THEN 'Warning' ELSE 'Normal' END
+  END AS Severity
+FROM (SELECT Region, Quarter,
+    COUNT(*) AS IncidentCount, SUM(Injuries) AS TotalInjuries,
+    AVG(ImpactPerCapita) AS AvgImpactPerCapita
+  FROM (SELECT *,
+      CASE WHEN Month <= 3 THEN 'Q1' WHEN Month <= 6 THEN 'Q2'
+           WHEN Month <= 9 THEN 'Q3' ELSE 'Q4' END AS Quarter
+    FROM (SELECT *, ROUND(Injuries * 1000000.0 / Population, 2) AS ImpactPerCapita
+      FROM (SELECT L.*, R.* EXCLUDE (State)
+        FROM Events AS L
+        LEFT OUTER JOIN StateInfo AS R ON L.State = R.State)
+      WHERE Injuries BETWEEN 1 AND 10))
+  GROUP BY ALL)
+ORDER BY Region ASC, Quarter ASC
 ```
 
 ## Contributing
