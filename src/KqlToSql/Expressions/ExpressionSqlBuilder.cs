@@ -162,6 +162,8 @@ internal class ExpressionSqlBuilder
                 $"(-{ConvertExpression(pu.Expression, leftAlias, rightAlias)})",
             PrefixUnaryExpression pu when pu.Kind == SyntaxKind.UnaryPlusExpression =>
                 ConvertExpression(pu.Expression, leftAlias, rightAlias),
+            ToScalarExpression tse =>
+                $"({ConvertExpression(tse.Expression, leftAlias, rightAlias)} LIMIT 1)",
             FunctionCallExpression fce =>
                 ConvertFunctionCall(fce, leftAlias, rightAlias),
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
