@@ -1070,13 +1070,9 @@ union texas, kansas | count";
     }
 
     [Fact]
-    public void Bug_Parse_TypedCapture_NoMatch_CastFails()
+    public void Parse_TypedCapture_NoMatch_ReturnsNull()
     {
-        // BUG: parse with typed captures (e.g., Code:long) generates
-        // CAST(REGEXP_EXTRACT(...) AS BIGINT). When the regex doesn't match,
-        // REGEXP_EXTRACT returns empty string ''. CAST('' AS BIGINT) fails
-        // in DuckDB. Should use TRY_CAST instead of CAST for parse captures,
-        // so non-matching rows get NULL instead of an error.
+        // Fixed: parse typed captures use TRY_CAST so non-matching rows get NULL
         using var conn = InMemory();
         using var setup = conn.CreateCommand();
         setup.CommandText = "CREATE TABLE Logs (Message VARCHAR); INSERT INTO Logs VALUES ('totally unrelated'), ('Error: 404 Not Found');";
@@ -1084,11 +1080,19 @@ union texas, kansas | count";
 
         var kql = "Logs | parse Message with 'Error: ' Code:long ' ' Rest";
         var sql = _converter.Convert(kql);
+        Assert.Contains("TRY_CAST", sql);
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
-        // BUG: DuckDB throws because CAST('' AS BIGINT) fails for non-matching rows
-        Assert.ThrowsAny<Exception>(() => cmd.ExecuteReader());
+        using var reader = cmd.ExecuteReader();
+
+        var rows = 0;
+        while (reader.Read())
+        {
+            rows++;
+            // Non-matching row should have NULL for Code
+        }
+        Assert.Equal(2, rows);
     }
 
     [Fact]
@@ -2000,24 +2004,19 @@ StormEvents
     // ══════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void Bug_Tolong_EmptyString_CastFails()
+    public void Tolong_EmptyString_ReturnsNull()
     {
-        // BUG: tolong('') translates to CAST('' AS BIGINT) which DuckDB
-        // rejects with "Could not convert string '' to INT64".
-        // KQL tolong('') returns null. The converter should use TRY_CAST
-        // for type conversion functions to match KQL null-on-failure semantics.
+        // Fixed: tolong('') now uses TRY_CAST, returns NULL, coalesce picks 42
         var kql = "print x = coalesce(tolong(''), 42)";
         var sql = _converter.Convert(kql);
+        Assert.Contains("TRY_CAST", sql);
 
         using var conn = InMemory();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
-        // BUG: CAST('' AS BIGINT) throws instead of returning NULL
-        Assert.ThrowsAny<Exception>(() =>
-        {
-            using var reader = cmd.ExecuteReader();
-            reader.Read();
-        });
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(42L, reader.GetInt64(reader.GetOrdinal("x")));
     }
 
     [Fact]

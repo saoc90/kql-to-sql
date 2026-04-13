@@ -207,7 +207,8 @@ internal class ExpressionSqlBuilder
                 throw new NotSupportedException($"{name} expects exactly one argument");
             }
             var arg = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
-            return $"CAST({arg} AS {sqlType})";
+            // KQL type conversions return null on failure (e.g. tolong('') → null)
+            return $"TRY_CAST({arg} AS {sqlType})";
         }
 
         // Handle functions with structural conversion logic
