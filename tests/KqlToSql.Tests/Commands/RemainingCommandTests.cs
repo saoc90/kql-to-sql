@@ -142,4 +142,32 @@ public class RemainingCommandTests
         var sql = converter.Convert(".set MyTable <| StormEvents | take 5");
         Assert.Equal("CREATE TABLE MyTable AS (SELECT * FROM StormEvents LIMIT 5)", sql);
     }
+
+    // --- .alter table folder (no-op) ---
+
+    [Fact]
+    public void Translates_Alter_Table_Folder_As_Noop()
+    {
+        var converter = new KqlToSqlConverter();
+        var sql = converter.Convert(".alter table MyTable folder \"Reports/Q1\"");
+        Assert.Contains("no-op", sql);
+    }
+
+    // --- .show queries ---
+
+    [Fact]
+    public void Translates_Show_Queries()
+    {
+        var converter = new KqlToSqlConverter();
+        var sql = converter.Convert(".show queries");
+        Assert.Equal("SELECT * FROM pg_stat_activity", sql);
+    }
+
+    [Fact]
+    public void Translates_Show_Running_Queries()
+    {
+        var converter = new KqlToSqlConverter();
+        var sql = converter.Convert(".show running queries");
+        Assert.Equal("SELECT * FROM pg_stat_activity WHERE state = 'active'", sql);
+    }
 }

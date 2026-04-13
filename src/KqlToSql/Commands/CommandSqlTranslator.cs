@@ -5,6 +5,7 @@ namespace KqlToSql.Commands;
 public class CommandSqlTranslator
 {
     private readonly ExternalTableCommandHandler _externalTable;
+    private readonly MaterializedViewCommandHandler _materializedView;
     private readonly TableCommandHandler _table;
     private readonly FunctionCommandHandler _function;
     private readonly DataCommandHandler _data;
@@ -13,6 +14,7 @@ public class CommandSqlTranslator
     public CommandSqlTranslator(KqlToSqlConverter converter)
     {
         _externalTable = new ExternalTableCommandHandler();
+        _materializedView = new MaterializedViewCommandHandler(converter);
         _table = new TableCommandHandler(converter);
         _function = new FunctionCommandHandler(converter);
         _data = new DataCommandHandler(converter);
@@ -23,9 +25,8 @@ public class CommandSqlTranslator
     {
         var text = kqlText.Trim();
 
-        // Order matters: more specific prefixes first within each handler.
-        // External tables before tables, as ".create external table" starts with ".create".
         if (_externalTable.TryTranslate(text, out var sql)) return sql;
+        if (_materializedView.TryTranslate(text, out sql)) return sql;
         if (_table.TryTranslate(text, out sql)) return sql;
         if (_function.TryTranslate(text, out sql)) return sql;
         if (_data.TryTranslate(text, out sql)) return sql;

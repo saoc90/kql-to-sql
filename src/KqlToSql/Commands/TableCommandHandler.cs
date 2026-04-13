@@ -44,6 +44,9 @@ internal sealed class TableCommandHandler
         if (Regex.IsMatch(text, @"^\.alter\s+table\s+\w+\s+docstring\b", RegexOptions.IgnoreCase))
         { sql = TranslateTableDocstring(text); return true; }
 
+        if (Regex.IsMatch(text, @"^\.alter\s+table\s+\w+\s+folder\b", RegexOptions.IgnoreCase))
+        { sql = "SELECT 1 /* .alter table folder is a no-op — no SQL equivalent */"; return true; }
+
         if (Regex.IsMatch(text, @"^\.alter\s+table\s+\w+\s*\(", RegexOptions.IgnoreCase))
         { sql = TranslateAlterTableSchema(text); return true; }
 
