@@ -344,3 +344,16 @@ These operators have no SQL equivalent or require capabilities beyond single-que
 | `graph-to-table` | Graph analytics — converts graph back to tabular form |
 | `graph-shortest-paths` | Graph analytics — shortest path algorithms |
 | `graph-mark-components` | Graph analytics — connected component detection |
+
+## Silently ignored (no-op)
+
+These are execution hints for the ADX distributed engine. They don't change query results and have no SQL equivalent — they're safely ignored during translation:
+
+| Hint | Context |
+|---|---|
+| `hint.shufflekey` | join, summarize, make-series — controls data distribution across cluster nodes |
+| `hint.strategy = shuffle/broadcast` | join — controls join strategy on distributed engine |
+| `hint.materialized` | as, evaluate — controls materialization on distributed engine |
+| `hint.num_partitions` | shuffle — controls partition count on distributed engine |
+| `hint.spread` | join — controls spread factor on distributed engine |
+| `hint.remote` | join — controls remote execution on cross-cluster joins |
