@@ -17,6 +17,15 @@ internal sealed class DataCommandHandler
         if (text.StartsWith(".ingest", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateIngest(text); return true; }
 
+        if (text.StartsWith(".set stored_query_result", StringComparison.OrdinalIgnoreCase))
+        { sql = TranslateSetStoredQueryResult(text); return true; }
+
+        if (text.StartsWith(".show stored_query_result", StringComparison.OrdinalIgnoreCase))
+        { sql = TranslateShowStoredQueryResult(text); return true; }
+
+        if (text.StartsWith(".drop stored_query_result", StringComparison.OrdinalIgnoreCase))
+        { sql = TranslateDropStoredQueryResult(text); return true; }
+
         if (text.StartsWith(".set-or-replace", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateSetOrReplace(text); return true; }
 
@@ -111,6 +120,29 @@ internal sealed class DataCommandHandler
         if (selectSql.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             return $"DELETE FROM {table} WHERE {selectSql.Substring(prefix.Length)}";
         throw new NotSupportedException("Could not extract WHERE clause for delete/purge");
+    }
+
+    private string TranslateSetStoredQueryResult(string text)
+    {
+        var match = Regex.Match(text, @"\.set\s+stored_query_result\s+(\w+)\s*<\|\s*(.*)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        if (!match.Success) throw new NotSupportedException("Malformed set stored_query_result command");
+        var name = match.Groups[1].Value;
+        var sql = _converter.Convert(match.Groups[2].Value.Trim());
+        return $"CREATE TEMP TABLE {name} AS ({sql})";
+    }
+
+    private static string TranslateShowStoredQueryResult(string text)
+    {
+        var match = Regex.Match(text, @"\.show\s+stored_query_result\s+(\w+)", RegexOptions.IgnoreCase);
+        if (!match.Success) throw new NotSupportedException("Malformed show stored_query_result command");
+        return $"SELECT * FROM {match.Groups[1].Value}";
+    }
+
+    private static string TranslateDropStoredQueryResult(string text)
+    {
+        var match = Regex.Match(text, @"\.drop\s+stored_query_result\s+(\w+)", RegexOptions.IgnoreCase);
+        if (!match.Success) throw new NotSupportedException("Malformed drop stored_query_result command");
+        return $"DROP TABLE IF EXISTS {match.Groups[1].Value}";
     }
 
     private (string Table, string Sql) ParseDataCmd(string text, string pattern)

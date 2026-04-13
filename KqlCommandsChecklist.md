@@ -46,14 +46,14 @@ KQL and SQL have different terminology for similar concepts:
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
 | [x] | `.create table T (Col:type, ...)` | `CREATE TABLE T (Col TYPE, ...)` | `CREATE TABLE T (Col TYPE, ...)` |
-| [ ] | `.create tables T1(...), T2(...)` | Multiple `CREATE TABLE` statements | Multiple `CREATE TABLE` statements |
-| [ ] | `.create-merge table T (Col:type, ...)` | `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN` | `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN` |
+| [x] | `.create tables T1(...), T2(...)` | Multiple `CREATE TABLE` statements | Multiple `CREATE TABLE` statements |
+| [x] | `.create-merge table T (Col:type, ...)` | `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN` | `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN` |
 | [x] | `.create table T based-on Other` | `CREATE TABLE T AS SELECT * FROM Other LIMIT 0` | `CREATE TABLE T (LIKE Other INCLUDING ALL)` |
 | [x] | `.drop table T` | `DROP TABLE T` | `DROP TABLE T` |
 | [x] | `.drop tables (T1, T2)` | Multiple `DROP TABLE` statements | Multiple `DROP TABLE` statements |
 | [x] | `.rename table Old to New` | `ALTER TABLE Old RENAME TO New` | `ALTER TABLE Old RENAME TO New` |
 | [x] | `.rename tables New=Old, ...` | Multiple `ALTER TABLE ... RENAME TO` | Multiple `ALTER TABLE ... RENAME TO` |
-| [ ] | `.alter table T (Col:type, ...)` | `DROP TABLE` + `CREATE TABLE` (schema replace) | `DROP TABLE` + `CREATE TABLE` (schema replace) |
+| [x] | `.alter table T (Col:type, ...)` | `DROP TABLE` + `CREATE TABLE` (schema replace) | `DROP TABLE` + `CREATE TABLE` (schema replace) |
 | [x] | `.alter-merge table T (Col:type, ...)` | `ALTER TABLE T ADD COLUMN ...` | `ALTER TABLE T ADD COLUMN ...` |
 | [x] | `.clear table T data` | `TRUNCATE TABLE T` | `TRUNCATE TABLE T` |
 | [x] | `.show tables` | `SELECT * FROM information_schema.tables WHERE table_schema = 'main'` | `SELECT * FROM information_schema.tables` |
@@ -73,10 +73,10 @@ KQL and SQL have different terminology for similar concepts:
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.create database Db` | `CREATE SCHEMA Db` | `CREATE DATABASE Db` / `CREATE SCHEMA Db` |
-| [ ] | `.drop database Db` | `DROP SCHEMA Db` | `DROP DATABASE Db` / `DROP SCHEMA Db` |
-| [ ] | `.show databases` | `SHOW DATABASES` / `SELECT * FROM information_schema.schemata` | `SELECT * FROM information_schema.schemata` |
-| [ ] | `.show database schema` | `DESCRIBE` / `information_schema` queries | `information_schema` queries |
+| [x] | `.create database Db` | `CREATE SCHEMA Db` | `CREATE DATABASE Db` / `CREATE SCHEMA Db` |
+| [x] | `.drop database Db` | `DROP SCHEMA Db` | `DROP DATABASE Db` / `DROP SCHEMA Db` |
+| [x] | `.show databases` | `SHOW DATABASES` / `SELECT * FROM information_schema.schemata` | `SELECT * FROM information_schema.schemata` |
+| [x] | `.show database schema` | `DESCRIBE` / `information_schema` queries | `information_schema` queries |
 
 ## Stored functions and views
 
@@ -86,10 +86,10 @@ KQL and SQL have different terminology for similar concepts:
 | [x] | `.create function Name() { Query }` (with `view=true`) | `CREATE VIEW Name AS ...` | `CREATE VIEW Name AS ...` |
 | [ ] | `.create function Name() { Query }` (with `view=false`) | `CREATE MACRO Name() AS TABLE ...` | `CREATE FUNCTION Name() RETURNS TABLE ... LANGUAGE SQL` |
 | [x] | `.create-or-alter function Name() { Query }` | `CREATE OR REPLACE VIEW Name AS ...` | `CREATE OR REPLACE VIEW Name AS ...` |
-| [ ] | `.alter function Name() { Query }` | `CREATE OR REPLACE VIEW/MACRO` | `CREATE OR REPLACE FUNCTION/VIEW` |
+| [x] | `.alter function Name() { Query }` | `CREATE OR REPLACE VIEW/MACRO` | `CREATE OR REPLACE FUNCTION/VIEW` |
 | [x] | `.drop function Name` | `DROP VIEW Name` / `DROP MACRO Name` | `DROP VIEW Name` / `DROP FUNCTION Name` |
 | [x] | `.show functions` | `SELECT * FROM information_schema.tables WHERE table_type = 'VIEW'` | `SELECT * FROM information_schema.routines` / `pg_views` |
-| [ ] | `.show function Name` | `SELECT * FROM duckdb_views() WHERE ...` | `SELECT * FROM information_schema.routines WHERE ...` |
+| [x] | `.show function Name` | `SELECT * FROM duckdb_views() WHERE ...` | `SELECT * FROM information_schema.routines WHERE ...` |
 
 ## Materialized views
 
@@ -150,16 +150,16 @@ KQL and SQL have different terminology for similar concepts:
 | [-] | `.show commands` | — | — (no equivalent) |
 | [-] | `.show journal` | — | — (no equivalent) |
 | [-] | `.show operations` | — | — (no equivalent) |
-| [ ] | `.show version` | `SELECT version()` | `SELECT version()` |
+| [x] | `.show version` | `SELECT version()` | `SELECT version()` |
 
 ## Metadata annotations
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.alter table T docstring "desc"` | `COMMENT ON TABLE T IS 'desc'` | `COMMENT ON TABLE T IS 'desc'` |
+| [x] | `.alter table T docstring "desc"` | `COMMENT ON TABLE T IS 'desc'` | `COMMENT ON TABLE T IS 'desc'` |
 | [ ] | `.alter table T folder "path"` | — (no equivalent) | — (no equivalent) |
-| [ ] | `.alter function F docstring "desc"` | `COMMENT ON VIEW F IS 'desc'` | `COMMENT ON VIEW F IS 'desc'` |
-| [ ] | `.alter column T.C docstring "desc"` | `COMMENT ON COLUMN T.C IS 'desc'` | `COMMENT ON COLUMN T.C IS 'desc'` |
+| [x] | `.alter function F docstring "desc"` | `COMMENT ON VIEW F IS 'desc'` | `COMMENT ON VIEW F IS 'desc'` |
+| [x] | `.alter column T.C docstring "desc"` | `COMMENT ON COLUMN T.C IS 'desc'` | `COMMENT ON COLUMN T.C IS 'desc'` |
 
 ## Policies — partitioning
 
@@ -317,20 +317,14 @@ KQL and SQL have different terminology for similar concepts:
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.set stored_query_result Name <\| Query` | `CREATE TEMP TABLE Name AS (SELECT ...)` | `CREATE TEMP TABLE Name AS (SELECT ...)` |
-| [ ] | `.show stored_query_result Name` | `SELECT * FROM Name` | `SELECT * FROM Name` |
-| [ ] | `.drop stored_query_result Name` | `DROP TABLE Name` | `DROP TABLE Name` |
+| [x] | `.set stored_query_result Name <\| Query` | `CREATE TEMP TABLE Name AS (SELECT ...)` | `CREATE TEMP TABLE Name AS (SELECT ...)` |
+| [x] | `.show stored_query_result Name` | `SELECT * FROM Name` | `SELECT * FROM Name` |
+| [x] | `.drop stored_query_result Name` | `DROP TABLE Name` | `DROP TABLE Name` |
 
 > [!NOTE]
 > ADX stored query results persist query output for later retrieval. The closest SQL equivalent is
 > temporary tables. ADX stored results have a TTL and are scoped to the database; SQL temp tables
 > are scoped to the session.
-
-## Table creation variants
-
-| Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
-|---|---|---|---|
-| [ ] | `.create table T based-on OtherT` | `CREATE TABLE T AS SELECT * FROM OtherT LIMIT 0` | `CREATE TABLE T (LIKE OtherT INCLUDING ALL)` |
 
 ## Ingestion time policy
 
@@ -360,7 +354,7 @@ KQL and SQL have different terminology for similar concepts:
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.execute database script <\| .create table ...; .create function ...` | Execute multiple SQL statements | Execute multiple SQL statements |
+| [x] | `.execute database script <\| .create table ...; .create function ...` | Execute multiple SQL statements | Execute multiple SQL statements |
 
 > [!NOTE]
 > ADX `.execute database script` runs multiple management commands atomically. In SQL this is simply
