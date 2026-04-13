@@ -48,25 +48,26 @@ KQL and SQL have different terminology for similar concepts:
 | [x] | `.create table T (Col:type, ...)` | `CREATE TABLE T (Col TYPE, ...)` | `CREATE TABLE T (Col TYPE, ...)` |
 | [ ] | `.create tables T1(...), T2(...)` | Multiple `CREATE TABLE` statements | Multiple `CREATE TABLE` statements |
 | [ ] | `.create-merge table T (Col:type, ...)` | `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN` | `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN` |
-| [ ] | `.drop table T` | `DROP TABLE T` | `DROP TABLE T` |
-| [ ] | `.drop tables (T1, T2)` | Multiple `DROP TABLE` statements | Multiple `DROP TABLE` statements |
-| [ ] | `.rename table Old to New` | `ALTER TABLE Old RENAME TO New` | `ALTER TABLE Old RENAME TO New` |
-| [ ] | `.rename tables New=Old, ...` | Multiple `ALTER TABLE ... RENAME TO` | Multiple `ALTER TABLE ... RENAME TO` |
+| [x] | `.create table T based-on Other` | `CREATE TABLE T AS SELECT * FROM Other LIMIT 0` | `CREATE TABLE T (LIKE Other INCLUDING ALL)` |
+| [x] | `.drop table T` | `DROP TABLE T` | `DROP TABLE T` |
+| [x] | `.drop tables (T1, T2)` | Multiple `DROP TABLE` statements | Multiple `DROP TABLE` statements |
+| [x] | `.rename table Old to New` | `ALTER TABLE Old RENAME TO New` | `ALTER TABLE Old RENAME TO New` |
+| [x] | `.rename tables New=Old, ...` | Multiple `ALTER TABLE ... RENAME TO` | Multiple `ALTER TABLE ... RENAME TO` |
 | [ ] | `.alter table T (Col:type, ...)` | `DROP TABLE` + `CREATE TABLE` (schema replace) | `DROP TABLE` + `CREATE TABLE` (schema replace) |
-| [ ] | `.alter-merge table T (Col:type, ...)` | `ALTER TABLE T ADD COLUMN ...` | `ALTER TABLE T ADD COLUMN ...` |
-| [ ] | `.clear table T data` | `DELETE FROM T` or `TRUNCATE TABLE T` | `TRUNCATE TABLE T` |
-| [ ] | `.show tables` | `SHOW TABLES` / `SELECT * FROM information_schema.tables` | `SELECT * FROM information_schema.tables` |
-| [ ] | `.show table T details` | `DESCRIBE T` / `PRAGMA table_info('T')` | `SELECT * FROM information_schema.columns WHERE table_name = 'T'` |
-| [ ] | `.show table T schema as json` | `DESCRIBE T` (format as JSON in app layer) | `SELECT * FROM information_schema.columns` (format as JSON) |
+| [x] | `.alter-merge table T (Col:type, ...)` | `ALTER TABLE T ADD COLUMN ...` | `ALTER TABLE T ADD COLUMN ...` |
+| [x] | `.clear table T data` | `TRUNCATE TABLE T` | `TRUNCATE TABLE T` |
+| [x] | `.show tables` | `SELECT * FROM information_schema.tables WHERE table_schema = 'main'` | `SELECT * FROM information_schema.tables` |
+| [x] | `.show table T details` | `DESCRIBE T` | `SELECT * FROM information_schema.columns WHERE table_name = 'T'` |
+| [x] | `.show table T schema as json` | `DESCRIBE T` (format as JSON in app layer) | `SELECT * FROM information_schema.columns` (format as JSON) |
 
 ## Column management
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.alter column T.Col type=newtype` | `ALTER TABLE T ALTER COLUMN Col TYPE newtype` | `ALTER TABLE T ALTER COLUMN Col TYPE newtype` |
-| [ ] | `.drop column T.Col` | `ALTER TABLE T DROP COLUMN Col` | `ALTER TABLE T DROP COLUMN Col` |
-| [ ] | `.drop table T columns (C1, C2)` | Multiple `ALTER TABLE T DROP COLUMN` | `ALTER TABLE T DROP COLUMN C1, DROP COLUMN C2` |
-| [ ] | `.rename column T.Old to New` | `ALTER TABLE T RENAME COLUMN Old TO New` | `ALTER TABLE T RENAME COLUMN Old TO New` |
+| [x] | `.alter column T.Col type=newtype` | `ALTER TABLE T ALTER COLUMN Col TYPE newtype` | `ALTER TABLE T ALTER COLUMN Col TYPE newtype` |
+| [x] | `.drop column T.Col` | `ALTER TABLE T DROP COLUMN Col` | `ALTER TABLE T DROP COLUMN Col` |
+| [x] | `.drop table T columns (C1, C2)` | Multiple `ALTER TABLE T DROP COLUMN` | `ALTER TABLE T DROP COLUMN C1, DROP COLUMN C2` |
+| [x] | `.rename column T.Old to New` | `ALTER TABLE T RENAME COLUMN Old TO New` | `ALTER TABLE T RENAME COLUMN Old TO New` |
 
 ## Database management
 
@@ -82,12 +83,12 @@ KQL and SQL have different terminology for similar concepts:
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
 | [x] | `.view Name <\| Query` | `CREATE VIEW Name AS ...` | `CREATE VIEW Name AS ...` |
-| [ ] | `.create function Name() { Query }` (with `view=true`) | `CREATE VIEW Name AS ...` | `CREATE VIEW Name AS ...` |
+| [x] | `.create function Name() { Query }` (with `view=true`) | `CREATE VIEW Name AS ...` | `CREATE VIEW Name AS ...` |
 | [ ] | `.create function Name() { Query }` (with `view=false`) | `CREATE MACRO Name() AS TABLE ...` | `CREATE FUNCTION Name() RETURNS TABLE ... LANGUAGE SQL` |
-| [ ] | `.create-or-alter function Name() { Query }` | `CREATE OR REPLACE VIEW Name AS ...` | `CREATE OR REPLACE VIEW Name AS ...` |
+| [x] | `.create-or-alter function Name() { Query }` | `CREATE OR REPLACE VIEW Name AS ...` | `CREATE OR REPLACE VIEW Name AS ...` |
 | [ ] | `.alter function Name() { Query }` | `CREATE OR REPLACE VIEW/MACRO` | `CREATE OR REPLACE FUNCTION/VIEW` |
-| [ ] | `.drop function Name` | `DROP VIEW Name` / `DROP MACRO Name` | `DROP VIEW Name` / `DROP FUNCTION Name` |
-| [ ] | `.show functions` | `SELECT * FROM duckdb_views()` / `duckdb_macros()` | `SELECT * FROM information_schema.routines` / `pg_views` |
+| [x] | `.drop function Name` | `DROP VIEW Name` / `DROP MACRO Name` | `DROP VIEW Name` / `DROP FUNCTION Name` |
+| [x] | `.show functions` | `SELECT * FROM information_schema.tables WHERE table_type = 'VIEW'` | `SELECT * FROM information_schema.routines` / `pg_views` |
 | [ ] | `.show function Name` | `SELECT * FROM duckdb_views() WHERE ...` | `SELECT * FROM information_schema.routines WHERE ...` |
 
 ## Materialized views
@@ -111,27 +112,29 @@ KQL and SQL have different terminology for similar concepts:
 |---|---|---|---|
 | [x] | `.ingest inline into table T <\| data` | `INSERT INTO T VALUES (...)` | `INSERT INTO T VALUES (...)` |
 | [x] | `.ingest into table T 'path'` | `COPY T FROM 'path' (HEADER, AUTO_DETECT TRUE)` | `COPY T FROM 'path' WITH (FORMAT csv, HEADER true)` |
-| [ ] | `.set T <\| Query` | `CREATE TABLE T AS (SELECT ...)` | `CREATE TABLE T AS (SELECT ...)` |
-| [ ] | `.append T <\| Query` | `INSERT INTO T SELECT ...` | `INSERT INTO T SELECT ...` |
-| [ ] | `.set-or-append T <\| Query` | `CREATE TABLE IF NOT EXISTS` + `INSERT INTO ... SELECT` | `CREATE TABLE IF NOT EXISTS` + `INSERT INTO ... SELECT` |
-| [ ] | `.set-or-replace T <\| Query` | `DROP TABLE IF EXISTS` + `CREATE TABLE AS` | `DROP TABLE IF EXISTS` + `CREATE TABLE AS` |
+| [x] | `.set T <\| Query` | `CREATE TABLE T AS (SELECT ...)` | `CREATE TABLE T AS (SELECT ...)` |
+| [x] | `.append T <\| Query` | `INSERT INTO T SELECT ...` | `INSERT INTO T SELECT ...` |
+| [x] | `.set-or-append T <\| Query` | `CREATE TABLE IF NOT EXISTS T AS (SELECT ...)` | `CREATE TABLE IF NOT EXISTS` + `INSERT INTO ... SELECT` |
+| [x] | `.set-or-replace T <\| Query` | `DROP TABLE IF EXISTS; CREATE TABLE AS` | `DROP TABLE IF EXISTS` + `CREATE TABLE AS` |
 
 ## Data export
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.export to csv ('path') <\| Query` | `COPY (SELECT ...) TO 'path' (FORMAT csv)` | `COPY (SELECT ...) TO 'path' WITH (FORMAT csv)` |
-| [ ] | `.export to parquet ('path') <\| Query` | `COPY (SELECT ...) TO 'path' (FORMAT parquet)` | — (requires extension) |
-| [ ] | `.export to json ('path') <\| Query` | `COPY (SELECT ...) TO 'path' (FORMAT json)` | `COPY (SELECT ...) TO 'path' WITH (FORMAT csv)` (no native JSON) |
+| [x] | `.export to csv ('path') <\| Query` | `COPY (SELECT ...) TO 'path' (FORMAT csv)` | `COPY (SELECT ...) TO 'path' WITH (FORMAT csv)` |
+| [x] | `.export to parquet ('path') <\| Query` | `COPY (SELECT ...) TO 'path' (FORMAT parquet)` | — (requires extension) |
+| [x] | `.export to json ('path') <\| Query` | `COPY (SELECT ...) TO 'path' (FORMAT json)` | `COPY (SELECT ...) TO 'path' WITH (FORMAT csv)` (no native JSON) |
 
 ## External tables
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.create external table T (...) kind=storage dataformat=parquet ('uri')` | `CREATE VIEW T AS SELECT * FROM read_parquet('uri')` | `CREATE FOREIGN TABLE T (...) SERVER ... OPTIONS (filename 'uri')` |
-| [ ] | `.create external table T (...) kind=storage dataformat=csv ('uri')` | `CREATE VIEW T AS SELECT * FROM read_csv('uri')` | `CREATE FOREIGN TABLE T (...)` |
-| [ ] | `.drop external table T` | `DROP VIEW T` | `DROP FOREIGN TABLE T` |
-| [ ] | `.show external tables` | `SELECT * FROM duckdb_views()` (filter convention) | `SELECT * FROM information_schema.foreign_tables` |
+| [x] | `.create external table T (...) kind=storage dataformat=parquet ('uri')` | `CREATE VIEW T AS SELECT * FROM read_parquet('uri')` | `CREATE FOREIGN TABLE T (...) SERVER ... OPTIONS (filename 'uri')` |
+| [x] | `.create external table T (...) kind=storage dataformat=csv ('uri')` | `CREATE VIEW T AS SELECT * FROM read_csv_auto('uri')` | `CREATE FOREIGN TABLE T (...)` |
+| [x] | `.create-or-alter external table T (...)` | `CREATE OR REPLACE VIEW T AS SELECT * FROM read_*('uri')` | — |
+| [x] | `.drop external table T` | `DROP VIEW T` | `DROP FOREIGN TABLE T` |
+| [x] | `.show external tables` | `SELECT table_name FROM information_schema.tables WHERE table_type = 'VIEW'` | `SELECT * FROM information_schema.foreign_tables` |
+| [x] | `.show external table T` | `DESCRIBE T` | `SELECT * FROM information_schema.columns WHERE table_name = 'T'` |
 
 > [!NOTE]
 > DuckDB handles external data via its `read_parquet()`, `read_csv()`, `read_json()` table functions.
@@ -301,8 +304,8 @@ KQL and SQL have different terminology for similar concepts:
 
 | Status | KQL command | DuckDB SQL | PGlite/PostgreSQL SQL |
 |---|---|---|---|
-| [ ] | `.purge table T records <\| where Predicate` | `DELETE FROM T WHERE ...` | `DELETE FROM T WHERE ...` |
-| [ ] | `.delete table T records <\| where Predicate` | `DELETE FROM T WHERE ...` | `DELETE FROM T WHERE ...` |
+| [x] | `.purge table T records <\| where Predicate` | `DELETE FROM T WHERE ...` | `DELETE FROM T WHERE ...` |
+| [x] | `.delete table T records <\| where Predicate` | `DELETE FROM T WHERE ...` | `DELETE FROM T WHERE ...` |
 | [-] | `.show purges` | — | — |
 
 > [!NOTE]
