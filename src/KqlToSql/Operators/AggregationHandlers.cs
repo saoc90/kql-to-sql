@@ -172,12 +172,26 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 _ => name
             };
 
-            var sqlFunc = Dialect.TryTranslateAggregate(name, args)
-                ?? throw new NotSupportedException($"Unsupported aggregate function {name}");
+            var sqlFunc = Dialect.TryTranslateAggregate(name, args);
+            if (sqlFunc != null)
+            {
+                return new[] { $"{sqlFunc} AS {alias}" };
+            }
 
-            return new[] { $"{sqlFunc} AS {alias}" };
+            // Not a known aggregate — try as scalar expression (e.g. datetime_diff wrapping aggregates)
+            var scalarResult = Dialect.TryTranslateFunction(name, args);
+            if (scalarResult != null || Expr.IsKnownScalarFunction(name))
+            {
+                var scalarSql = Expr.ConvertExpression(expr);
+                alias ??= name;
+                return new[] { $"{scalarSql} AS {alias}" };
+            }
+
+            throw new NotSupportedException($"Unsupported aggregate function {name}");
         }
 
-        throw new NotSupportedException($"Unsupported aggregate expression {expr.Kind}");
+        // Non-function expression in summarize (e.g. arithmetic on aggregates)
+        var exprSql2 = Expr.ConvertExpression(expr);
+        return new[] { $"{exprSql2} AS {alias ?? "expr"}" };
     }
 }

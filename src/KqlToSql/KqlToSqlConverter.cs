@@ -16,6 +16,7 @@ public class KqlToSqlConverter
     private readonly CommandSqlTranslator _commands;
     private readonly Dictionary<string, (string sql, bool materialized)> _ctes = new();
     private readonly Dictionary<string, string> _scalarLets = new();
+    private readonly Dictionary<string, (string[] paramNames, Expression body)> _userFunctions = new();
 
     /// <summary>The SQL dialect used for engine-specific translations.</summary>
     public ISqlDialect Dialect { get; }
@@ -38,6 +39,7 @@ public class KqlToSqlConverter
 
         _ctes.Clear();
         _scalarLets.Clear();
+        _userFunctions.Clear();
         
         if (root is CommandBlock)
         {
@@ -83,8 +85,9 @@ public class KqlToSqlConverter
             }
         }
 
-        // Make scalar lets available to the expression builder for inline substitution
+        // Make scalar lets and user functions available to the expression builder
         _operators.ExpressionBuilder.SetScalarLets(_scalarLets);
+        _operators.ExpressionBuilder.SetUserFunctions(_userFunctions);
         
         // Find the main query (the last statement that's not a let statement)
         var mainStatement = statements.LastOrDefault(s => s is not LetStatement);
@@ -135,24 +138,26 @@ public class KqlToSqlConverter
         {
             materialized = false;
 
-            // Parameterized functions: let fn = (x: type) { body }
-            // Extract parameters and store for inline substitution
             var parameters = funcDecl.Parameters?.Parameters
                 .Select(p => p.Element?.NameAndType?.Name?.ToString().Trim())
                 .Where(p => p != null)
-                .ToList() ?? new List<string?>();
+                .Cast<string>()
+                .ToArray() ?? Array.Empty<string>();
 
             var viewKeyword = funcDecl.ViewKeyword?.ToString().Trim().ToLowerInvariant();
-            if (viewKeyword == "view" || parameters.Count == 0)
+
+            if (parameters.Length > 0 && viewKeyword != "view")
             {
-                sql = ConvertNode(funcDecl.Body);
+                // Parameterized function — store body expression for inline expansion at call sites
+                var bodyExpr = funcDecl.Body.GetDescendants<Expression>().FirstOrDefault();
+                if (bodyExpr != null)
+                {
+                    _userFunctions[name] = (parameters, bodyExpr);
+                    return;
+                }
             }
-            else
-            {
-                // Parameterized function — store body as CTE, parameters are ignored
-                // (caller must pass matching arguments; KQL parser resolves them)
-                sql = ConvertNode(funcDecl.Body);
-            }
+
+            sql = ConvertNode(funcDecl.Body);
         }
         else if (expression is FunctionCallExpression fce)
         {
@@ -217,9 +222,18 @@ public class KqlToSqlConverter
         // These are expressions that reference other scalars or call scalar functions
         if (expression is FunctionCallExpression fce2)
         {
-            var fname = fce2.Name.ToString().Trim().ToLowerInvariant();
+            var fname = fce2.Name.ToString().Trim();
+            var fnameLower = fname.ToLowerInvariant();
+
+            // User-defined function call: let x = myFunc(arg)
+            if (_userFunctions.ContainsKey(fname))
+            {
+                _scalarLets[name] = exprBuilder.ConvertExpression(fce2);
+                return true;
+            }
+
             // Scalar functions: time, type casts, math
-            if (fname is "ago" or "now" or "datetime" or "timespan" or "todatetime" or "totimespan"
+            if (fnameLower is "ago" or "now" or "datetime" or "timespan" or "todatetime" or "totimespan"
                 or "toreal" or "todouble" or "toint" or "tolong" or "tostring" or "tobool" or "toboolean"
                 or "int" or "long" or "real" or "double" or "bool" or "string"
                 or "strlen" or "tolower" or "toupper" or "abs" or "floor" or "ceiling" or "round"

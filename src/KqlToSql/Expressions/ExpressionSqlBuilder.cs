@@ -23,6 +23,10 @@ internal class ExpressionSqlBuilder
     /// <summary>Sets the scalar let bindings for inline substitution.</summary>
     internal void SetScalarLets(Dictionary<string, string> scalarLets) => _scalarLets = scalarLets;
 
+    private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.Expression body)>? _userFunctions;
+    /// <summary>Sets user-defined parameterized functions for inline expansion.</summary>
+    internal void SetUserFunctions(Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.Expression body)> funcs) => _userFunctions = funcs;
+
     private static readonly Dictionary<string, string> CastFunctionMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["tobool"] = "BOOLEAN",
@@ -173,6 +177,28 @@ internal class ExpressionSqlBuilder
         };
     }
 
+    private static readonly HashSet<string> KnownScalarFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bin", "substring", "ago", "iif", "iff", "case", "bin_at", "trim", "trim_start", "trim_end",
+        "strcat_delim", "extract", "toscalar", "round", "datetime_add", "datetime_diff",
+        "strlen", "tolower", "toupper", "now", "pack_array", "abs", "acos", "asin", "atan", "atan2",
+        "ceiling", "floor", "sqrt", "exp", "log", "log10", "pow", "rand", "parse_json", "todynamic",
+        "format_datetime", "isnull", "isempty", "coalesce", "not", "isnotempty", "isnotnull",
+        "strcat", "replace_string", "indexof", "countof", "reverse", "split", "sign", "log2",
+        "cos", "sin", "tan", "min_of", "max_of", "row_number", "prev", "next",
+        "dayofweek", "dayofmonth", "dayofyear", "getmonth", "getyear", "monthofyear", "weekofyear",
+        "hourofday", "minuteofhour", "secondofminute", "make_datetime", "make_timespan",
+        "startofday", "startofweek", "startofmonth", "startofyear",
+        "endofday", "endofweek", "endofmonth", "endofyear",
+        "datetime_part", "format_timespan", "parse_url", "hash", "hash_md5",
+        "toreal", "todouble", "toint", "tolong", "tostring", "tobool",
+        "binary_and", "binary_or", "binary_xor", "binary_not",
+    };
+
+    internal bool IsKnownScalarFunction(string name) =>
+        KnownScalarFunctions.Contains(name) ||
+        (_userFunctions != null && _userFunctions.ContainsKey(name));
+
     private string ResolveNameReference(NameReference nr, string? leftAlias, string? rightAlias)
     {
         var name = nr.Name.ToString().Trim();
@@ -252,6 +278,34 @@ internal class ExpressionSqlBuilder
         if (dialectResult != null)
         {
             return dialectResult;
+        }
+
+        // User-defined parameterized function: inline the body with arg substitution
+        if (_userFunctions != null && _userFunctions.TryGetValue(name, out var userFunc))
+        {
+            // Temporarily bind parameter names to the converted argument values
+            var savedScalars = new Dictionary<string, string>();
+            for (int i = 0; i < Math.Min(userFunc.paramNames.Length, args.Length); i++)
+            {
+                var pname = userFunc.paramNames[i];
+                if (_scalarLets != null && _scalarLets.TryGetValue(pname, out var prev))
+                    savedScalars[pname] = prev;
+                _scalarLets ??= new Dictionary<string, string>();
+                _scalarLets[pname] = args[i];
+            }
+
+            var result = ConvertExpression(userFunc.body, leftAlias, rightAlias);
+
+            // Restore previous scalar values
+            foreach (var pname in userFunc.paramNames)
+            {
+                if (savedScalars.TryGetValue(pname, out var prev))
+                    _scalarLets![pname] = prev;
+                else
+                    _scalarLets?.Remove(pname);
+            }
+
+            return result;
         }
 
         // Fallback: pass through as-is
