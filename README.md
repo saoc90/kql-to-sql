@@ -1,67 +1,74 @@
-# KQL to SQL Translator 
+# KQL to SQL Translator
 
-Simple, pragmatic KQL-to-SQL translator built on top of the official Kusto language parser. The core library converts Kusto Query Language (KQL) pipelines into executable SQL so you can run familiar KQL against SQL engines.
+Translates [Kusto Query Language (KQL)](https://learn.microsoft.com/en-us/kusto/query/) into executable SQL. Built on the official Kusto language parser.
+
+Supports two SQL dialects: **DuckDB** and **PGlite** (Postgres).
 
 - Live demo: https://saoc90.github.io/kql-to-sql/
 
-## Why this exists
+## What's in the repo
 
-- Bring the KQL experience to SQL-based backends (on‑prem, embedded, or cloud) without ADX.
-- Enable small-scale analytics at the edge where a light SQL engine is preferred.
-- Keep KQL as the authoring language while choosing the persistence backend that fits your constraints.
+| Project | Description |
+|---------|-------------|
+| `src/KqlToSql` | Core library — parses KQL and emits SQL for the selected dialect |
+| `src/KqlToSql.DuckDbExtension` | Native DuckDB extension exposing `kql_to_sql()` as a built-in function |
+| `src/DuckDbDemo` | Blazor WASM demo — runs KQL queries client-side against DuckDB in the browser |
+| `tests/KqlToSql.Tests` | Unit tests against DuckDB with the StormEvents dataset |
+| `tests/KqlToSql.IntegrationTests` | Integration tests executing converted SQL against DuckDB WASM and PGlite |
 
-## What’s in the repo
+## Usage
 
-- Core library: KqlToSql (C#/.NET) – translates KQL to SQL.
-- Demo: Blazor WebAssembly site with an in-browser analytics engine powered by DuckDB (and optional PGLite). No server required.
-- PoC API: Minimal Kusto API compatibility surface for basic flows with Kusto.Explorer and Azure Data Explorer (web).
-
-## Code examples
-
-- Translate KQL to SQL and execute on DuckDB (C#)
+### As a library
 
 ```csharp
 using KqlToSql;
-using DuckDB.NET.Data;
+using KqlToSql.Dialects;
 
-var kql = @"StormEvents
-| where EventType == 'Tornado' and State in~ ('TX','OK','KS')
-| summarize cnt = count() by State
-| sort by cnt desc
-| take 5";
-
-var converter = new KqlToSqlConverter();
-var sql = converter.Convert(kql);
-
-using var conn = new DuckDBConnection("DataSource=StormEvents.duckdb");
-conn.Open();
-using var cmd = conn.CreateCommand();
-cmd.CommandText = sql;
-using var reader = cmd.ExecuteReader();
-while (reader.Read())
-{
-    var state = reader.GetString(0);
-    var cnt = Convert.ToInt32(reader.GetValue(1));
-    Console.WriteLine($"{state}: {cnt}");
-}
+var converter = new KqlToSqlConverter(new DuckDbDialect());
+var sql = converter.Convert("StormEvents | where State == 'TEXAS' | summarize count() by EventType");
+// SELECT EventType, COUNT(*) AS count FROM StormEvents WHERE State = 'TEXAS' GROUP BY ALL
 ```
 
-- Run the in-browser demo (DuckDB, optional PGLite)
+### As a DuckDB extension
+
+```sql
+LOAD kql;
+
+SELECT kql_to_sql('StormEvents | where State == ''TEXAS'' | count');
+-- Returns: SELECT COUNT(*) AS Count FROM StormEvents WHERE State = 'TEXAS'
+
+SELECT * FROM kql_explain('StormEvents | take 5');
+-- kql_input              | sql_output                        | dialect
+-- StormEvents | take 5   | SELECT * FROM StormEvents LIMIT 5 | duckdb
+```
+
+See [`src/KqlToSql.DuckDbExtension/README.md`](src/KqlToSql.DuckDbExtension/README.md) for build and install instructions.
+
+### In-browser demo
 
 ```bash
 cd src/DuckDbDemo
 dotnet run
 ```
 
-Open the printed local URL and use the KQL editor to run queries client-side.
+Open the printed URL — the KQL editor runs queries entirely client-side against DuckDB WASM.
+
+## Supported KQL
+
+The full feature matrix is in [`KqlOperatorsChecklist.md`](./KqlOperatorsChecklist.md). Summary:
+
+- **70+ tabular operators** — `where`, `summarize`, `join`, `union`, `extend`, `project`, `sort`, `top`, `distinct`, `mv-expand`, `mv-apply`, `parse`, `parse-kv`, `search`, `make-series`, `evaluate` (pivot, narrow, bag_unpack), `serialize`, `top-nested`, `let`/`materialize`, and more
+- **200+ scalar functions** — string, math, datetime, array/dynamic, hash, IP, regex, type conversion
+- **40+ aggregate functions** — `count`, `sum`, `avg`, `percentile`, `dcount`, `make_list`, `make_set`, `arg_max`, `countif`, `sumif`, `stdev`, `variance`, `hll`, and more
+- **Control commands** — `create table`, view declarations
 
 ## Query showcases
 
-Complex KQL pipelines that translate and execute against DuckDB. Each of these is a passing integration test.
+Complex KQL that translates and executes correctly. Each is a passing integration test.
 
 ### Risk score dashboard
 
-`let` statements with `datatable`, `join`, `case()`, multi-aggregate `summarize`, `countif`, and computed ranking:
+`let` with `datatable`, `join`, `case()`, multi-aggregate `summarize`, `countif`, computed ranking:
 
 ```kql
 let severity_lookup = datatable(EventType:string, SeverityWeight:long) [
@@ -96,7 +103,7 @@ enriched
 
 ### Year-over-year comparison
 
-Self-join for YoY analysis with `iif()` trend labels and percentage change:
+Self-join, `iif()` trend labels, percentage change:
 
 ```kql
 Events
@@ -116,7 +123,7 @@ Events
 
 ### Source reliability analysis
 
-Multi-step `extend` with `case()`, `countif`, `dcount`, `strcat`, and `tostring`:
+`case()`, `countif`, `dcount`, `strcat`, `tostring`:
 
 ```kql
 Events
@@ -141,7 +148,7 @@ Events
 
 ### Regional impact with lookup
 
-`lookup` enrichment, `between`, computed per-capita metrics, and multi-level `iif`:
+`lookup` enrichment, `between`, per-capita metrics, nested `iif`:
 
 ```kql
 Events
@@ -160,43 +167,6 @@ Events
 | sort by Region asc, Quarter asc
 ```
 
-## Supported KQL features
-
-See the up-to-date feature matrix in KqlOperatorsChecklist.md:
-- Operators (tabular)
-- Scalar functions
-- Aggregate functions
-- Control commands
-
-[View KqlOperatorsChecklist.md](./KqlOperatorsChecklist.md)
-
-## Demo – all in the browser
-
-- DuckDB demo (`src/DuckDbDemo`): WebAssembly app that runs queries entirely client‑side against DuckDB using the generated SQL.
-- Also supports PGLite as an alternative in‑browser SQL engine (experimental). Pick the engine that fits your footprint.
-- Bundled StormEvents sample data for quick exploration.
-- Live demo: https://saoc90.github.io/kql-to-sql/
-
-## Kusto API – Proof of Concept
-
-- Minimal Kusto API surface to exercise basic scenarios with Kusto.Explorer and Azure Data Explorer (web).
-- Intended for basic query flows and evaluation only; not a full server implementation.
-
-## Notes and caveats
-
-- SQL output is validated against DuckDB in tests; other SQL engines may have minor dialect differences.
-- Some KQL operators map to more complex SQL; performance characteristics depend on your target engine.
-- PGLite and the Kusto API are experimental/PoC and may change.
-
-## Getting started (library)
-
-- Add a reference to the `KqlToSql` project/package.
-- Use `KqlToSqlConverter` to translate KQL pipelines into SQL text; execute the SQL against your engine of choice.
-
 ## Contributing
 
-- See `KqlOperatorsChecklist.md` to track support status. PRs welcome for missing operators/functions.
-- When adding features:
-  - Implement translator(s) in `KqlToSql`
-  - Add tests in `tests/KqlToSql.Tests`
-  - Update `KqlOperatorsChecklist.md` and this README as needed
+See `KqlOperatorsChecklist.md` to track support status. PRs welcome for missing operators and functions.
