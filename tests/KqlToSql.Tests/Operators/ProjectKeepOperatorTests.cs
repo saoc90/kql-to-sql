@@ -10,32 +10,32 @@ public class ProjectKeepOperatorTests
     public void Converts_ProjectKeep()
     {
         var converter = new KqlToSqlConverter();
-        var kql = "StormEvents | project-keep STATE, EVENT_TYPE | take 1";
+        var kql = "StormEvents | project-keep State, EventType | take 1";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT STATE, EVENT_TYPE FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT State, EventType FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         using var reader = cmd.ExecuteReader();
         var columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToArray();
-        Assert.Equal(new[] { "STATE", "EVENT_TYPE" }, columns);
+        Assert.Equal(new[] { "State", "EventType" }, columns);
     }
 
     [Fact]
     public void ProjectKeep_SingleColumn()
     {
         var converter = new KqlToSqlConverter();
-        var kql = "StormEvents | project-keep STATE | take 1";
+        var kql = "StormEvents | project-keep State | take 1";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT STATE FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT State FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         using var reader = cmd.ExecuteReader();
         var columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToArray();
-        Assert.Equal(new[] { "STATE" }, columns);
+        Assert.Equal(new[] { "State" }, columns);
     }
 }
 

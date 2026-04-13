@@ -12,14 +12,14 @@ public class TypeCastFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = @"StormEvents
 | take 1
-| extend year_str=tostring(Year)
+| extend year_str=tostring(EpisodeId)
 | project toint(year_str)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT CAST(year_str AS INTEGER) FROM (SELECT *, CAST(Year AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
+        Assert.Equal("SELECT TRY_CAST(year_str AS INTEGER) FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT Year FROM StormEvents LIMIT 1";
+        cmd.CommandText = "SELECT EpisodeId FROM StormEvents LIMIT 1";
         var expected = Convert.ToInt64(cmd.ExecuteScalar()!);
         cmd.CommandText = sql;
         var result = Convert.ToInt64(cmd.ExecuteScalar()!);
@@ -32,14 +32,14 @@ public class TypeCastFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = @"StormEvents
 | take 1
-| extend year_str=tostring(Year)
+| extend year_str=tostring(EpisodeId)
 | project tolong(year_str)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT CAST(year_str AS BIGINT) FROM (SELECT *, CAST(Year AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
+        Assert.Equal("SELECT TRY_CAST(year_str AS BIGINT) FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT Year FROM StormEvents LIMIT 1";
+        cmd.CommandText = "SELECT EpisodeId FROM StormEvents LIMIT 1";
         var expected = Convert.ToInt64(cmd.ExecuteScalar()!);
         cmd.CommandText = sql;
         var result = Convert.ToInt64(cmd.ExecuteScalar()!);
@@ -52,14 +52,14 @@ public class TypeCastFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = @"StormEvents
 | take 1
-| extend year_str=tostring(Year)
+| extend year_str=tostring(EpisodeId)
 | project todouble(year_str)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT CAST(year_str AS DOUBLE) FROM (SELECT *, CAST(Year AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
+        Assert.Equal("SELECT TRY_CAST(year_str AS DOUBLE) FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT Year FROM StormEvents LIMIT 1";
+        cmd.CommandText = "SELECT EpisodeId FROM StormEvents LIMIT 1";
         var expected = Convert.ToDouble(cmd.ExecuteScalar()!);
         cmd.CommandText = sql;
         var result = Convert.ToDouble(cmd.ExecuteScalar()!);
@@ -74,7 +74,7 @@ public class TypeCastFunctionTests
 | take 1
 | project tobool('1')";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT CAST('1' AS BOOLEAN) FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT TRY_CAST('1' AS BOOLEAN) FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -91,7 +91,7 @@ public class TypeCastFunctionTests
 | take 1
 | project todatetime('1950-01-03 00:00:00')";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT CAST('1950-01-03 00:00:00' AS TIMESTAMP) FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT TRY_CAST('1950-01-03 00:00:00' AS TIMESTAMP) FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -106,13 +106,13 @@ public class TypeCastFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = @"StormEvents
 | take 1
-| project tostring(Year)";
+| project tostring(EpisodeId)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT CAST(Year AS TEXT) FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT TRY_CAST(EpisodeId AS TEXT) FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT CAST(Year AS VARCHAR) FROM StormEvents LIMIT 1";
+        cmd.CommandText = "SELECT CAST(EpisodeId AS VARCHAR) FROM StormEvents LIMIT 1";
         var expected = (string)cmd.ExecuteScalar()!;
         cmd.CommandText = sql;
         var result = (string)cmd.ExecuteScalar()!;

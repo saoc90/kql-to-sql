@@ -27,7 +27,7 @@ ExpensiveComputation | where TotalEvents > 100
         // Verify the key components are present
         Assert.Contains("WITH ExpensiveComputation AS MATERIALIZED", sql);
         Assert.Contains("WHERE State = 'TEXAS'", sql);
-        Assert.Contains("GROUP BY EventType", sql);
+        Assert.Contains("GROUP BY ALL", sql);
         Assert.Contains("WHERE TotalEvents > 100", sql);
     }
 
@@ -52,6 +52,6 @@ HighDamageEvents | summarize count() by EventType
         Assert.Contains("HighDamageEvents AS NOT MATERIALIZED", sql);
         Assert.Contains("WHERE State = 'TEXAS'", sql);
         Assert.Contains("WHERE DamageProperty > 1000000", sql);
-        Assert.Contains("GROUP BY EventType", sql);
+        Assert.Contains("GROUP BY ALL", sql);
     }
 }

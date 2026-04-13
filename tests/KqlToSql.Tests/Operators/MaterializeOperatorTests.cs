@@ -11,14 +11,14 @@ public class MaterializeOperatorTests
     {
         // Test basic materialize function usage
         var kql = @"
-let MaterializedData = materialize(StormEvents | where STATE == 'TEXAS' | summarize cnt=count() by EVENT_TYPE);
+let MaterializedData = materialize(StormEvents | where State == 'TEXAS' | summarize cnt=count() by EventType);
 MaterializedData | top 5 by cnt
 ";
         
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert(kql);
         
-        // Expected: WITH MaterializedData AS MATERIALIZED (SELECT EVENT_TYPE, COUNT(*) AS cnt FROM StormEvents WHERE STATE = 'TEXAS' GROUP BY EVENT_TYPE) SELECT * FROM MaterializedData ORDER BY cnt DESC LIMIT 5
+        // Expected: WITH MaterializedData AS MATERIALIZED (SELECT EventType, COUNT(*) AS cnt FROM StormEvents WHERE State = 'TEXAS' GROUP BY ALL) SELECT * FROM MaterializedData ORDER BY cnt DESC LIMIT 5
         Assert.Contains("AS MATERIALIZED", sql);
         Assert.Contains("WITH MaterializedData", sql);
         
@@ -29,7 +29,7 @@ MaterializedData | top 5 by cnt
         using var reader = cmd.ExecuteReader();
         Assert.True(reader.Read());
         // Should have results since TEXAS has events in the test data
-        Assert.NotNull(reader.GetString(0)); // EVENT_TYPE
+        Assert.NotNull(reader.GetString(0)); // EventType
         Assert.True(reader.GetInt64(1) > 0); // cnt
     }
 
@@ -38,7 +38,7 @@ MaterializedData | top 5 by cnt
     {
         // Test materialize being referenced multiple times - simplified without union for now
         var kql = @"
-let MaterializedData = materialize(StormEvents | summarize cnt=count() by STATE);
+let MaterializedData = materialize(StormEvents | summarize cnt=count() by State);
 MaterializedData | where cnt > 5
 ";
         
@@ -56,7 +56,7 @@ MaterializedData | where cnt > 5
         using var reader = cmd.ExecuteReader();
         Assert.True(reader.Read());
         // Should have at least one state with more than 5 events
-        Assert.NotNull(reader.GetString(0)); // STATE
+        Assert.NotNull(reader.GetString(0)); // State
         Assert.True(reader.GetInt64(1) > 5); // cnt
     }
     
@@ -65,7 +65,7 @@ MaterializedData | where cnt > 5
     {
         // Test that materialize actually works with a more complex query
         var kql = @"
-let ExpensiveData = materialize(StormEvents | summarize TotalEvents=count() by STATE);
+let ExpensiveData = materialize(StormEvents | summarize TotalEvents=count() by State);
 ExpensiveData | where TotalEvents > 10 | top 3 by TotalEvents
 ";
         

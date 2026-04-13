@@ -15,7 +15,7 @@ public class HasSuffixOperatorTests
 | where State hassuffix ""A""
 | project State, event_count";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State ILIKE '%A%'", sql);
+        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE State ILIKE '%A%'", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -54,7 +54,7 @@ public class HasSuffixOperatorTests
 | where State !hassuffix ""A""
 | project State";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State NOT ILIKE '%A%'", sql);
+        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE State NOT ILIKE '%A%'", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -77,7 +77,7 @@ public class HasSuffixOperatorTests
 | where State !hassuffix_cs ""a""
 | project State";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY State) WHERE State NOT LIKE '%a%'", sql);
+        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE State NOT LIKE '%a%'", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
