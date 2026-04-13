@@ -1633,18 +1633,25 @@ StormEvents
     // ══════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void Bug_RealWorld_ToscalarInExtend_ThrowsUnsupported()
+    public void Toscalar_InExtend_WorksWithPipeline()
     {
-        // BUG: toscalar(StormEvents | count) inside extend is parsed as
-        // ToScalarExpression by the Kusto SDK, which ExpressionSqlBuilder
-        // does not handle. Same root cause as Bug_Toscalar_InFilter.
+        // Fixed: toscalar() with embedded pipeline now converts to scalar subquery
         var kql = @"
 StormEvents
 | summarize EventCount = count() by State
 | extend TotalEvents = toscalar(StormEvents | count)
 | sort by EventCount desc
 | take 5";
-        Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
+        var sql = _converter.Convert(kql);
+        Assert.Contains("LIMIT 1", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var rows = 0;
+        while (reader.Read()) rows++;
+        Assert.Equal(5, rows);
     }
 
     [Fact]
@@ -1946,17 +1953,21 @@ StormEvents
     }
 
     [Fact]
-    public void Bug_Toscalar_InFilter_ThrowsUnsupported()
+    public void Toscalar_InFilter_WorksWithPipeline()
     {
-        // BUG: toscalar() inside a where clause is parsed by Kusto SDK as
-        // ToScalarExpression (not FunctionCallExpression), which ExpressionSqlBuilder
-        // does not handle. The FunctionCallExpression path for "toscalar" only works
-        // when toscalar() is used directly in print or extend without subquery syntax.
+        // Fixed: toscalar() with embedded pipeline in WHERE clause
         var kql = @"
 StormEvents
 | where InjuriesDirect > toscalar(StormEvents | summarize avg(InjuriesDirect))
 | count";
-        Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
+        var sql = _converter.Convert(kql);
+        Assert.Contains("LIMIT 1", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        var count = (long)cmd.ExecuteScalar()!;
+        Assert.True(count >= 0);
     }
 
     // ══════════════════════════════════════════════════════════════════════

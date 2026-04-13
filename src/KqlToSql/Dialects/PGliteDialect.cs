@@ -337,4 +337,7 @@ public class PGliteDialect : ISqlDialect
     {
         return $"CROSS JOIN LATERAL UNNEST({sourceAlias}.{column}) AS {unnestAlias}(value)";
     }
+
+    // PostgreSQL doesn't have TRY_CAST. Fall back to CAST (stricter, may throw).
+    public string SafeCast(string expr, string sqlType) => $"CAST({expr} AS {sqlType})";
 }
