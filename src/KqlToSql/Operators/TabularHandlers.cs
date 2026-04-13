@@ -15,8 +15,12 @@ internal class TabularHandlers : OperatorHandlerBase
     {
         var condition = Expr.ConvertExpression(filter.Condition);
 
+        // Only append WHERE directly if there's no ORDER BY, LIMIT, or GROUP BY trailing
         if (IsSimpleSelectStar(leftSql) &&
-            !leftSql.Contains(" WHERE ", StringComparison.OrdinalIgnoreCase))
+            !leftSql.Contains(" WHERE ", StringComparison.OrdinalIgnoreCase) &&
+            !leftSql.Contains(" ORDER BY ", StringComparison.OrdinalIgnoreCase) &&
+            !leftSql.Contains(" LIMIT ", StringComparison.OrdinalIgnoreCase) &&
+            !leftSql.Contains(" GROUP BY ", StringComparison.OrdinalIgnoreCase))
             return $"{leftSql} WHERE {condition}";
 
         if (CanAppendWhere(leftSql))

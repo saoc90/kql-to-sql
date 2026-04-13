@@ -285,7 +285,15 @@ internal class AdvancedHandlers : OperatorHandlerBase
             var aggExpr = clause.ByExpression;
 
             string aggSql;
-            if (aggExpr is FunctionCallExpression fce)
+            if (aggExpr is SimpleNamedExpression sne && sne.Expression is FunctionCallExpression namedFce)
+            {
+                var name = namedFce.Name.ToString().Trim().ToLowerInvariant();
+                var args = namedFce.ArgumentList.Expressions
+                    .Select(a => Expr.ConvertExpression(a.Element)).ToArray();
+                aggSql = Dialect.TryTranslateAggregate(name, args)
+                    ?? $"{name}({string.Join(", ", args)})";
+            }
+            else if (aggExpr is FunctionCallExpression fce)
             {
                 var name = fce.Name.ToString().Trim().ToLowerInvariant();
                 var args = fce.ArgumentList.Expressions
