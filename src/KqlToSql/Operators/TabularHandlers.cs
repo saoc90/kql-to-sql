@@ -83,7 +83,9 @@ internal class TabularHandlers : OperatorHandlerBase
             }
             else
             {
-                throw new NotSupportedException("Unsupported extend expression");
+                // Bare column reference (identity extend) — just pass through, no-op
+                var colName = Expr.ConvertExpression(se.Element);
+                extras.Add((colName, colName));
             }
         }
 

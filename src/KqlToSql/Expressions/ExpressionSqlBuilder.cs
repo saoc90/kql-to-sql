@@ -173,6 +173,9 @@ internal class ExpressionSqlBuilder
             FunctionCallExpression fce =>
                 ConvertFunctionCall(fce, leftAlias, rightAlias),
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
+            DynamicExpression de => ConvertDynamic(de, leftAlias, rightAlias),
+            SimpleNamedExpression sne2 => $"{ConvertExpression(sne2.Expression, leftAlias, rightAlias)} AS {sne2.Name.ToString().Trim()}",
+            PipeExpression pe2 when _nodeConverter != null => $"({_nodeConverter(pe2)})",
             _ => throw new NotSupportedException($"Unsupported expression {expr.Kind}")
         };
     }
@@ -198,6 +201,34 @@ internal class ExpressionSqlBuilder
     internal bool IsKnownScalarFunction(string name) =>
         KnownScalarFunctions.Contains(name) ||
         (_userFunctions != null && _userFunctions.ContainsKey(name));
+
+    private string ConvertDynamic(DynamicExpression de, string? leftAlias, string? rightAlias)
+    {
+        // dynamic(["a","b"]) → LIST_VALUE('a', 'b') for DuckDB arrays
+        // dynamic(null) → NULL
+        var inner = de.GetDescendants<JsonArrayExpression>().FirstOrDefault();
+        if (inner != null)
+        {
+            var elements = inner.Values
+                .Select(v => ConvertExpression(v.Element, leftAlias, rightAlias))
+                .ToArray();
+            return $"LIST_VALUE({string.Join(", ", elements)})";
+        }
+
+        // dynamic({key:val}) → JSON object
+        var obj = de.GetDescendants<JsonObjectExpression>().FirstOrDefault();
+        if (obj != null)
+        {
+            return $"'{de.ToString().Trim()}'::JSON";
+        }
+
+        // dynamic(null)
+        var text = de.ToString().Trim();
+        if (text.Contains("null", StringComparison.OrdinalIgnoreCase))
+            return "NULL";
+
+        return $"'{text}'::JSON";
+    }
 
     private string ResolveNameReference(NameReference nr, string? leftAlias, string? rightAlias)
     {
@@ -387,12 +418,27 @@ internal class ExpressionSqlBuilder
     internal string ConvertInExpression(InExpression inExpr, string? leftAlias, string? rightAlias)
     {
         var left = ConvertExpression(inExpr.Left, leftAlias, rightAlias);
-        if (inExpr.Right is not ExpressionList list)
-        {
-            throw new NotSupportedException("Only expression lists are supported for in operator");
-        }
+        var list = inExpr.Right;
 
-        var items = list.Expressions.Select(e => ConvertExpression(e.Element, leftAlias, rightAlias)).ToArray();
+        // When dynamic(["a","b"]) is used, the expression list contains a single DynamicExpression.
+        // Expand its array elements as individual IN values.
+        string[] items;
+        if (list.Expressions.Count == 1 && list.Expressions[0].Element is DynamicExpression de)
+        {
+            var array = de.GetDescendants<JsonArrayExpression>().FirstOrDefault();
+            if (array != null)
+            {
+                items = array.Values.Select(v => ConvertExpression(v.Element, leftAlias, rightAlias)).ToArray();
+            }
+            else
+            {
+                items = new[] { ConvertExpression(de, leftAlias, rightAlias) };
+            }
+        }
+        else
+        {
+            items = list.Expressions.Select(e => ConvertExpression(e.Element, leftAlias, rightAlias)).ToArray();
+        }
 
         var caseInsensitive = inExpr.Kind == SyntaxKind.InCsExpression || inExpr.Kind == SyntaxKind.NotInCsExpression;
         if (caseInsensitive)
