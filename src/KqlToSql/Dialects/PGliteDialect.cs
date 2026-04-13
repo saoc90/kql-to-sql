@@ -191,6 +191,23 @@ public class PGliteDialect : ISqlDialect
             // Parse functions
             "parse_version" => $"STRING_TO_ARRAY({args[0]}, '.')",
 
+            // Array shift functions
+            "array_shift_left" when args.Length >= 2 => args.Length >= 3
+                ? $"({args[0]}[{args[1]}+1:] || (SELECT ARRAY_AGG({args[2]}) FROM GENERATE_SERIES(1, {args[1]})))"
+                : $"({args[0]}[{args[1]}+1:] || (SELECT ARRAY_AGG(NULL) FROM GENERATE_SERIES(1, {args[1]})))",
+            "array_shift_right" when args.Length >= 2 => args.Length >= 3
+                ? $"((SELECT ARRAY_AGG({args[2]}) FROM GENERATE_SERIES(1, {args[1]})) || {args[0]}[:ARRAY_LENGTH({args[0]},1)-{args[1]}])"
+                : $"((SELECT ARRAY_AGG(NULL) FROM GENERATE_SERIES(1, {args[1]})) || {args[0]}[:ARRAY_LENGTH({args[0]},1)-{args[1]}])",
+
+            // IPv4 additional (PostgreSQL has native INET type)
+            "ipv4_is_match" when args.Length == 2 => $"(INET({args[0]}) = INET({args[1]}))",
+            "ipv4_is_match" when args.Length == 3 => $"(INET({args[0]}) <<= NETWORK(SET_MASKLEN(INET({args[1]}), {args[2]})))",
+            "ipv4_netmask_suffix" => $"SPLIT_PART({args[0]}, '/', 2)::INT",
+            "format_ipv4_mask" when args.Length == 2 => $"CONCAT(HOST(INET({args[0]}::text)), '/', {args[1]})",
+
+            // Set functions
+            "jaccard_index" => $"((SELECT COUNT(*) FROM UNNEST({args[0]}) x WHERE x = ANY({args[1]}))::DOUBLE PRECISION / (SELECT COUNT(DISTINCT x) FROM UNNEST({args[0]} || {args[1]}) x)::DOUBLE PRECISION)",
+
             // Type/conditional functions
             "gettype" or "typeof" => $"PG_TYPEOF({args[0]})::text",
             "isnan" => $"({args[0]} = 'NaN'::double precision)",
