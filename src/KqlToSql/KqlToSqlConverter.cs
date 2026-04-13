@@ -240,16 +240,16 @@ public class KqlToSqlConverter
                 return true;
             }
 
-            // Scalar functions: time, type casts, math
-            if (fnameLower is "ago" or "now" or "datetime" or "timespan" or "todatetime" or "totimespan"
-                or "toreal" or "todouble" or "toint" or "tolong" or "tostring" or "tobool" or "toboolean"
-                or "todecimal" or "tofloat"
-                or "int" or "long" or "real" or "double" or "bool" or "string" or "decimal" or "float"
-                or "strlen" or "tolower" or "toupper" or "abs" or "floor" or "ceiling" or "round"
-                or "min_of" or "max_of" or "iif" or "iff" or "coalesce" or "strcat")
+            // Try converting any function call as a scalar expression.
+            // If the expression builder can handle it (known scalar/cast function), use it.
+            try
             {
                 _scalarLets[name] = exprBuilder.ConvertExpression(fce2);
                 return true;
+            }
+            catch
+            {
+                // Not a scalar function — fall through to CTE handling
             }
         }
 
@@ -260,17 +260,24 @@ public class KqlToSqlConverter
             return true;
         }
 
-        // Binary expression on scalars: let X = EndTime - StartTime
-        if (expression is BinaryExpression bin)
+        // Dynamic expressions: let x = dynamic(["a","b"])
+        if (expression is DynamicExpression)
         {
-            var left = bin.Left.ToString().Trim();
-            var right = bin.Right.ToString().Trim();
-            // If both sides reference known scalar lets or are literals, treat as scalar
-            if (_scalarLets.ContainsKey(left) || _scalarLets.ContainsKey(right) ||
-                bin.Left is LiteralExpression || bin.Right is LiteralExpression)
+            _scalarLets[name] = exprBuilder.ConvertExpression(expression);
+            return true;
+        }
+
+        // Binary/arithmetic expressions on scalars: let X = EndTime - StartTime, let X = a / b
+        if (expression is BinaryExpression)
+        {
+            try
             {
-                _scalarLets[name] = exprBuilder.ConvertExpression(bin);
+                _scalarLets[name] = exprBuilder.ConvertExpression(expression);
                 return true;
+            }
+            catch
+            {
+                // If conversion fails, it's probably a tabular expression — let it fall through
             }
         }
 
@@ -294,6 +301,9 @@ public class KqlToSqlConverter
             DataTableExpression dt => _operators.ConvertDataTable(dt),
             ExternalDataExpression ed => _operators.ConvertExternalData(ed),
             FunctionBody fb => ConvertFunctionBody(fb),
+            // Scalar expressions that appear as standalone nodes (e.g. in let statements)
+            Expression expr when expr is BinaryExpression or LiteralExpression or DynamicExpression =>
+                $"SELECT {_operators.ExpressionBuilder.ConvertExpression(expr)} AS value",
             _ => throw new NotSupportedException($"Unsupported node type {node.Kind}")
         };
     }
