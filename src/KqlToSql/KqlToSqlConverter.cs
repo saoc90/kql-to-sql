@@ -218,7 +218,12 @@ public class KqlToSqlConverter
         if (expression is FunctionCallExpression fce2)
         {
             var fname = fce2.Name.ToString().Trim().ToLowerInvariant();
-            if (fname is "ago" or "now" or "datetime" or "timespan" or "todatetime" or "totimespan")
+            // Scalar functions: time, type casts, math
+            if (fname is "ago" or "now" or "datetime" or "timespan" or "todatetime" or "totimespan"
+                or "toreal" or "todouble" or "toint" or "tolong" or "tostring" or "tobool" or "toboolean"
+                or "int" or "long" or "real" or "double" or "bool" or "string"
+                or "strlen" or "tolower" or "toupper" or "abs" or "floor" or "ceiling" or "round"
+                or "min_of" or "max_of" or "iif" or "iff" or "coalesce" or "strcat")
             {
                 _scalarLets[name] = exprBuilder.ConvertExpression(fce2);
                 return true;
