@@ -19,6 +19,7 @@ internal sealed class OperatorDispatcher
     internal OperatorDispatcher(KqlToSqlConverter converter)
     {
         var expr = new ExpressionSqlBuilder(converter.Dialect);
+        expr.SetNodeConverter(node => converter.ConvertNode(node));
         _tabular = new TabularHandlers(converter, expr);
         _joins = new JoinHandlers(converter, expr);
         _aggregation = new AggregationHandlers(converter, expr);

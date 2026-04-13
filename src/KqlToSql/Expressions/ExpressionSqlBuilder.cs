@@ -9,11 +9,15 @@ namespace KqlToSql.Expressions;
 internal class ExpressionSqlBuilder
 {
     private readonly ISqlDialect _dialect;
+    private Func<SyntaxNode, string>? _nodeConverter;
 
     internal ExpressionSqlBuilder(ISqlDialect dialect)
     {
         _dialect = dialect;
     }
+
+    /// <summary>Sets the callback used to convert full KQL sub-expressions (e.g. toscalar pipelines).</summary>
+    internal void SetNodeConverter(Func<SyntaxNode, string> converter) => _nodeConverter = converter;
 
     private static readonly Dictionary<string, string> CastFunctionMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -162,8 +166,7 @@ internal class ExpressionSqlBuilder
                 $"(-{ConvertExpression(pu.Expression, leftAlias, rightAlias)})",
             PrefixUnaryExpression pu when pu.Kind == SyntaxKind.UnaryPlusExpression =>
                 ConvertExpression(pu.Expression, leftAlias, rightAlias),
-            ToScalarExpression tse =>
-                $"({ConvertExpression(tse.Expression, leftAlias, rightAlias)} LIMIT 1)",
+            ToScalarExpression tse => ConvertToScalar(tse, leftAlias, rightAlias),
             FunctionCallExpression fce =>
                 ConvertFunctionCall(fce, leftAlias, rightAlias),
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
@@ -208,7 +211,7 @@ internal class ExpressionSqlBuilder
             }
             var arg = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
             // KQL type conversions return null on failure (e.g. tolong('') → null)
-            return $"TRY_CAST({arg} AS {sqlType})";
+            return _dialect.SafeCast(arg, sqlType);
         }
 
         // Handle functions with structural conversion logic
@@ -659,6 +662,20 @@ internal class ExpressionSqlBuilder
             throw new NotSupportedException("toscalar() expects exactly one argument");
         var inner = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
         return $"({inner} LIMIT 1)";
+    }
+
+    private string ConvertToScalar(ToScalarExpression tse, string? leftAlias, string? rightAlias)
+    {
+        // toscalar() with an embedded pipeline (e.g. toscalar(T | count)) is parsed
+        // as ToScalarExpression, not FunctionCallExpression. Use the node converter
+        // to translate the inner pipeline to SQL, then wrap as scalar subquery.
+        if (_nodeConverter != null)
+        {
+            var innerSql = _nodeConverter(tse.Expression);
+            return $"({innerSql} LIMIT 1)";
+        }
+        // Fallback for simple expressions
+        return $"({ConvertExpression(tse.Expression, leftAlias, rightAlias)} LIMIT 1)";
     }
 
     private string ConvertRound(FunctionCallExpression fce, string? leftAlias, string? rightAlias)

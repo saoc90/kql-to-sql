@@ -48,6 +48,9 @@ public interface ISqlDialect
     /// <summary>Whether this dialect supports GROUP BY ALL (auto group by non-aggregate columns).</summary>
     bool SupportsGroupByAll => false;
 
+    /// <summary>Generates a null-safe cast expression. DuckDB uses TRY_CAST, PGlite falls back to CAST.</summary>
+    string SafeCast(string expr, string sqlType) => $"TRY_CAST({expr} AS {sqlType})";
+
     /// <summary>Generates a random sample clause. Returns null to use ORDER BY RANDOM() LIMIT n fallback.</summary>
     string? SampleClause(string fromSql, string count) => null;
 }

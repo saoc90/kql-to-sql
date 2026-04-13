@@ -21,7 +21,7 @@ internal sealed class ParseHandlers : OperatorHandlerBase
         {
             var extract = $"REGEXP_EXTRACT({sourceExpr}, '{regex}', {idx + 1})";
             if (c.Type != null && c.Type != "string")
-                extract = $"TRY_CAST({extract} AS {Dialect.MapType(c.Type)})";
+                extract = Dialect.SafeCast(extract, Dialect.MapType(c.Type));
             return $"{extract} AS {c.Name}";
         }).ToArray();
 
@@ -70,7 +70,7 @@ internal sealed class ParseHandlers : OperatorHandlerBase
         {
             var extract = $"REGEXP_EXTRACT({sourceExpr}, '{c.Name}=([^,;\\s]+)', 1)";
             if (c.Type != "string")
-                extract = $"TRY_CAST({extract} AS {Dialect.MapType(c.Type)})";
+                extract = Dialect.SafeCast(extract, Dialect.MapType(c.Type));
             return $"{extract} AS {c.Name}";
         }).ToArray();
 
