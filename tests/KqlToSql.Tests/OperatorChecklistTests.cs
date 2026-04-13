@@ -30,10 +30,17 @@ public class OperatorChecklistTests
             .Where(line => line.StartsWith("- ["))
             .Select(line => {
                 var text = line[(line.IndexOf("] ") + 2)..];
+                // Strip strikethrough markers
+                text = text.Replace("~~", "");
                 var idx = text.IndexOf(" (", StringComparison.Ordinal);
                 return (idx >= 0 ? text[..idx] : text).Trim();
             })
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Remove category headings that aren't actual operators
+        var categories = new[] { "Tabular", "Query", "Scalar", "String", "Numerical",
+            "Bitwise binary", "Logical or binary", "Graph" };
+        foreach (var c in categories) docOps.Remove(c);
 
         docOps.ExceptWith(fileOps);
         Assert.Empty(docOps);

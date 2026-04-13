@@ -33,47 +33,47 @@ public class BugFixTests
     public void Extend_SubtractExpression()
     {
         var converter = new KqlToSqlConverter();
-        var sql = converter.Convert("StormEvents | extend diff = INJURIES_DIRECT - INJURIES_INDIRECT");
-        Assert.Equal("SELECT *, INJURIES_DIRECT - INJURIES_INDIRECT AS diff FROM StormEvents", sql);
+        var sql = converter.Convert("StormEvents | extend diff = InjuriesDirect - InjuriesIndirect");
+        Assert.Equal("SELECT *, InjuriesDirect - InjuriesIndirect AS diff FROM StormEvents", sql);
     }
 
     [Fact]
     public void Extend_MultiplyExpression()
     {
         var converter = new KqlToSqlConverter();
-        var sql = converter.Convert("StormEvents | extend doubled = INJURIES_DIRECT * 2");
-        Assert.Equal("SELECT *, INJURIES_DIRECT * 2 AS doubled FROM StormEvents", sql);
+        var sql = converter.Convert("StormEvents | extend doubled = InjuriesDirect * 2");
+        Assert.Equal("SELECT *, InjuriesDirect * 2 AS doubled FROM StormEvents", sql);
     }
 
     [Fact]
     public void Extend_DivideExpression()
     {
         var converter = new KqlToSqlConverter();
-        var sql = converter.Convert("StormEvents | extend halved = INJURIES_DIRECT / 2");
-        Assert.Equal("SELECT *, INJURIES_DIRECT / 2 AS halved FROM StormEvents", sql);
+        var sql = converter.Convert("StormEvents | extend halved = InjuriesDirect / 2");
+        Assert.Equal("SELECT *, InjuriesDirect / 2 AS halved FROM StormEvents", sql);
     }
 
     [Fact]
     public void Extend_ModuloExpression()
     {
         var converter = new KqlToSqlConverter();
-        var sql = converter.Convert("StormEvents | extend remainder = INJURIES_DIRECT % 2");
-        Assert.Equal("SELECT *, INJURIES_DIRECT % 2 AS remainder FROM StormEvents", sql);
+        var sql = converter.Convert("StormEvents | extend remainder = InjuriesDirect % 2");
+        Assert.Equal("SELECT *, InjuriesDirect % 2 AS remainder FROM StormEvents", sql);
     }
 
     [Fact]
     public void Iff_Function_MapsToCase()
     {
         var converter = new KqlToSqlConverter();
-        var sql = converter.Convert("StormEvents | extend result = iff(INJURIES_DIRECT > 0, 'Yes', 'No')");
-        Assert.Equal("SELECT *, CASE WHEN INJURIES_DIRECT > 0 THEN 'Yes' ELSE 'No' END AS result FROM StormEvents", sql);
+        var sql = converter.Convert("StormEvents | extend result = iff(InjuriesDirect > 0, 'Yes', 'No')");
+        Assert.Equal("SELECT *, CASE WHEN InjuriesDirect > 0 THEN 'Yes' ELSE 'No' END AS result FROM StormEvents", sql);
     }
 
     [Fact]
     public void Iif_Function_MapsToCase()
     {
         var converter = new KqlToSqlConverter();
-        var sql = converter.Convert("StormEvents | extend result = iif(INJURIES_DIRECT > 0, 'Yes', 'No')");
-        Assert.Equal("SELECT *, CASE WHEN INJURIES_DIRECT > 0 THEN 'Yes' ELSE 'No' END AS result FROM StormEvents", sql);
+        var sql = converter.Convert("StormEvents | extend result = iif(InjuriesDirect > 0, 'Yes', 'No')");
+        Assert.Equal("SELECT *, CASE WHEN InjuriesDirect > 0 THEN 'Yes' ELSE 'No' END AS result FROM StormEvents", sql);
     }
 }

@@ -21,8 +21,8 @@ public class ViewFunctionDeclarationTests
     {
         // Test view function declaration syntax: let T_view = view () { ... };
         var kql = @"
-let T_view = view () { StormEvents | where STATE == 'TEXAS' };
-T_view | top 5 by EVENT_TYPE
+let T_view = view () { StormEvents | where State == 'TEXAS' };
+T_view | top 5 by EventType
 ";
         
         var converter = new KqlToSqlConverter();
@@ -33,8 +33,8 @@ T_view | top 5 by EVENT_TYPE
         
         // Should create a non-materialized CTE
         Assert.Contains("WITH T_view AS NOT MATERIALIZED", sql);
-        Assert.Contains("SELECT * FROM StormEvents WHERE STATE = 'TEXAS'", sql);
-        Assert.Contains("SELECT * FROM T_view ORDER BY EVENT_TYPE DESC LIMIT 5", sql);
+        Assert.Contains("SELECT * FROM StormEvents WHERE State = 'TEXAS'", sql);
+        Assert.Contains("SELECT * FROM T_view ORDER BY EventType DESC LIMIT 5", sql);
     }
 
     [Fact]
@@ -42,8 +42,8 @@ T_view | top 5 by EVENT_TYPE
     {
         // Test view function declaration with actual DuckDB execution
         var kql = @"
-let MaterializedData = materialize(StormEvents | where STATE == 'TEXAS' | summarize cnt=count() by EVENT_TYPE);
-let ViewData = view () { StormEvents | where STATE == 'CALIFORNIA' };
+let MaterializedData = materialize(StormEvents | where State == 'TEXAS' | summarize cnt=count() by EventType);
+let ViewData = view () { StormEvents | where State == 'CALIFORNIA' };
 MaterializedData | top 5 by cnt
 ";
         
@@ -65,7 +65,7 @@ MaterializedData | top 5 by cnt
         {
             results.Add(new
             {
-                EVENT_TYPE = reader["EVENT_TYPE"]?.ToString(),
+                EventType = reader["EventType"]?.ToString(),
                 cnt = reader["cnt"] != DBNull.Value ? (long)reader["cnt"] : 0
             });
         }
@@ -76,7 +76,7 @@ MaterializedData | top 5 by cnt
         
         foreach (var result in results.Take(3))
         {
-            _output.WriteLine($"EVENT_TYPE: {result.EVENT_TYPE}, cnt: {result.cnt}");
+            _output.WriteLine($"EventType: {result.EventType}, cnt: {result.cnt}");
         }
         
         // Should have both CTEs in the SQL
@@ -90,7 +90,7 @@ MaterializedData | top 5 by cnt
         // Test simple view function declaration
         var kql = @"
 let SimpleView = view () { StormEvents };
-SimpleView | top 3 by EVENT_TYPE
+SimpleView | top 3 by EventType
 ";
         
         var converter = new KqlToSqlConverter();
@@ -102,6 +102,6 @@ SimpleView | top 3 by EVENT_TYPE
         // Should create a non-materialized CTE with simple table reference
         Assert.Contains("WITH SimpleView AS NOT MATERIALIZED", sql);
         Assert.Contains("SELECT * FROM StormEvents", sql);
-        Assert.Contains("SELECT * FROM SimpleView ORDER BY EVENT_TYPE DESC LIMIT 3", sql);
+        Assert.Contains("SELECT * FROM SimpleView ORDER BY EventType DESC LIMIT 3", sql);
     }
 }

@@ -24,7 +24,7 @@ public class ParseOperatorTests
         Assert.Contains("REGEXP_EXTRACT(Text,", sql);
         Assert.Contains("AS val", sql);
         Assert.Contains("AS rest", sql);
-        Assert.Contains("CAST(", sql);
+        Assert.Contains("TRY_CAST(", sql);
         Assert.Contains("BIGINT", sql);
     }
 

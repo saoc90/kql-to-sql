@@ -21,7 +21,7 @@ public class UnionOperatorTests
         var states = new List<string>();
         while (reader.Read())
         {
-            states.Add(reader.GetString(reader.GetOrdinal("STATE")));
+            states.Add(reader.GetString(reader.GetOrdinal("State")));
         }
         Assert.Equal(new[] { "ALABAMA", "TEXAS" }, states);
     }

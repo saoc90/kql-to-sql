@@ -10,9 +10,9 @@ public class ProjectRenameOperatorTests
     public void Converts_ProjectRename()
     {
         var converter = new KqlToSqlConverter();
-        var kql = "StormEvents | project-rename StateName = STATE | take 1";
+        var kql = "StormEvents | project-rename StateName = State | take 1";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT * RENAME (STATE AS StateName) FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT * RENAME (State AS StateName) FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -20,16 +20,16 @@ public class ProjectRenameOperatorTests
         using var reader = cmd.ExecuteReader();
         var columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToArray();
         Assert.Contains("StateName", columns);
-        Assert.DoesNotContain("STATE", columns);
+        Assert.DoesNotContain("State", columns);
     }
 
     [Fact]
     public void Renames_Multiple_Columns()
     {
         var converter = new KqlToSqlConverter();
-        var kql = "StormEvents | project-rename S=STATE, E=EVENT_TYPE | take 1";
+        var kql = "StormEvents | project-rename S=State, E=EventType | take 1";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT * RENAME (STATE AS S, EVENT_TYPE AS E) FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT * RENAME (State AS S, EventType AS E) FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -38,7 +38,7 @@ public class ProjectRenameOperatorTests
         var columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToArray();
         Assert.Contains("S", columns);
         Assert.Contains("E", columns);
-        Assert.DoesNotContain("STATE", columns);
-        Assert.DoesNotContain("EVENT_TYPE", columns);
+        Assert.DoesNotContain("State", columns);
+        Assert.DoesNotContain("EventType", columns);
     }
 }

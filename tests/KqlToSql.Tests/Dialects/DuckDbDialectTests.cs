@@ -30,22 +30,22 @@ public class DuckDbDialectTests
     [Fact]
     public void DuckDb_ParseJson_Uses_CastAsJson()
     {
-        var sql = _converter.Convert("StormEvents | extend data = parse_json(STATE)");
-        Assert.Contains("CAST(STATE AS JSON)", sql);
+        var sql = _converter.Convert("StormEvents | extend data = parse_json(State)");
+        Assert.Contains("CAST(State AS JSON)", sql);
     }
 
     [Fact]
     public void DuckDb_ToDynamic_Uses_CastAsJson()
     {
-        var sql = _converter.Convert("StormEvents | extend data = todynamic(STATE)");
-        Assert.Contains("CAST(STATE AS JSON)", sql);
+        var sql = _converter.Convert("StormEvents | extend data = todynamic(State)");
+        Assert.Contains("CAST(State AS JSON)", sql);
     }
 
     [Fact]
     public void DuckDb_Split_Uses_StringSplit()
     {
-        var sql = _converter.Convert("StormEvents | extend parts = split(STATE, ',')");
-        Assert.Contains("STRING_SPLIT(STATE, ',')", sql);
+        var sql = _converter.Convert("StormEvents | extend parts = split(State, ',')");
+        Assert.Contains("STRING_SPLIT(State, ',')", sql);
     }
 
     [Fact]
@@ -102,36 +102,36 @@ public class DuckDbDialectTests
     [Fact]
     public void DuckDb_Dcount_Uses_ApproxCountDistinct()
     {
-        var sql = _converter.Convert("StormEvents | summarize dcount(STATE)");
-        Assert.Contains("APPROX_COUNT_DISTINCT(STATE)", sql);
+        var sql = _converter.Convert("StormEvents | summarize dcount(State)");
+        Assert.Contains("APPROX_COUNT_DISTINCT(State)", sql);
     }
 
     [Fact]
     public void DuckDb_MakeList_Uses_List()
     {
-        var sql = _converter.Convert("StormEvents | summarize make_list(STATE)");
-        Assert.Contains("LIST(STATE)", sql);
+        var sql = _converter.Convert("StormEvents | summarize make_list(State)");
+        Assert.Contains("LIST(State)", sql);
     }
 
     [Fact]
     public void DuckDb_MakeSet_Uses_ListDistinct()
     {
-        var sql = _converter.Convert("StormEvents | summarize make_set(STATE)");
-        Assert.Contains("LIST(DISTINCT STATE)", sql);
+        var sql = _converter.Convert("StormEvents | summarize make_set(State)");
+        Assert.Contains("LIST(DISTINCT State)", sql);
     }
 
     [Fact]
     public void DuckDb_TakeAny_Uses_AnyValue()
     {
-        var sql = _converter.Convert("StormEvents | summarize take_any(STATE)");
-        Assert.Contains("ANY_VALUE(STATE)", sql);
+        var sql = _converter.Convert("StormEvents | summarize take_any(State)");
+        Assert.Contains("ANY_VALUE(State)", sql);
     }
 
     [Fact]
     public void DuckDb_Percentile_Uses_QuantileCont()
     {
-        var sql = _converter.Convert("StormEvents | summarize percentile(DAMAGE_PROPERTY, 50)");
-        Assert.Contains("quantile_cont(DAMAGE_PROPERTY, 50 / 100.0)", sql);
+        var sql = _converter.Convert("StormEvents | summarize percentile(DamageProperty, 50)");
+        Assert.Contains("quantile_cont(DamageProperty, 50 / 100.0)", sql);
     }
 
     // --- SQL syntax feature tests ---
@@ -139,21 +139,21 @@ public class DuckDbDialectTests
     [Fact]
     public void DuckDb_ProjectAway_Uses_Exclude()
     {
-        var sql = _converter.Convert("StormEvents | project-away STATE");
-        Assert.Contains("* EXCLUDE (STATE)", sql);
+        var sql = _converter.Convert("StormEvents | project-away State");
+        Assert.Contains("* EXCLUDE (State)", sql);
     }
 
     [Fact]
     public void DuckDb_ProjectRename_Uses_Rename()
     {
-        var sql = _converter.Convert("StormEvents | project-rename s = STATE");
-        Assert.Contains("* RENAME (STATE AS s)", sql);
+        var sql = _converter.Convert("StormEvents | project-rename s = State");
+        Assert.Contains("* RENAME (State AS s)", sql);
     }
 
     [Fact]
     public void DuckDb_Join_InnerUnique_Uses_Qualify()
     {
-        var sql = _converter.Convert("StormEvents | join (StormEvents) on STATE");
+        var sql = _converter.Convert("StormEvents | join (StormEvents) on State");
         Assert.Contains("QUALIFY ROW_NUMBER()", sql);
     }
 
@@ -167,14 +167,14 @@ public class DuckDbDialectTests
     [Fact]
     public void DuckDb_Has_Uses_Ilike()
     {
-        var sql = _converter.Convert("StormEvents | where STATE has 'tex'");
+        var sql = _converter.Convert("StormEvents | where State has 'tex'");
         Assert.Contains("ILIKE", sql);
     }
 
     [Fact]
     public void DuckDb_Contains_Uses_Ilike()
     {
-        var sql = _converter.Convert("StormEvents | where STATE contains 'tex'");
+        var sql = _converter.Convert("StormEvents | where State contains 'tex'");
         Assert.Contains("ILIKE", sql);
     }
 
@@ -228,7 +228,7 @@ public class DuckDbDialectTests
     public void DuckDb_Qualify_Returns_Correct_Syntax()
     {
         var dialect = new DuckDbDialect();
-        Assert.Equal("SELECT * FROM (SELECT 1) QUALIFY x = 1", dialect.Qualify("SELECT 1", "x = 1"));
+        Assert.Equal("SELECT 1 QUALIFY x = 1", dialect.Qualify("SELECT 1", "x = 1"));
     }
 
     [Fact]

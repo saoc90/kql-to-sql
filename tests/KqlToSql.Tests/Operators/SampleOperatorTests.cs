@@ -11,7 +11,7 @@ public class SampleOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "T | sample 5";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT * FROM T ORDER BY RANDOM() LIMIT 5", sql);
+        Assert.Equal("SELECT * FROM T USING SAMPLE 5 ROWS", sql);
     }
 
     [Fact]
@@ -29,6 +29,6 @@ public class SampleOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "T | where Status == 'active' | sample 10";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT * FROM T WHERE Status = 'active' ORDER BY RANDOM() LIMIT 10", sql);
+        Assert.Equal("SELECT * FROM T WHERE Status = 'active' USING SAMPLE 10 ROWS", sql);
     }
 }

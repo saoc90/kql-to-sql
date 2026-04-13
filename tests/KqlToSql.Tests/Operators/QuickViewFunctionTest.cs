@@ -17,8 +17,8 @@ namespace KqlToSql.Tests.Operators
         {
             // Test the view function declaration syntax with a main query
             var kql = @"
-let T_view = view () { StormEvents | where STATE == 'TEXAS' };
-T_view | top 5 by EVENT_TYPE
+let T_view = view () { StormEvents | where State == 'TEXAS' };
+T_view | top 5 by EventType
 ";
             
             var converter = new KqlToSqlConverter();
@@ -31,7 +31,7 @@ T_view | top 5 by EVENT_TYPE
             Assert.NotNull(sql);
             Assert.Contains("T_view", sql);
             Assert.Contains("NOT MATERIALIZED", sql);
-            Assert.Contains("SELECT * FROM StormEvents WHERE STATE = 'TEXAS'", sql);
+            Assert.Contains("SELECT * FROM StormEvents WHERE State = 'TEXAS'", sql);
         }
     }
 }

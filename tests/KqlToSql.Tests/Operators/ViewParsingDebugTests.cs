@@ -19,7 +19,7 @@ namespace KqlToSql.Tests.Operators
         public void DebugViewFunctionStructure()
         {
             // Parse the view function declaration
-            var query = "let T_view = view () { StormEvents | where STATE == 'TEXAS' };";
+            var query = "let T_view = view () { StormEvents | where State == 'TEXAS' };";
             var parsedQuery = KustoCode.Parse(query);
             var letStatement = parsedQuery.Syntax.GetDescendants<LetStatement>().First();
             var functionDeclaration = letStatement.Expression as FunctionDeclaration;
