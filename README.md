@@ -49,7 +49,9 @@ The full feature matrix is in [`KqlOperatorsChecklist.md`](./KqlOperatorsCheckli
 - **70+ tabular operators** — `where`, `summarize`, `join`, `union`, `extend`, `project`, `sort`, `top`, `distinct`, `mv-expand`, `mv-apply`, `parse`, `parse-kv`, `search`, `make-series`, `evaluate` (pivot, narrow, bag_unpack), `serialize`, `top-nested`, `let`/`materialize`, and more
 - **200+ scalar functions** — string, math, datetime, array/dynamic, hash, IP, regex, type conversion
 - **40+ aggregate functions** — `count`, `sum`, `avg`, `percentile`, `dcount`, `make_list`, `make_set`, `arg_max`, `countif`, `sumif`, `stdev`, `variance`, `hll`, and more
-- **Control commands** — `create table`, view declarations
+- **50+ management commands** — table DDL, column ops, functions/views, data ingestion (`.set`, `.append`, `.ingest`), export, external tables, database management, stored query results, metadata annotations
+
+The full command matrix with DuckDB and PostgreSQL mappings is in [`KqlCommandsChecklist.md`](./KqlCommandsChecklist.md).
 
 ## Translation examples
 

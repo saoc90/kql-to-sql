@@ -14,6 +14,12 @@ internal sealed class TableCommandHandler
     {
         sql = null!;
 
+        if (text.StartsWith(".create tables", StringComparison.OrdinalIgnoreCase))
+        { sql = TranslateCreateMultiple(text); return true; }
+
+        if (text.StartsWith(".create-merge table", StringComparison.OrdinalIgnoreCase))
+        { sql = TranslateCreateMerge(text); return true; }
+
         if (text.StartsWith(".create table", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateCreate(text); return true; }
 
@@ -35,6 +41,15 @@ internal sealed class TableCommandHandler
         if (text.StartsWith(".alter-merge table", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateAlterMerge(text); return true; }
 
+        if (Regex.IsMatch(text, @"^\.alter\s+table\s+\w+\s+docstring\b", RegexOptions.IgnoreCase))
+        { sql = TranslateTableDocstring(text); return true; }
+
+        if (Regex.IsMatch(text, @"^\.alter\s+table\s+\w+\s*\(", RegexOptions.IgnoreCase))
+        { sql = TranslateAlterTableSchema(text); return true; }
+
+        if (Regex.IsMatch(text, @"^\.alter\s+column\s+\w+\.\w+\s+docstring\b", RegexOptions.IgnoreCase))
+        { sql = TranslateColumnDocstring(text); return true; }
+
         if (text.StartsWith(".alter column", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateAlterColumn(text); return true; }
 
@@ -53,7 +68,60 @@ internal sealed class TableCommandHandler
         if (text.StartsWith(".show table", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateShow(text); return true; }
 
+        if (text.StartsWith(".show version", StringComparison.OrdinalIgnoreCase))
+        { sql = "SELECT version()"; return true; }
+
         return false;
+    }
+
+    private string TranslateCreateMultiple(string text)
+    {
+        var match = Regex.Match(text, @"\.create\s+tables\s+(.*)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!match.Success) throw new NotSupportedException("Malformed create tables command");
+        var rest = match.Groups[1].Value.Trim();
+        // Split on boundaries: "T1(...), T2(...)" — split after each closing paren
+        var tableMatches = Regex.Matches(rest, @"(\w+)\s*\(([^)]*)\)", RegexOptions.Singleline);
+        if (tableMatches.Count == 0) throw new NotSupportedException("Malformed create tables command");
+        var statements = tableMatches.Select(m =>
+        {
+            var columns = CommandParsingUtils.ParseColumnDefinitions(m.Groups[2].Value, _converter.Dialect);
+            return $"CREATE TABLE {m.Groups[1].Value} ({string.Join(", ", columns)})";
+        });
+        return string.Join("; ", statements);
+    }
+
+    private string TranslateCreateMerge(string text)
+    {
+        var match = Regex.Match(text, @"\.create-merge\s+table\s+(\w+)\s*\(([^)]*)\)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        if (!match.Success) throw new NotSupportedException("Malformed create-merge table command");
+        var table = match.Groups[1].Value;
+        var columns = CommandParsingUtils.ParseColumnDefinitions(match.Groups[2].Value, _converter.Dialect);
+        var createIfNotExists = $"CREATE TABLE IF NOT EXISTS {table} ({string.Join(", ", columns)})";
+        var addColumns = string.Join("; ", columns.Select(c => $"ALTER TABLE {table} ADD COLUMN {c}"));
+        return $"{createIfNotExists}; {addColumns}";
+    }
+
+    private string TranslateAlterTableSchema(string text)
+    {
+        var match = Regex.Match(text, @"\.alter\s+table\s+(\w+)\s*\(([^)]*)\)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        if (!match.Success) throw new NotSupportedException("Malformed alter table command");
+        var table = match.Groups[1].Value;
+        var columns = CommandParsingUtils.ParseColumnDefinitions(match.Groups[2].Value, _converter.Dialect);
+        return $"DROP TABLE IF EXISTS {table}; CREATE TABLE {table} ({string.Join(", ", columns)})";
+    }
+
+    private static string TranslateTableDocstring(string text)
+    {
+        var match = Regex.Match(text, @"\.alter\s+table\s+(\w+)\s+docstring\s+""([^""]*)""", RegexOptions.IgnoreCase);
+        if (!match.Success) throw new NotSupportedException("Malformed alter table docstring command");
+        return $"COMMENT ON TABLE {match.Groups[1].Value} IS '{match.Groups[2].Value}'";
+    }
+
+    private static string TranslateColumnDocstring(string text)
+    {
+        var match = Regex.Match(text, @"\.alter\s+column\s+(\w+)\.(\w+)\s+docstring\s+""([^""]*)""", RegexOptions.IgnoreCase);
+        if (!match.Success) throw new NotSupportedException("Malformed alter column docstring command");
+        return $"COMMENT ON COLUMN {match.Groups[1].Value}.{match.Groups[2].Value} IS '{match.Groups[3].Value}'";
     }
 
     private string TranslateCreate(string text)

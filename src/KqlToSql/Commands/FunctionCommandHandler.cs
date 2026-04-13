@@ -19,11 +19,20 @@ internal sealed class FunctionCommandHandler
         if (text.StartsWith(".show functions", StringComparison.OrdinalIgnoreCase))
         { sql = "SELECT * FROM information_schema.tables WHERE table_type = 'VIEW'"; return true; }
 
+        if (text.StartsWith(".show function", StringComparison.OrdinalIgnoreCase))
+        { sql = TranslateShowFunction(text); return true; }
+
         if (text.StartsWith(".create-or-alter function", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateCreateOrAlter(text); return true; }
 
         if (text.StartsWith(".create function", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateCreate(text); return true; }
+
+        if (Regex.IsMatch(text, @"^\.alter\s+function\s+\w+\s+docstring\b", RegexOptions.IgnoreCase))
+        { sql = TranslateFunctionDocstring(text); return true; }
+
+        if (text.StartsWith(".alter function", StringComparison.OrdinalIgnoreCase))
+        { sql = TranslateAlterFunction(text); return true; }
 
         if (text.StartsWith(".drop function", StringComparison.OrdinalIgnoreCase))
         { sql = TranslateDrop(text); return true; }
@@ -56,6 +65,26 @@ internal sealed class FunctionCommandHandler
         if (!match.Success) throw new NotSupportedException("Malformed drop function command");
         var ifExists = match.Groups[2].Success;
         return $"DROP VIEW {CommandParsingUtils.IfExistsClause(ifExists)}{match.Groups[1].Value}";
+    }
+
+    private string TranslateAlterFunction(string text)
+    {
+        var (name, query) = ParseFunctionBody(text, @"\.alter\s+function(?:\s+with\s*\([^)]*\))?\s+(\w+)\s*\([^)]*\)\s*\{(.*)\}");
+        return $"CREATE OR REPLACE VIEW {name} AS {_converter.Convert(query)}";
+    }
+
+    private static string TranslateShowFunction(string text)
+    {
+        var match = Regex.Match(text, @"\.show\s+function\s+(\w+)", RegexOptions.IgnoreCase);
+        if (!match.Success) throw new NotSupportedException("Malformed show function command");
+        return $"DESCRIBE {match.Groups[1].Value}";
+    }
+
+    private static string TranslateFunctionDocstring(string text)
+    {
+        var match = Regex.Match(text, @"\.alter\s+function\s+(\w+)\s+docstring\s+""([^""]*)""", RegexOptions.IgnoreCase);
+        if (!match.Success) throw new NotSupportedException("Malformed alter function docstring command");
+        return $"COMMENT ON VIEW {match.Groups[1].Value} IS '{match.Groups[2].Value}'";
     }
 
     private static (string Name, string Query) ParseFunctionBody(string text, string pattern)
