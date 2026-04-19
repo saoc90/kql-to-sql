@@ -52,8 +52,8 @@ internal sealed class OperatorDispatcher
             DistinctOperator distinct => _tabular.ApplyDistinct(leftSql, distinct),
 
             // Join operators
-            JoinOperator join => _joins.ApplyJoin(leftSql, join),
-            LookupOperator lookup => _joins.ApplyLookup(leftSql, lookup),
+            JoinOperator join => _joins.ApplyJoin(leftSql, join, leftExpression),
+            LookupOperator lookup => _joins.ApplyLookup(leftSql, lookup, leftExpression),
             UnionOperator union => _joins.ApplyUnion(leftSql, union, leftExpression),
 
             // Aggregation

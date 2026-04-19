@@ -134,6 +134,52 @@ public class JoinOperatorTests
         Assert.Contains(results, r => r.Key == null && r.Value1 == null && r.Value2 == 40);
     }
 
+    [Fact]
+    public void Converts_Join_DuplicateCols_Get_Suffixed_With_1()
+    {
+        // KQL: any R column that also exists on L keeps L's name and is re-emitted as <name>1.
+        // Uses CTEs so the converter can enumerate both sides' output columns via AST.
+        DuckDbSetup.EnsureDuckDb();
+        var converter = new KqlToSqlConverter();
+        var kql = "let A = X | project Key, Value; let B = Y | project Key, Value; A | join B on Key";
+        var sql = converter.Convert(kql);
+
+        // Expect R.Value aliased to Value1 (because L also has Value).
+        Assert.Contains("R.Value AS Value1", sql);
+
+        using var conn = new DuckDBConnection("DataSource=:memory:");
+        conn.Open();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "CREATE TABLE X (Key VARCHAR, Value BIGINT); INSERT INTO X VALUES ('b', 2), ('c', 4);";
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = "CREATE TABLE Y (Key VARCHAR, Value BIGINT); INSERT INTO Y VALUES ('b', 10), ('c', 20);";
+            cmd.ExecuteNonQuery();
+        }
+        using var runCmd = conn.CreateCommand();
+        runCmd.CommandText = sql;
+        using var reader = runCmd.ExecuteReader();
+        var rows = new List<(string Key, long Value, long Value1)>();
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2)));
+        }
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r.Key == "b" && r.Value == 2 && r.Value1 == 10);
+        Assert.Contains(rows, r => r.Key == "c" && r.Value == 4 && r.Value1 == 20);
+    }
+
+    [Fact]
+    public void Converts_Join_NonColliding_Cols_Not_Suffixed()
+    {
+        // If the R column name doesn't exist on L, no suffix is applied.
+        var converter = new KqlToSqlConverter();
+        var kql = "let A = X | project Key, LeftOnly; let B = Y | project Key, RightOnly; A | join B on Key";
+        var sql = converter.Convert(kql);
+        Assert.Contains("R.RightOnly", sql);
+        Assert.DoesNotContain("AS RightOnly1", sql);
+    }
+
     private static void CreateJoinTables(DuckDBConnection conn)
     {
         using var cmd = conn.CreateCommand();
