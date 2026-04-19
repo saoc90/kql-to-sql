@@ -486,6 +486,7 @@ internal class ExpressionSqlBuilder
         // them to the outer CASE expression instead.
         var (trueExpr, trueAlias) = ConvertBranchExtractAlias(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
         var (falseExpr, falseAlias) = ConvertBranchExtractAlias(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
+        (trueExpr, falseExpr) = AlignStringBranches(trueExpr, falseExpr);
         var caseSql = $"CASE WHEN {condition} THEN {trueExpr} ELSE {falseExpr} END";
         var outerAlias = trueAlias ?? falseAlias;
         return outerAlias != null ? $"{caseSql} AS {QuoteIdentifierIfReserved(outerAlias)}" : caseSql;
@@ -501,6 +502,23 @@ internal class ExpressionSqlBuilder
         return (ConvertExpression(expr, leftAlias, rightAlias), null);
     }
 
+    private static bool IsStringLiteral(string expr) =>
+        expr.StartsWith('\'') && expr.EndsWith('\'');
+
+    private static bool IsBareIdentifier(string expr) =>
+        System.Text.RegularExpressions.Regex.IsMatch(expr, @"^[A-Za-z_][A-Za-z0-9_]*$");
+
+    private static (string True, string False) AlignStringBranches(string trueExpr, string falseExpr)
+    {
+        bool trueIsString = IsStringLiteral(trueExpr);
+        bool falseIsString = IsStringLiteral(falseExpr);
+        if (trueIsString && IsBareIdentifier(falseExpr))
+            return (trueExpr, $"TRY_CAST({falseExpr} AS VARCHAR)");
+        if (falseIsString && IsBareIdentifier(trueExpr))
+            return ($"TRY_CAST({trueExpr} AS VARCHAR)", falseExpr);
+        return (trueExpr, falseExpr);
+    }
+
     private string ConvertCase(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         var args = fce.ArgumentList.Expressions;
@@ -510,13 +528,27 @@ internal class ExpressionSqlBuilder
         }
 
         var cases = new List<string>();
+        var thenExprs = new List<string>();
+        for (var i = 0; i < args.Count - 1; i += 2)
+        {
+            thenExprs.Add(ConvertExpression(args[i + 1].Element, leftAlias, rightAlias));
+        }
+        var defaultExpr = ConvertExpression(args[^1].Element, leftAlias, rightAlias);
+
+        // If any THEN/ELSE branch is a string literal and another is a bare identifier, cast identifiers to VARCHAR.
+        var allBranches = thenExprs.Append(defaultExpr).ToList();
+        bool hasStringLiteral = allBranches.Any(IsStringLiteral);
+        if (hasStringLiteral)
+        {
+            thenExprs = thenExprs.Select(e => IsBareIdentifier(e) ? $"TRY_CAST({e} AS VARCHAR)" : e).ToList();
+            if (IsBareIdentifier(defaultExpr)) defaultExpr = $"TRY_CAST({defaultExpr} AS VARCHAR)";
+        }
+
         for (var i = 0; i < args.Count - 1; i += 2)
         {
             var condition = ConvertExpression(args[i].Element, leftAlias, rightAlias);
-            var result = ConvertExpression(args[i + 1].Element, leftAlias, rightAlias);
-            cases.Add($"WHEN {condition} THEN {result}");
+            cases.Add($"WHEN {condition} THEN {thenExprs[i / 2]}");
         }
-        var defaultExpr = ConvertExpression(args[^1].Element, leftAlias, rightAlias);
         return $"CASE {string.Join(" ", cases)} ELSE {defaultExpr} END";
     }
 
