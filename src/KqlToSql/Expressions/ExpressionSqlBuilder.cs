@@ -712,9 +712,11 @@ internal class ExpressionSqlBuilder
 
     private string ConvertNumericOrOtherLiteral(LiteralExpression lit)
     {
-        // KQL typed null literals: long(null), int(null), double(null), real(null), bool(null)
-        // are parsed as LongLiteralExpression / IntLiteralExpression / RealLiteralExpression / BooleanLiteralExpression
-        // with LiteralValue == null and text like "long(null)". Emit proper typed NULL casts.
+        // KQL typed numeric/bool literals — int(N), long(N), double(N), bool(X) — parse as a LiteralExpression
+        // whose text looks like "int(0)" or "long(null)". The LiteralValue holds the parsed value (null for (null)).
+        //
+        // DuckDB treats 'int' / 'long' / 'double' as function calls if we pass the text through verbatim.
+        // Emit CAST(NULL AS <type>) for null payloads, otherwise the numeric literal form.
         if (lit.LiteralValue == null)
         {
             var text = lit.ToString().Trim();
@@ -731,6 +733,18 @@ internal class ExpressionSqlBuilder
                 };
                 return sqlType != null ? $"CAST(NULL AS {sqlType})" : "NULL";
             }
+        }
+        else if (lit.Kind is SyntaxKind.LongLiteralExpression
+                    or SyntaxKind.IntLiteralExpression
+                    or SyntaxKind.RealLiteralExpression
+                    or SyntaxKind.DecimalLiteralExpression)
+        {
+            // Use the parsed value (as SQL number) rather than text, so "int(0)" → "0" not "int(0)".
+            return System.Convert.ToString(lit.LiteralValue, CultureInfo.InvariantCulture) ?? lit.ToString().Trim();
+        }
+        else if (lit.Kind == SyntaxKind.BooleanLiteralExpression)
+        {
+            return lit.LiteralValue is true ? "TRUE" : "FALSE";
         }
         return lit.ToString().Trim();
     }

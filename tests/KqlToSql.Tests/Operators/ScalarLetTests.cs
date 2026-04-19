@@ -31,6 +31,7 @@ StormEvents | where InjuriesIndirect > v | take 1 | project InjuriesIndirect";
         var sql = converter.Convert(kql);
         Assert.DoesNotContain(" v AS NOT MATERIALIZED", sql);
         Assert.DoesNotContain(" v AS MATERIALIZED", sql);
-        Assert.Contains("10.0 / 2.0", sql);
+        // Numeric LiteralValue rendering drops trailing zero: 10.0 → "10", 2.0 → "2".
+        Assert.Contains("10 / 2", sql);
     }
 }
