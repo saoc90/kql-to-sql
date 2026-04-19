@@ -1060,6 +1060,16 @@ internal class ExpressionSqlBuilder
         {
             return $"(EPOCH_MS(CAST({left} AS TIMESTAMP)) / EXTRACT(MILLISECOND FROM ({right})))";
         }
+        // VARCHAR / numeric — cast left to DOUBLE so DuckDB can divide.
+        bool leftLooksVarchar = left.StartsWith("trim(", StringComparison.OrdinalIgnoreCase) ||
+                               left.Contains("json_extract(") ||
+                               left.Contains("::VARCHAR") ||
+                               left.TrimStart('(').StartsWith("TRY_CAST(", StringComparison.OrdinalIgnoreCase) && left.Contains("AS TEXT") ||
+                               left.Contains("AS VARCHAR");
+        bool rightIsNumericLiteral = System.Text.RegularExpressions.Regex.IsMatch(right, @"^\s*-?\d+(\.\d+)?\s*$");
+        if (leftLooksVarchar && rightIsNumericLiteral)
+            return $"TRY_CAST({left} AS DOUBLE) / {right}";
+
         return $"{left} / {right}";
     }
 
