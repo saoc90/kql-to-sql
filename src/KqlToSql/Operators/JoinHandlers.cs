@@ -17,6 +17,11 @@ internal class JoinHandlers : OperatorHandlerBase
     {
         var kindParam = join.Parameters.FirstOrDefault(p => p.Name.ToString().Trim().Equals("kind", StringComparison.OrdinalIgnoreCase));
         var kind = kindParam?.Expression.ToString().Trim().ToLowerInvariant();
+        // SEMI/ANTI joins are not a DuckDB join syntax — rewrite via EXISTS / NOT EXISTS.
+        if (kind is "leftsemi" or "rightsemi" or "leftanti" or "anti" or "rightanti")
+        {
+            return ApplyFilterJoin(leftSql, join, kind);
+        }
         var joinType = kind switch
         {
             null or "innerunique" => "INNER JOIN",
@@ -24,10 +29,6 @@ internal class JoinHandlers : OperatorHandlerBase
             "leftouter" => "LEFT OUTER JOIN",
             "rightouter" => "RIGHT OUTER JOIN",
             "fullouter" => "FULL OUTER JOIN",
-            "leftsemi" => "LEFT SEMI JOIN",
-            "rightsemi" => "RIGHT SEMI JOIN",
-            "leftanti" or "anti" => "LEFT ANTI JOIN",
-            "rightanti" => "RIGHT ANTI JOIN",
             _ => throw new NotSupportedException($"Unsupported join kind {kind}")
         };
 
@@ -92,6 +93,51 @@ internal class JoinHandlers : OperatorHandlerBase
             : $"L.*, R.{rightColumns}";
 
         return $"SELECT {selectClause} FROM {UnwrapFrom(leftSql)} AS L {joinType} {UnwrapFrom(rightSql)} AS R ON {string.Join(" AND ", conditions)}";
+    }
+
+    private string ApplyFilterJoin(string leftSql, JoinOperator join, string kind)
+    {
+        if (join.ConditionClause is not JoinOnClause onClause)
+            throw new NotSupportedException("Only join on clause is supported");
+
+        // Build conditions in terms of "outer" (the side whose rows are kept) and "inner" (the side used
+        // only to filter). For SEMI → keep outer rows that have at least one matching inner row;
+        // for ANTI → keep outer rows that have none.
+        bool isAnti = kind is "leftanti" or "anti" or "rightanti";
+        bool swap = kind is "rightsemi" or "rightanti";
+
+        var rightSql = Converter.ConvertNode(join.Expression);
+
+        var conditions = new List<string>();
+        foreach (var se in onClause.Expressions)
+        {
+            var expr = se.Element;
+            if (expr is NameReference nr)
+            {
+                var name = nr.Name.ToString().Trim();
+                if (name.StartsWith("[") && name.EndsWith("]")) name = name.Substring(1, name.Length - 2);
+                name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
+                conditions.Add(swap ? $"R.{name} = L.{name}" : $"L.{name} = R.{name}");
+            }
+            else if (expr is BinaryExpression be && be.Kind == SyntaxKind.EqualExpression)
+            {
+                var l = Expr.ConvertExpression(be.Left, "L", "R");
+                var r = Expr.ConvertExpression(be.Right, "L", "R");
+                conditions.Add($"{l} = {r}");
+            }
+            else
+            {
+                conditions.Add(Expr.ConvertExpression(expr, "L", "R"));
+            }
+        }
+
+        var outerSql = swap ? rightSql : leftSql;
+        var innerSql = swap ? leftSql : rightSql;
+        var outerAlias = "L";
+        var innerAlias = "R";
+        var pred = isAnti ? "NOT EXISTS" : "EXISTS";
+        var existsClause = $"{pred} (SELECT 1 FROM {UnwrapFrom(innerSql)} AS {innerAlias} WHERE {string.Join(" AND ", conditions)})";
+        return $"SELECT {outerAlias}.* FROM {UnwrapFrom(outerSql)} AS {outerAlias} WHERE {existsClause}";
     }
 
     internal string ApplyLookup(string leftSql, LookupOperator lookup)
