@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Kusto.Language;
 using Kusto.Language.Syntax;
 
 namespace KqlToSql.Expressions;
@@ -402,24 +403,21 @@ internal class ExpressionSqlBuilder
         }
 
         // Handle functions with structural conversion logic
-        switch (lower)
-        {
-            case "bin": return ConvertBin(fce, leftAlias, rightAlias);
-            case "substring": return ConvertSubstring(fce, leftAlias, rightAlias);
-            case "ago": return ConvertAgo(fce, leftAlias, rightAlias);
-            case "iif" or "iff": return ConvertIif(fce, leftAlias, rightAlias);
-            case "case": return ConvertCase(fce, leftAlias, rightAlias);
-            case "bin_at": return ConvertBinAt(fce, leftAlias, rightAlias);
-            case "trim": return ConvertTrim(fce, leftAlias, rightAlias);
-            case "trim_start": return ConvertTrimStart(fce, leftAlias, rightAlias);
-            case "trim_end": return ConvertTrimEnd(fce, leftAlias, rightAlias);
-            case "strcat_delim": return ConvertStrcatDelim(fce, leftAlias, rightAlias);
-            case "extract": return ConvertExtract(fce, leftAlias, rightAlias);
-            case "toscalar": return ConvertToscalar(fce, leftAlias, rightAlias);
-            case "round": return ConvertRound(fce, leftAlias, rightAlias);
-            case "datetime_add": return ConvertDatetimeAdd(fce, leftAlias, rightAlias);
-            case "datetime_diff": return ConvertDatetimeDiff(fce, leftAlias, rightAlias);
-        }
+        if (fce.Is(Functions.Bin)) return ConvertBin(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.Substring)) return ConvertSubstring(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.Ago)) return ConvertAgo(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.Iif) || fce.Is(Functions.Iff)) return ConvertIif(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.Case)) return ConvertCase(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.BinAt)) return ConvertBinAt(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.Trim)) return ConvertTrim(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.TrimStart)) return ConvertTrimStart(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.TrimEnd)) return ConvertTrimEnd(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.StrcatDelim)) return ConvertStrcatDelim(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.Extract)) return ConvertExtract(fce, leftAlias, rightAlias);
+        if (lower == "toscalar") return ConvertToscalar(fce, leftAlias, rightAlias); // TODO: no Kusto.Language symbol for 'toscalar'
+        if (fce.Is(Functions.Round)) return ConvertRound(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.DatetimeAdd)) return ConvertDatetimeAdd(fce, leftAlias, rightAlias);
+        if (fce.Is(Functions.DatetimeDiff)) return ConvertDatetimeDiff(fce, leftAlias, rightAlias);
 
         // Delegate to dialect for engine-specific function translation.
         // Strip SimpleNamedExpression wrappers from function arguments — ConvertExpression would
@@ -431,10 +429,10 @@ internal class ExpressionSqlBuilder
             .ToArray();
 
         // sum/sumif on an interval column — rewrite to epoch-ms arithmetic so it type-checks in DuckDB.
-        if ((lower == "sum" || lower == "sumif") && args.Length >= 1 && IsBareIdentifier(args[0]) && IsIntervalColumn(args[0]))
+        if ((fce.Is(Aggregates.Sum) || fce.Is(Aggregates.SumIf)) && args.Length >= 1 && IsBareIdentifier(args[0]) && IsIntervalColumn(args[0]))
         {
             var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
-            var filter = lower == "sumif" && args.Length >= 2 ? args[1] : null;
+            var filter = fce.Is(Aggregates.SumIf) && args.Length >= 2 ? args[1] : null;
             var inner = filter is null ? $"SUM({ms})" : $"SUM({ms}) FILTER (WHERE {filter})";
             return $"(({inner}) * INTERVAL '1 millisecond')";
         }
@@ -576,12 +574,12 @@ internal class ExpressionSqlBuilder
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < args.Count - 1; i += 2)
             if (args[i].Element is FunctionCallExpression c &&
-                c.Name.ToString().Trim().ToLowerInvariant() is "isnotempty" or "isempty" &&
+                (c.Is(Functions.IsNotEmpty) || c.Is(Functions.IsEmpty)) &&
                 c.ArgumentList.Expressions.Count == 1 &&
                 c.ArgumentList.Expressions[0].Element is NameReference ca &&
                 args[i + 1].Element is NameReference th &&
-                ca.Name.ToString().Trim() == th.Name.ToString().Trim())
-                ids.Add(th.Name.ToString().Trim());
+                ca.Name.SimpleName == th.Name.SimpleName)
+                ids.Add(th.Name.SimpleName);
         return ids;
     }
 
