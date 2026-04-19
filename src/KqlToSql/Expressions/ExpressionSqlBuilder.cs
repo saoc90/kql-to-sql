@@ -1074,8 +1074,15 @@ internal class ExpressionSqlBuilder
     }
 
     internal bool IsIntervalExpression(string sql)
-        => sql.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase)
-           || (IsBareIdentifier(sql) && IsIntervalColumn(sql.Trim('"')));
+    {
+        // A CAST/TRY_CAST to a numeric scalar type is NOT an interval, even if the inner expr contains INTERVAL.
+        if (System.Text.RegularExpressions.Regex.IsMatch(sql,
+                @"AS\s+(DOUBLE|BIGINT|INTEGER|FLOAT|REAL|NUMERIC)\s*\)+\s*$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            return false;
+        return sql.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase)
+               || (IsBareIdentifier(sql) && IsIntervalColumn(sql.Trim('"')));
+    }
 
     private string ConvertDivide(BinaryExpression bin, string? leftAlias, string? rightAlias)
     {
