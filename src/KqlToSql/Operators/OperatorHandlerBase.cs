@@ -52,6 +52,33 @@ internal abstract class OperatorHandlerBase
         return $"SELECT {columns} FROM ({sql})";
     }
 
+    /// <summary>Returns true if the string is a single parenthesized group: '(' at pos 0 matches ')' at the final position
+    /// (i.e. safe to strip the outer parens without losing content).</summary>
+    protected static bool IsFullyParenthesized(string sql)
+    {
+        if (sql.Length < 2 || sql[0] != '(' || sql[^1] != ')') return false;
+        int depth = 0;
+        bool inStr = false;
+        char quote = ' ';
+        for (int i = 0; i < sql.Length; i++)
+        {
+            var c = sql[i];
+            if (inStr)
+            {
+                if (c == quote) inStr = false;
+                continue;
+            }
+            if (c == '\'' || c == '"') { inStr = true; quote = c; continue; }
+            if (c == '(') depth++;
+            else if (c == ')')
+            {
+                depth--;
+                if (depth == 0 && i != sql.Length - 1) return false;
+            }
+        }
+        return depth == 0;
+    }
+
     /// <summary>Appends extra columns to SELECT *.</summary>
     protected static string AppendToSelectStar(string sql, string extras)
     {

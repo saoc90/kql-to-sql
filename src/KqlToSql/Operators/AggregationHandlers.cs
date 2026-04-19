@@ -36,7 +36,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 ? "ASC" : "DESC";
 
             var qualifyCondition = $"ROW_NUMBER() OVER ({partition}ORDER BY {extremumExpr} {direction}) = 1";
-            var innerSql = fromSql.StartsWith("(") ? fromSql.Substring(1, fromSql.Length - 2) : $"SELECT * FROM {fromSql}";
+            var innerSql = IsFullyParenthesized(fromSql) ? fromSql.Substring(1, fromSql.Length - 2) : $"SELECT * FROM {fromSql}";
             return Dialect.Qualify(innerSql, qualifyCondition);
         }
 
