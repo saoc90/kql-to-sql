@@ -15,7 +15,7 @@ public class JoinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "X | join Y on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* EXCLUDE (Key) FROM (SELECT * FROM X QUALIFY ROW_NUMBER() OVER (PARTITION BY Key) = 1) AS L INNER JOIN Y AS R ON L.Key = R.Key", sql);
+        Assert.Equal("SELECT L.*, R.* EXCLUDE (\"Key\") FROM (SELECT * FROM X QUALIFY ROW_NUMBER() OVER (PARTITION BY \"Key\") = 1) AS L INNER JOIN Y AS R ON L.\"Key\" = R.\"Key\"", sql);
 
         using var conn = new DuckDBConnection("DataSource=:memory:");
         conn.Open();
@@ -42,7 +42,7 @@ public class JoinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "X | join kind=leftouter Y on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* EXCLUDE (Key) FROM X AS L LEFT OUTER JOIN Y AS R ON L.Key = R.Key", sql);
+        Assert.Equal("SELECT L.*, R.* EXCLUDE (\"Key\") FROM X AS L LEFT OUTER JOIN Y AS R ON L.\"Key\" = R.\"Key\"", sql);
 
         using var conn = new DuckDBConnection("DataSource=:memory:");
         conn.Open();
@@ -75,7 +75,7 @@ public class JoinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "X | join kind=rightouter Y on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* EXCLUDE (Key) FROM X AS L RIGHT OUTER JOIN Y AS R ON L.Key = R.Key", sql);
+        Assert.Equal("SELECT L.*, R.* EXCLUDE (\"Key\") FROM X AS L RIGHT OUTER JOIN Y AS R ON L.\"Key\" = R.\"Key\"", sql);
 
         using var conn = new DuckDBConnection("DataSource=:memory:");
         conn.Open();
@@ -108,7 +108,7 @@ public class JoinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "X | join kind=fullouter Y on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* EXCLUDE (Key) FROM X AS L FULL OUTER JOIN Y AS R ON L.Key = R.Key", sql);
+        Assert.Equal("SELECT L.*, R.* EXCLUDE (\"Key\") FROM X AS L FULL OUTER JOIN Y AS R ON L.\"Key\" = R.\"Key\"", sql);
 
         using var conn = new DuckDBConnection("DataSource=:memory:");
         conn.Open();

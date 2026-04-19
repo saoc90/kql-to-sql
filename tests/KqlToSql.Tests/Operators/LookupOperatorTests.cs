@@ -11,7 +11,7 @@ public class LookupOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "Facts | lookup Dims on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* EXCLUDE (Key) FROM Facts AS L LEFT OUTER JOIN Dims AS R ON L.Key = R.Key", sql);
+        Assert.Equal("SELECT L.*, R.* EXCLUDE (\"Key\") FROM Facts AS L LEFT OUTER JOIN Dims AS R ON L.\"Key\" = R.\"Key\"", sql);
     }
 
     [Fact]
@@ -20,7 +20,7 @@ public class LookupOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "Facts | lookup kind=inner Dims on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* EXCLUDE (Key) FROM Facts AS L INNER JOIN Dims AS R ON L.Key = R.Key", sql);
+        Assert.Equal("SELECT L.*, R.* EXCLUDE (\"Key\") FROM Facts AS L INNER JOIN Dims AS R ON L.\"Key\" = R.\"Key\"", sql);
     }
 
     [Fact]

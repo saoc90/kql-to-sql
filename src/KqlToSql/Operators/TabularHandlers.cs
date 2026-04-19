@@ -146,7 +146,31 @@ internal class TabularHandlers : OperatorHandlerBase
             }
         }
 
+        // If leftSql already has a trailing ORDER BY (e.g. from | top), wrap in a subquery so the
+        // new sort replaces it, rather than producing invalid 'ORDER BY x LIMIT n ORDER BY y'.
+        if (HasTrailingOrderBy(leftSql))
+            return $"SELECT * FROM ({leftSql}) ORDER BY {string.Join(", ", orderings)}";
         return $"{leftSql} ORDER BY {string.Join(", ", orderings)}";
+    }
+
+    private static bool HasTrailingOrderBy(string sql)
+    {
+        // Look for a top-level ORDER BY that is NOT wrapped in a subquery.
+        int depth = 0;
+        bool inStr = false;
+        char quote = ' ';
+        int lastOrderBy = -1;
+        for (int i = 0; i <= sql.Length - 10; i++)
+        {
+            var c = sql[i];
+            if (inStr) { if (c == quote) inStr = false; continue; }
+            if (c == '\'' || c == '"') { inStr = true; quote = c; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (depth == 0 && string.Compare(sql, i, " ORDER BY ", 0, 10, StringComparison.OrdinalIgnoreCase) == 0)
+                lastOrderBy = i;
+        }
+        return lastOrderBy >= 0;
     }
 
     internal string ApplyTake(string leftSql, TakeOperator take)
