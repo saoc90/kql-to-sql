@@ -22,7 +22,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         if (summarize.Aggregates.Count == 1 &&
             summarize.Aggregates[0].Element is Expression aggExpr &&
             aggExpr is FunctionCallExpression fce &&
-            (fce.Is(Aggregates.ArgMax) || fce.Is(Aggregates.ArgMin)) &&
+            (fce.IsAny(Aggregates.ArgMax, Aggregates.ArgMin, Aggregates.ArgMax_Deprecated, Aggregates.ArgMin_Deprecated)) &&
             fce.ArgumentList.Expressions.Count == 2 &&
             fce.ArgumentList.Expressions[1].Element is StarExpression)
         {
@@ -111,11 +111,22 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
     internal IEnumerable<string> ConvertAggregate(SyntaxNode node, Dictionary<string, int>? keyAliasCounts)
     {
         string? alias = null;
+        string[]? compoundAliases = null;
         Expression expr;
         if (node is SimpleNamedExpression sne)
         {
             alias = Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.ToString().Trim());
             expr = sne.Expression;
+        }
+        else if (node is CompoundNamedExpression cne)
+        {
+            // KQL: (name1, name2, ...) = arg_max/arg_min(key, v1, v2, ...)
+            //   Each LHS name becomes the output alias of the corresponding aggregate result:
+            //   name1 for the key, name2+ for each value arg.
+            compoundAliases = cne.Names.Names
+                .Select(n => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(n.Element.Name.SimpleName))
+                .ToArray();
+            expr = cne.Expression;
         }
         else if (node is Expression e)
         {
@@ -129,18 +140,20 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         if (expr is FunctionCallExpression fce)
         {
             var name = fce.Name.SimpleName.ToLowerInvariant();
-            if (fce.Is(Aggregates.ArgMax) || fce.Is(Aggregates.ArgMin))
+            if (fce.IsAny(Aggregates.ArgMax, Aggregates.ArgMin, Aggregates.ArgMax_Deprecated, Aggregates.ArgMin_Deprecated))
             {
                 // KQL: arg_max(key, v1, v2=alias, ...) by ...
                 //   output includes key (max/min of key) + each value at the extremum row.
-                // Outer alias applies to the key output: (K = arg_max(key, v1))  → key output named K.
+                //   Outer alias applies to the key output: (K = arg_max(key, v1))  → key output named K.
+                //   Tuple form:  (K, V1, V2) = arg_max(key, v1, v2) → key aliased as K, values as V1/V2.
                 var keyNode = fce.ArgumentList.Expressions[0].Element;
                 var extremumExpr = Expr.ConvertExpression(keyNode);
-                var baseKeyAlias = alias ?? (keyNode is NameReference knr ? knr.Name.SimpleName : name);
+                var explicitKeyAlias = compoundAliases is { Length: > 0 } ? compoundAliases[0] : alias;
+                var baseKeyAlias = explicitKeyAlias ?? (keyNode is NameReference knr ? knr.Name.SimpleName : name);
                 // Live Kusto: repeated auto-named columns in one summarize suffix 2nd/3rd as <name>1, <name>2, ...
-                // Explicit outer alias (alias != null) bypasses the counter on the key.
-                var keyAlias = SuffixIfCollides(baseKeyAlias, alias != null, keyAliasCounts);
-                var keyAgg = fce.Is(Aggregates.ArgMax) ? "MAX" : "MIN";
+                // Explicit outer alias bypasses the counter on the key.
+                var keyAlias = SuffixIfCollides(baseKeyAlias, explicitKeyAlias != null, keyAliasCounts);
+                var keyAgg = fce.IsAny(Aggregates.ArgMax, Aggregates.ArgMax_Deprecated) ? "MAX" : "MIN";
                 var results = new List<string> { $"{keyAgg}({extremumExpr}) AS {keyAlias}" };
 
                 for (int i = 1; i < fce.ArgumentList.Expressions.Count; i++)
@@ -153,6 +166,12 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                     {
                         innerExpr = Expr.ConvertExpression(vsne.Expression);
                         resultAlias = vsne.Name.SimpleName;
+                        explicitValueAlias = true;
+                    }
+                    else if (compoundAliases is { } aliases && i < aliases.Length)
+                    {
+                        innerExpr = Expr.ConvertExpression(argNode);
+                        resultAlias = aliases[i];
                         explicitValueAlias = true;
                     }
                     else
