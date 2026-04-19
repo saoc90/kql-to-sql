@@ -418,8 +418,15 @@ public class KqlToSqlConverter
         }
         finally
         {
+            // Scalar lets and user functions are body-scoped — restore to pre-body state.
+            // CTEs behave like KQL `as` — `| as name` inside a view()/materialize() body stays visible
+            // to later outer references, so preserve new CTE entries across the restore.
+            var addedCtes = _ctes
+                .Where(kv => !savedCtes.ContainsKey(kv.Key))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
             _ctes.Clear();
             foreach (var kv in savedCtes) _ctes[kv.Key] = kv.Value;
+            foreach (var kv in addedCtes) _ctes[kv.Key] = kv.Value;
             _scalarLets.Clear();
             foreach (var kv in savedScalars) _scalarLets[kv.Key] = kv.Value;
             _userFunctions.Clear();
