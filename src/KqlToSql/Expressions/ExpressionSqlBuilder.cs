@@ -555,6 +555,21 @@ internal class ExpressionSqlBuilder
         var left = ConvertExpression(inExpr.Left, leftAlias, rightAlias);
         var list = inExpr.Right;
 
+        // When the RHS is a single NameReference that refers to a CTE / table / scalar-let bound to a query,
+        // KQL interprets it as 'col IN (SELECT <first-column> FROM <name>)'. DuckDB rejects bare identifiers
+        // on the RHS of IN, so expand to a subquery form.
+        if (list.Expressions.Count == 1 && list.Expressions[0].Element is NameReference tblRef)
+        {
+            var refName = tblRef.Name.ToString().Trim();
+            bool isScalar = _scalarLets != null && _scalarLets.ContainsKey(refName);
+            if (!isScalar && !string.Equals(refName, "$left", StringComparison.Ordinal) && !string.Equals(refName, "$right", StringComparison.Ordinal))
+            {
+                var negate = inExpr.Kind == SyntaxKind.NotInExpression || inExpr.Kind == SyntaxKind.NotInCsExpression;
+                var inOp = negate ? "NOT IN" : "IN";
+                return $"{left} {inOp} (SELECT * FROM {refName})";
+            }
+        }
+
         // When dynamic(["a","b"]) is used, the expression list contains a single DynamicExpression.
         // Expand its array elements as individual IN values.
         string[] items;
