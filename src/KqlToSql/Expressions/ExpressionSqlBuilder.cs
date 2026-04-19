@@ -272,12 +272,27 @@ internal class ExpressionSqlBuilder
 
     internal static string QuoteIdentifierIfReserved(string name)
     {
-        // Strip existing brackets like ["foo"]
+        // Strip existing brackets like ["foo"] or ['foo']
         if (name.StartsWith("[") && name.EndsWith("]"))
+        {
             name = name.Substring(1, name.Length - 2);
+            if ((name.StartsWith("\"") && name.EndsWith("\"")) ||
+                (name.StartsWith("'") && name.EndsWith("'")))
+                name = name.Substring(1, name.Length - 2);
+        }
         if (name.StartsWith("\"") && name.EndsWith("\""))
             return name;
-        return DuckDbReservedWords.Contains(name) ? $"\"{name}\"" : name;
+        bool needsQuoting = DuckDbReservedWords.Contains(name) || NeedsIdentifierQuoting(name);
+        return needsQuoting ? $"\"{name.Replace("\"", "\"\"")}\"" : name;
+    }
+
+    private static bool NeedsIdentifierQuoting(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        if (!(char.IsLetter(name[0]) || name[0] == '_')) return true;
+        foreach (var c in name)
+            if (!(char.IsLetterOrDigit(c) || c == '_')) return true;
+        return false;
     }
 
     private string ResolveNameReference(NameReference nr, string? leftAlias, string? rightAlias)

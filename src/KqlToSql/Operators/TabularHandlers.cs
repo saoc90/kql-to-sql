@@ -34,7 +34,7 @@ internal class TabularHandlers : OperatorHandlerBase
         var columns = project.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
-                return $"{Expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
+                return $"{Expr.ConvertExpression(sne.Expression)} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.ToString().Trim())}";
             return Expr.ConvertExpression(se.Element);
         }).ToArray();
 
@@ -43,7 +43,9 @@ internal class TabularHandlers : OperatorHandlerBase
 
     internal string ApplyProjectAway(string leftSql, ProjectAwayOperator projectAway)
     {
-        var columns = projectAway.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
+        var columns = projectAway.Expressions
+            .Select(se => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(se.Element.ToString().Trim()))
+            .ToArray();
         return ReplaceSelectStar(leftSql, Dialect.SelectExclude(columns));
     }
 
@@ -52,7 +54,7 @@ internal class TabularHandlers : OperatorHandlerBase
         var mappings = projectRename.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
-                return $"{Expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
+                return $"{Expr.ConvertExpression(sne.Expression)} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.ToString().Trim())}";
             throw new NotSupportedException("Unsupported project-rename expression");
         }).ToArray();
 
@@ -61,13 +63,17 @@ internal class TabularHandlers : OperatorHandlerBase
 
     internal string ApplyProjectKeep(string leftSql, ProjectKeepOperator projectKeep)
     {
-        var columns = projectKeep.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
+        var columns = projectKeep.Expressions
+            .Select(se => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(se.Element.ToString().Trim()))
+            .ToArray();
         return ReplaceSelectStar(leftSql, string.Join(", ", columns));
     }
 
     internal string ApplyProjectReorder(string leftSql, ProjectReorderOperator projectReorder)
     {
-        var columns = projectReorder.Expressions.Select(se => se.Element.ToString().Trim()).ToArray();
+        var columns = projectReorder.Expressions
+            .Select(se => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(se.Element.ToString().Trim()))
+            .ToArray();
         return ReplaceSelectStar(leftSql, $"{string.Join(", ", columns)}, {Dialect.SelectExclude(columns)}");
     }
 
