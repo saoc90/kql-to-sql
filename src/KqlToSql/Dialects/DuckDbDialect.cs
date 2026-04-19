@@ -36,7 +36,7 @@ public class DuckDbDialect : ISqlDialect
             "coalesce" => $"COALESCE({string.Join(", ", args)})",
             "countof" => $"(LENGTH({args[0]}) - LENGTH(REPLACE({args[0]}, {args[1]}, ''))) / LENGTH({args[1]})",
             "reverse" => $"REVERSE({args[0]})",
-            "split" => $"STRING_SPLIT({args[0]}, {args[1]})",
+            "split" => $"STRING_SPLIT(CAST({args[0]} AS VARCHAR), {args[1]})",
             "floor" => $"FLOOR({args[0]})",
             "ceiling" => $"CEILING({args[0]})",
             "abs" => $"ABS({args[0]})",
