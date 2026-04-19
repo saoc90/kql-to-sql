@@ -1020,13 +1020,22 @@ internal class ExpressionSqlBuilder
 
     private string ConvertRound(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
-        var value = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
+        var value = ConvertArgument(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
         if (fce.ArgumentList.Expressions.Count >= 2)
         {
-            var precision = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
+            var precision = ConvertArgument(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
             return $"ROUND({value}, {precision})";
         }
         return $"ROUND({value})";
+    }
+
+    /// <summary>Converts a function-call argument, stripping SimpleNamedExpression wrappers so
+    /// we don't leak 'X AS alias' into the middle of a function-arg list.</summary>
+    private string ConvertArgument(Expression expr, string? leftAlias, string? rightAlias)
+    {
+        if (expr is SimpleNamedExpression sne)
+            return ConvertExpression(sne.Expression, leftAlias, rightAlias);
+        return ConvertExpression(expr, leftAlias, rightAlias);
     }
 
     private string ConvertDatetimeAdd(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
