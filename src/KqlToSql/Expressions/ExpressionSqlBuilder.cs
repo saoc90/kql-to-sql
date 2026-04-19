@@ -358,7 +358,12 @@ internal class ExpressionSqlBuilder
             {
                 throw new NotSupportedException($"{name} expects exactly one argument");
             }
-            var arg = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
+            // Strip SimpleNamedExpression wrapper — inner 'alias = expr' would leak 'AS alias' into
+            // the CAST expression (producing invalid 'CAST(X AS alias AS TIMESTAMP)').
+            var argNode = fce.ArgumentList.Expressions[0].Element is SimpleNamedExpression sneArg
+                ? sneArg.Expression
+                : fce.ArgumentList.Expressions[0].Element;
+            var arg = ConvertExpression(argNode, leftAlias, rightAlias);
             // KQL type conversions return null on failure (e.g. tolong('') → null)
             return _dialect.SafeCast(arg, sqlType);
         }
