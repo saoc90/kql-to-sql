@@ -39,7 +39,7 @@ public class KqlToSqlConverter
         }
     }
     private readonly Dictionary<string, string> _scalarLets = new();
-    private readonly Dictionary<string, (string[] paramNames, FunctionBody body)> _userFunctions = new();
+    private readonly Dictionary<string, (string[] paramNames, Expression?[] paramDefaults, FunctionBody body)> _userFunctions = new();
 
     /// <summary>Well-known table → column name registry used by structural column enumeration
     /// (e.g. join-duplicate suffixing) when a join side references a base table whose schema
@@ -211,17 +211,22 @@ public class KqlToSqlConverter
         {
             materialized = false;
 
-            var parameters = funcDecl.Parameters?.Parameters
-                .Select(p => p.Element?.NameAndType?.Name?.ToString().Trim())
-                .Where(p => p != null)
-                .Cast<string>()
-                .ToArray() ?? Array.Empty<string>();
+            var paramElements = funcDecl.Parameters?.Parameters
+                .Select(p => p.Element)
+                .Where(p => p?.NameAndType?.Name != null)
+                .ToList() ?? new List<FunctionParameter>();
+            var parameters = paramElements
+                .Select(p => p!.NameAndType.Name.ToString().Trim())
+                .ToArray();
+            var paramDefaults = paramElements
+                .Select(p => p!.DefaultValue?.Value as Expression)
+                .ToArray();
 
             var viewKeyword = funcDecl.ViewKeyword?.ToString().Trim().ToLowerInvariant();
 
             // Always register the function so downstream call sites (X() or X(args)) can
             // inline its body, regardless of whether it has parameters.
-            _userFunctions[name] = (parameters, funcDecl.Body);
+            _userFunctions[name] = (parameters, paramDefaults, funcDecl.Body);
 
             if (parameters.Length > 0)
             {
@@ -461,7 +466,7 @@ public class KqlToSqlConverter
         // FunctionBody has direct children: Statements (let bindings) and Expression (result)
         var savedCtes = new Dictionary<string, (string, bool)>(_ctes);
         var savedScalars = new Dictionary<string, string>(_scalarLets);
-        var savedFuncs = new Dictionary<string, (string[], FunctionBody)>(_userFunctions);
+        var savedFuncs = new Dictionary<string, (string[], Expression?[], FunctionBody)>(_userFunctions);
         try
         {
             // Process only the IMMEDIATE let statements (not nested ones in deeper bodies)

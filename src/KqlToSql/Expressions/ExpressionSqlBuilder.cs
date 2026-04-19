@@ -36,9 +36,9 @@ internal class ExpressionSqlBuilder
     /// <summary>Clears interval column tracking — call once per top-level Convert() to avoid cross-query stale state.</summary>
     internal void ClearIntervalColumns() => _intervalColumns.Clear();
 
-    private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.FunctionBody body)>? _userFunctions;
+    private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.Expression?[] paramDefaults, Kusto.Language.Syntax.FunctionBody body)>? _userFunctions;
     /// <summary>Sets user-defined parameterized functions for inline expansion.</summary>
-    internal void SetUserFunctions(Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.FunctionBody body)> funcs) => _userFunctions = funcs;
+    internal void SetUserFunctions(Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.Expression?[] paramDefaults, Kusto.Language.Syntax.FunctionBody body)> funcs) => _userFunctions = funcs;
 
     private static readonly Dictionary<string, string> CastFunctionMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -472,13 +472,20 @@ internal class ExpressionSqlBuilder
         if (_userFunctions != null && _userFunctions.TryGetValue(actualName, out var userFunc))
         {
             var savedScalars = new Dictionary<string, string>();
-            for (int i = 0; i < Math.Min(userFunc.paramNames.Length, args.Length); i++)
+            for (int i = 0; i < userFunc.paramNames.Length; i++)
             {
                 var pname = userFunc.paramNames[i];
+                string? bound = null;
+                if (i < args.Length) bound = args[i];
+                else if (userFunc.paramDefaults[i] is Expression defExpr)
+                {
+                    try { bound = ConvertExpression(defExpr, leftAlias, rightAlias); } catch { }
+                }
+                if (bound == null) continue;
                 if (_scalarLets != null && _scalarLets.TryGetValue(pname, out var prev))
                     savedScalars[pname] = prev;
                 _scalarLets ??= new Dictionary<string, string>();
-                _scalarLets[pname] = args[i];
+                _scalarLets[pname] = bound;
             }
 
             // Process nested let statements in the function body as scalar bindings
