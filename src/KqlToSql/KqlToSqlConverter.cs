@@ -222,7 +222,7 @@ public class KqlToSqlConverter
                 var text = lit.ToString().Trim();
                 if (Expressions.ExpressionSqlBuilder.TryParseTimespan(text, out var ms))
                 {
-                    _scalarLets[name] = $"{ms} * INTERVAL '1 millisecond'";
+                    _scalarLets[name] = $"({ms} * INTERVAL '1 millisecond')";
                     return true;
                 }
             }

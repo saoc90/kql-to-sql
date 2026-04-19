@@ -310,7 +310,7 @@ internal class ExpressionSqlBuilder
         var text = lit.ToString().Trim();
         if (TryParseTimespan(text, out var ms))
         {
-            return $"{ms} * INTERVAL '1 millisecond'";
+            return $"({ms} * INTERVAL '1 millisecond')";
         }
         return $"INTERVAL '{text}'";
     }
@@ -400,15 +400,13 @@ internal class ExpressionSqlBuilder
                 catch { }
             }
 
-            // Find the result expression: the last non-let expression in the body
+            // Find the result expression: prefer FunctionBody.Expression (the authoritative result
+            // expression), then fall back to node converter or name.
             string result;
             try
             {
-                var tail = userFunc.body.GetDescendants<Expression>()
-                    .LastOrDefault(e => e.Parent is FunctionBody
-                                       || (e.Parent is not LetStatement && e.Parent?.Parent is FunctionBody));
-                if (tail != null)
-                    result = ConvertExpression(tail, leftAlias, rightAlias);
+                if (userFunc.body.Expression != null)
+                    result = ConvertExpression(userFunc.body.Expression, leftAlias, rightAlias);
                 else if (_nodeConverter != null)
                     result = _nodeConverter(userFunc.body);
                 else
