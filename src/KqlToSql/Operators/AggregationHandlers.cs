@@ -144,15 +144,12 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                         innerExpr = Expr.ConvertExpression(vsne.Expression);
                         resultAlias = vsne.Name.ToString().Trim();
                     }
-                    else if (argNode is NameReference vnr)
-                    {
-                        innerExpr = Expr.ConvertExpression(argNode);
-                        resultAlias = vnr.Name.ToString().Trim();
-                    }
                     else
                     {
                         innerExpr = Expr.ConvertExpression(argNode);
-                        resultAlias = $"{name}_{i}";
+                        // Match live Kusto: non-key arg auto-name is the inner identifier
+                        // (e.g. todouble(Value) → Value, toreal(X) → X, bare V → V).
+                        resultAlias = TryGetInnerIdentifier(argNode) ?? $"{name}_{i}";
                     }
                     results.Add($"{name.ToUpperInvariant()}({innerExpr}, {extremumExpr}) AS {resultAlias}");
                 }
@@ -259,6 +256,24 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         if (alias != null && Expr.IsIntervalExpression(exprSql2))
             Expr.MarkIntervalColumn(alias.Trim('"'));
         return new[] { $"{exprSql2} AS {alias ?? "expr"}" };
+    }
+
+    private static string? TryGetInnerIdentifier(SyntaxNode node)
+    {
+        // Drill through single-arg conversion wrappers (toreal/todouble/tostring/...) to the
+        // inner identifier — same rule live Kusto uses to auto-name arg_max/arg_min value args.
+        SyntaxNode? current = node;
+        while (current is FunctionCallExpression fce && fce.ArgumentList.Expressions.Count == 1)
+        {
+            var fname = fce.Name.ToString().Trim().ToLowerInvariant();
+            if (fname is "tostring" or "toreal" or "todouble" or "toint" or "tolong"
+                or "tobool" or "tofloat" or "todatetime" or "todynamic")
+                current = fce.ArgumentList.Expressions[0].Element;
+            else break;
+        }
+        if (current is NameReference nr)
+            return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.ToString().Trim());
+        return null;
     }
 
     private static bool IsBareIdentifier(string sql)
