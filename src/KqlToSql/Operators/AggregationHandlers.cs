@@ -211,6 +211,19 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 _ => name
             };
 
+            // When summing a column we recorded as interval-typed upstream, rewrite to epoch-ms math
+            // before dispatching to the dialect so the emission bypasses the plain SUM path.
+            if (name == "sum" && args.Length == 1 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
+            {
+                var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
+                return new[] { $"((SUM({ms})) * INTERVAL '1 millisecond') AS {alias}" };
+            }
+            if (name == "sumif" && args.Length == 2 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
+            {
+                var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
+                return new[] { $"((SUM({ms}) FILTER (WHERE {args[1]})) * INTERVAL '1 millisecond') AS {alias}" };
+            }
+
             var sqlFunc = Dialect.TryTranslateAggregate(name, args);
             if (sqlFunc != null)
             {
@@ -232,6 +245,14 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         // Non-function expression in summarize (e.g. arithmetic on aggregates)
         var exprSql2 = Expr.ConvertExpression(expr);
         return new[] { $"{exprSql2} AS {alias ?? "expr"}" };
+    }
+
+    private static bool IsBareIdentifier(string sql)
+    {
+        if (string.IsNullOrEmpty(sql)) return false;
+        foreach (var c in sql)
+            if (!(char.IsLetterOrDigit(c) || c == '_')) return false;
+        return char.IsLetter(sql[0]) || sql[0] == '_';
     }
 
     private static string SafeAliasPart(string sqlFragment)
