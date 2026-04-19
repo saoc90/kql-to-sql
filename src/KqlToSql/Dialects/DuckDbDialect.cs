@@ -238,6 +238,11 @@ public class DuckDbDialect : ISqlDialect
             "anyif" or "take_anyif" => $"ANY_VALUE({args[0]}) FILTER (WHERE {args[1]})",
             "make_list" or "makelist" => $"LIST({args[0]})",
             "make_set" or "makeset" => $"LIST(DISTINCT {args[0]})",
+            "sumif" => $"SUM({args[0]}) FILTER (WHERE {args[1]})",
+            "countif" => $"COUNT(*) FILTER (WHERE {args[0]})",
+            "avgif" when args.Length >= 2 => $"AVG({args[0]}) FILTER (WHERE {args[1]})",
+            "minif" => $"MIN({args[0]}) FILTER (WHERE {args[1]})",
+            "maxif" => $"MAX({args[0]}) FILTER (WHERE {args[1]})",
 
             _ => null
         };
