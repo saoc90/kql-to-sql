@@ -6,6 +6,7 @@ obj/
 *.duckdb
 libduckdb.so
 .vs
+.claude/
 node_modules/
 package-lock.json
 build-wasm/
