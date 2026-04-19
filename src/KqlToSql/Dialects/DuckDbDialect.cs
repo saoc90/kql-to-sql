@@ -232,6 +232,13 @@ public class DuckDbDialect : ISqlDialect
             "isinf" => $"ISINF({args[0]})",
             "isfinite" => $"ISFINITE({args[0]})",
 
+            // Aggregate names that also appear inside scalar wrappers (e.g. toreal(any(Value)))
+            // — alias to the DuckDB aggregate so the enclosing GROUP BY remains valid.
+            "any" or "take_any" => $"ANY_VALUE({args[0]})",
+            "anyif" or "take_anyif" => $"ANY_VALUE({args[0]}) FILTER (WHERE {args[1]})",
+            "make_list" or "makelist" => $"LIST({args[0]})",
+            "make_set" or "makeset" => $"LIST(DISTINCT {args[0]})",
+
             _ => null
         };
     }
