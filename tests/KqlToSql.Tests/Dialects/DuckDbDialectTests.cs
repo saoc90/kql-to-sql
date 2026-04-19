@@ -242,7 +242,7 @@ public class DuckDbDialectTests
     public void DuckDb_GenerateSeries_Returns_Correct_Syntax()
     {
         var dialect = new DuckDbDialect();
-        Assert.Equal("SELECT generate_series AS x FROM generate_series(1, 10, 1)", dialect.GenerateSeries("x", "1", "10", "1"));
+        Assert.Equal("SELECT generate_series AS x FROM generate_series(CAST(1 AS BIGINT), CAST(10 AS BIGINT), CAST(1 AS BIGINT))", dialect.GenerateSeries("x", "1", "10", "1"));
     }
 
     [Fact]

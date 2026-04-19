@@ -167,7 +167,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         }
 
         // Build: generate time series, cross join with by-columns, left join with aggregated data
-        var timeSeries = $"SELECT generate_series AS _ts FROM generate_series({fromExpr}, {toExpr}, {stepInterval})";
+        var timeSeries = $"SELECT generate_series AS _ts FROM generate_series(CAST({fromExpr} AS BIGINT), CAST({toExpr} AS BIGINT), CAST({stepInterval} AS BIGINT))";
 
         var aggSelectList = string.Join(", ", aggParts.Select(a =>
             a.Default != null

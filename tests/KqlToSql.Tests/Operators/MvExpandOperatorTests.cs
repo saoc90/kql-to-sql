@@ -12,7 +12,7 @@ public class MvExpandOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "range x from 1 to 1 step 1 | extend arr=pack_array(1,2,3) | mv-expand arr";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT t.* EXCLUDE (arr), u.value AS arr FROM (SELECT *, LIST_VALUE(1, 2, 3) AS arr FROM (SELECT generate_series AS x FROM generate_series(1, 1, 1))) AS t CROSS JOIN UNNEST(t.arr) AS u(value)", sql);
+        Assert.Equal("SELECT t.* EXCLUDE (arr), u.value AS arr FROM (SELECT *, LIST_VALUE(1, 2, 3) AS arr FROM (SELECT generate_series AS x FROM generate_series(CAST(1 AS BIGINT), CAST(1 AS BIGINT), CAST(1 AS BIGINT)))) AS t CROSS JOIN UNNEST(t.arr) AS u(value)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

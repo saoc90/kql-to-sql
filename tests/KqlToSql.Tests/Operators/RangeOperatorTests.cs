@@ -12,7 +12,7 @@ public class RangeOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "range x from 1 to 5 step 1";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT generate_series AS x FROM generate_series(1, 5, 1)", sql);
+        Assert.Equal("SELECT generate_series AS x FROM generate_series(CAST(1 AS BIGINT), CAST(5 AS BIGINT), CAST(1 AS BIGINT))", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -27,12 +27,29 @@ public class RangeOperatorTests
     }
 
     [Fact]
+    public void Range_GenerateSeries_CastsAllArgsToBigInt()
+    {
+        // step expressed as large tick arithmetic would resolve to HUGEINT without explicit cast
+        var converter = new KqlToSqlConverter();
+        var kql = "range x from 0 to 1000000000000 step 3600000";
+        var sql = converter.Convert(kql);
+        Assert.Contains("CAST(", sql);
+        Assert.Contains("AS BIGINT)", sql);
+        // verify DuckDB can execute it without type-mismatch error
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        var ex = Record.Exception(() => { using var r = cmd.ExecuteReader(); r.Read(); });
+        Assert.Null(ex);
+    }
+
+    [Fact]
     public void Range_In_Pipeline()
     {
         var converter = new KqlToSqlConverter();
         var kql = "range x from 1 to 5 step 1 | where x > 3";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT * FROM (SELECT generate_series AS x FROM generate_series(1, 5, 1)) WHERE x > 3", sql);
+        Assert.Equal("SELECT * FROM (SELECT generate_series AS x FROM generate_series(CAST(1 AS BIGINT), CAST(5 AS BIGINT), CAST(1 AS BIGINT))) WHERE x > 3", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
