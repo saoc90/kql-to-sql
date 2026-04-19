@@ -11,7 +11,7 @@ public class SummarizeOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize cnt=count() by State | sort by cnt desc";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State, COUNT(*) AS cnt FROM StormEvents GROUP BY ALL ORDER BY cnt DESC", sql);
+        Assert.Equal("SELECT * FROM (SELECT State, COUNT(*) AS cnt FROM StormEvents GROUP BY ALL) ORDER BY cnt DESC", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
