@@ -343,11 +343,19 @@ public class DuckDbDialect : ISqlDialect
     {
         if (innerSql.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase))
         {
-            // QUALIFY must come before ORDER BY / LIMIT. If the SELECT already has a trailing
-            // top-level ORDER BY or LIMIT, wrap it in a subquery so QUALIFY stays at the
-            // right position.
+            // QUALIFY must come before ORDER BY / LIMIT and belongs to a single SELECT block.
+            // Wrap in a subquery when:
+            //  - the SELECT already has a trailing top-level ORDER BY / LIMIT, or
+            //  - the SQL is a UNION / EXCEPT / INTERSECT at the top level — QUALIFY can't attach
+            //    to the set-op result; it must apply to a wrapped SELECT, or
+            //  - the SELECT already ends with QUALIFY — chaining a second QUALIFY is invalid.
             if (HasTopLevelTail(innerSql, " ORDER BY ") ||
-                HasTopLevelTail(innerSql, " LIMIT "))
+                HasTopLevelTail(innerSql, " LIMIT ") ||
+                HasTopLevelTail(innerSql, " UNION ALL ") ||
+                HasTopLevelTail(innerSql, " UNION ") ||
+                HasTopLevelTail(innerSql, " EXCEPT ") ||
+                HasTopLevelTail(innerSql, " INTERSECT ") ||
+                HasTopLevelTail(innerSql, " QUALIFY "))
                 return $"SELECT * FROM ({innerSql}) QUALIFY {condition}";
             return $"{innerSql} QUALIFY {condition}";
         }
