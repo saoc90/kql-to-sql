@@ -11,7 +11,7 @@ public class BetweenOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | where InjuriesDirect between (5 .. 50) | summarize cnt=count()";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COUNT(*) AS cnt FROM StormEvents WHERE InjuriesDirect BETWEEN 5 AND 50", sql);
+        Assert.Equal("SELECT COUNT(*) AS cnt FROM (SELECT * FROM StormEvents WHERE InjuriesDirect BETWEEN 5 AND 50)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -26,7 +26,7 @@ public class BetweenOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | where InjuriesDirect !between (5 .. 50) | summarize cnt=count()";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COUNT(*) AS cnt FROM StormEvents WHERE NOT (InjuriesDirect BETWEEN 5 AND 50)", sql);
+        Assert.Equal("SELECT COUNT(*) AS cnt FROM (SELECT * FROM StormEvents WHERE NOT (InjuriesDirect BETWEEN 5 AND 50))", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
