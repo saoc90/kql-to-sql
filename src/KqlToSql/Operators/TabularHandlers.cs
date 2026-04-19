@@ -271,8 +271,7 @@ internal class TabularHandlers : OperatorHandlerBase
             {
                 bool leftIsTimespan = bin.Left is LiteralExpression lt && lt.Kind == SyntaxKind.TimespanLiteralExpression;
                 bool rightIsTimespan = bin.Right is LiteralExpression rt && rt.Kind == SyntaxKind.TimespanLiteralExpression;
-                System.Console.Error.WriteLine($"DEBUG MultiplyExpr: left={bin.Left.GetType().Name}({bin.Left.Kind}) rightIsTimespan={rightIsTimespan} leftIsTimespan={leftIsTimespan} sql={convertedSql.Substring(0, Math.Min(80, convertedSql.Length))}");
-                if (leftIsTimespan || rightIsTimespan) return true;
+if (leftIsTimespan || rightIsTimespan) return true;
             }
         }
         return false;
