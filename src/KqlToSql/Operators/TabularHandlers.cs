@@ -111,6 +111,9 @@ internal class TabularHandlers : OperatorHandlerBase
     internal string ApplyExtend(string leftSql, ExtendOperator extend)
     {
         var extras = new List<(string Expr, string Name)>();
+        // KQL auto-numbers anonymous (unnamed, non-path, non-identifier) extend results Column1, Column2, ...
+        // The counter advances only when we emit an auto-name, not for every extras entry.
+        int anonCounter = 0;
         foreach (var se in extend.Expressions)
         {
             if (se.Element is SimpleNamedExpression sne)
@@ -199,9 +202,11 @@ internal class TabularHandlers : OperatorHandlerBase
             }
         }
 
-        // If leftSql already has a trailing ORDER BY (e.g. from | top), wrap in a subquery so the
-        // new sort replaces it, rather than producing invalid 'ORDER BY x LIMIT n ORDER BY y'.
-        if (HasTrailingOrderBy(leftSql))
+        // Wrap in a subquery if:
+        //   (a) leftSql has a trailing ORDER BY (e.g. from | top) — prevents invalid double ORDER BY, or
+        //   (b) leftSql contains a top-level GROUP BY — appending ORDER BY after GROUP BY can reference
+        //       columns not in the aggregation output, causing DuckDB "must appear in GROUP BY" errors.
+        if (HasTrailingOrderBy(leftSql) || HasTopLevelGroupBy(leftSql))
             return $"SELECT * FROM ({leftSql}) ORDER BY {string.Join(", ", orderings)}";
         return $"{leftSql} ORDER BY {string.Join(", ", orderings)}";
     }
@@ -241,6 +246,25 @@ internal class TabularHandlers : OperatorHandlerBase
                 lastOrderBy = i;
         }
         return lastOrderBy >= 0;
+    }
+
+    private static bool HasTopLevelGroupBy(string sql)
+    {
+        // Return true if there is a top-level GROUP BY (depth 0) in the SQL.
+        int depth = 0;
+        bool inStr = false;
+        char quote = ' ';
+        for (int i = 0; i <= sql.Length - 9; i++)
+        {
+            var c = sql[i];
+            if (inStr) { if (c == quote) inStr = false; continue; }
+            if (c == '\'' || c == '"') { inStr = true; quote = c; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (depth == 0 && string.Compare(sql, i, " GROUP BY ", 0, 10, StringComparison.OrdinalIgnoreCase) == 0)
+                return true;
+        }
+        return false;
     }
 
     internal string ApplyTake(string leftSql, TakeOperator take)
