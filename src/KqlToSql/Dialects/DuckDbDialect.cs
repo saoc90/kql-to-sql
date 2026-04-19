@@ -87,10 +87,10 @@ public class DuckDbDialect : ISqlDialect
             "make_datetime" when args.Length == 1 => $"CAST({args[0]} AS TIMESTAMP)",
             "make_timespan" when args.Length == 3 =>
                 $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
-            "unixtime_seconds_todatetime" => $"TO_TIMESTAMP({args[0]})",
-            "unixtime_milliseconds_todatetime" => $"TO_TIMESTAMP_MS({args[0]})",
-            "unixtime_microseconds_todatetime" => $"TO_TIMESTAMP_US({args[0]})",
-            "unixtime_nanoseconds_todatetime" => $"TO_TIMESTAMP_NS({args[0]})",
+            "unixtime_seconds_todatetime" => $"TO_TIMESTAMP(CAST({args[0]} AS DOUBLE))",
+            "unixtime_milliseconds_todatetime" => $"EPOCH_MS(CAST({args[0]} AS BIGINT))",
+            "unixtime_microseconds_todatetime" => $"MAKE_TIMESTAMP(CAST({args[0]} AS BIGINT))",
+            "unixtime_nanoseconds_todatetime" => $"MAKE_TIMESTAMP(CAST({args[0]} AS BIGINT) / 1000)",
             "datetime_part" => $"EXTRACT({args[0].Trim('\'')} FROM {args[1]})",
             "format_timespan" => $"CAST({args[0]} AS VARCHAR)",
 

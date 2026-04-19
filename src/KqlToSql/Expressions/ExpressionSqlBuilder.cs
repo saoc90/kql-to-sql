@@ -672,7 +672,22 @@ internal class ExpressionSqlBuilder
         {
             text = text[9..^1];
         }
-        text = text.Trim('"', '\'');
+        text = text.Trim('"', '\'').Trim();
+
+        // KQL allows partial datetime literals that DateTime.TryParse rejects or mis-parses:
+        //   datetime(0001)        → year-only → 0001-01-01 00:00:00
+        //   datetime(2026-04)     → year-month → 2026-04-01 00:00:00
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, "^\\d{1,4}$"))
+        {
+            var year = int.Parse(text, CultureInfo.InvariantCulture);
+            return $"TIMESTAMP '{year:D4}-01-01 00:00:00'";
+        }
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, "^\\d{1,4}-\\d{1,2}$"))
+        {
+            var parts = text.Split('-');
+            return $"TIMESTAMP '{int.Parse(parts[0]):D4}-{int.Parse(parts[1]):D2}-01 00:00:00'";
+        }
+
         if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dt))
         {
             return $"TIMESTAMP '{dt:yyyy-MM-dd HH:mm:ss}'";
@@ -741,7 +756,7 @@ internal class ExpressionSqlBuilder
             var text = lit.ToString().Trim().Trim('"', '\'');
             if (TryParseTimespan(text, out var ms))
             {
-                return $"TO_TIMESTAMP_MS(FLOOR(EPOCH_MS(CAST({value} AS TIMESTAMP))/{ms})*{ms})";
+                return $"EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST({value} AS TIMESTAMP))/{ms})*{ms} AS BIGINT))";
             }
         }
 
@@ -764,7 +779,7 @@ internal class ExpressionSqlBuilder
             var text = lit.ToString().Trim().Trim('"', '\'');
             if (TryParseTimespan(text, out var ms))
             {
-                return $"TO_TIMESTAMP_MS(FLOOR((EPOCH_MS(CAST({value} AS TIMESTAMP)) - EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP)))/{ms})*{ms} + EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP)))";
+                return $"EPOCH_MS(CAST(FLOOR((EPOCH_MS(CAST({value} AS TIMESTAMP)) - EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP)))/{ms})*{ms} + EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP)) AS BIGINT))";
             }
         }
 

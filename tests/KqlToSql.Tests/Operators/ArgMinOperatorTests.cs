@@ -11,7 +11,7 @@ public class ArgMinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize arg_min(EndTime, EventType) by State | sort by State";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State, arg_min(EventType, EndTime) AS EventType FROM StormEvents GROUP BY ALL ORDER BY State DESC", sql);
+        Assert.Equal("SELECT State, MIN(EndTime) AS EndTime, ARG_MIN(EventType, EndTime) AS EventType FROM StormEvents GROUP BY ALL ORDER BY State DESC", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -19,7 +19,8 @@ public class ArgMinOperatorTests
         using var reader = cmd.ExecuteReader();
         Assert.True(reader.Read());
         Assert.False(string.IsNullOrWhiteSpace(reader.GetString(0)));
-        Assert.False(string.IsNullOrWhiteSpace(reader.GetString(1)));
+        Assert.False(string.IsNullOrWhiteSpace(reader.GetValue(1).ToString()));
+        Assert.False(string.IsNullOrWhiteSpace(reader.GetString(2)));
     }
 
     [Fact]
