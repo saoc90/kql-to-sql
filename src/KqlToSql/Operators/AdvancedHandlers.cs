@@ -200,14 +200,26 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
     internal string ApplyMvExpand(string leftSql, MvExpandOperator mvExpand)
     {
-        // Collect all columns being expanded
-        var columns = new List<string>();
+        // Each mv-expand slot may be either a bare column reference (mv-expand bag)
+        // or a named assignment (mv-expand name = expr). Track both so EXCLUDE names
+        // stay valid identifiers and unnest sources pick up the expression form.
+        var columns = new List<(string Name, string Source)>();
         foreach (var se in mvExpand.Expressions)
         {
-            if (se.Element is MvExpandExpression mve)
-                columns.Add(mve.Expression.ToString().Trim());
-            else
+            if (se.Element is not MvExpandExpression mve)
                 throw new NotSupportedException("Unexpected mv-expand expression type");
+
+            if (mve.Expression is SimpleNamedExpression sne)
+            {
+                var name = sne.Name.ToString().Trim();
+                var sourceSql = Expr.ConvertExpression(sne.Expression);
+                columns.Add((name, sourceSql));
+            }
+            else
+            {
+                var colName = mve.Expression.ToString().Trim();
+                columns.Add((colName, colName));
+            }
         }
 
         // Single-column case: simple unnest
@@ -217,21 +229,27 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
         if (columns.Count == 1)
         {
-            var column = columns[0];
+            var (name, source) = columns[0];
             var unnestAlias = "u";
-            var excludeClause = Dialect.SelectExclude(new[] { column });
-            var unnestClause = Dialect.Unnest(sourceAlias, column, unnestAlias);
-            return $"SELECT {sourceAlias}.{excludeClause}, {unnestAlias}.value AS {column} FROM {aliasedFrom} {unnestClause}";
+            var excludeClause = Dialect.SelectExclude(new[] { name });
+            // When source differs from name, the column doesn't yet exist on the LHS — use source directly.
+            var unnestSource = source == name ? $"{sourceAlias}.{name}" : source;
+            var unnestClause = $"CROSS JOIN UNNEST({unnestSource}) AS {unnestAlias}(value)";
+            var excludePart = source == name ? $"{sourceAlias}.{excludeClause}" : $"{sourceAlias}.*";
+            return $"SELECT {excludePart}, {unnestAlias}.value AS {name} FROM {aliasedFrom} {unnestClause}";
         }
 
         // Multi-column: chain unnests, each as a separate CROSS JOIN
         var clauses = new List<string>();
         for (int i = 0; i < columns.Count; i++)
         {
-            clauses.Add(Dialect.Unnest(sourceAlias, columns[i], $"u{i}"));
+            var (name, source) = columns[i];
+            var unnestSource = source == name ? $"{sourceAlias}.{name}" : source;
+            clauses.Add($"CROSS JOIN UNNEST({unnestSource}) AS u{i}(value)");
         }
-        var excludeAll = Dialect.SelectExclude(columns.ToArray());
-        var selectCols = string.Join(", ", columns.Select((c, i) => $"u{i}.value AS {c}"));
+        var existingNames = columns.Where(c => c.Source == c.Name).Select(c => c.Name).ToArray();
+        var excludeAll = existingNames.Length > 0 ? Dialect.SelectExclude(existingNames) : "*";
+        var selectCols = string.Join(", ", columns.Select((c, i) => $"u{i}.value AS {c.Name}"));
         return $"SELECT {sourceAlias}.{excludeAll}, {selectCols} FROM {aliasedFrom} {string.Join(" ", clauses)}";
     }
 
@@ -474,6 +492,13 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 rowValues.Add(Expr.ConvertLiteralValue(values[i + j].Element));
             }
             rows.Add($"({string.Join(", ", rowValues)})");
+        }
+
+        // Empty datatable: DuckDB rejects 'VALUES ) AS t(col)'. Emit a typed empty SELECT instead.
+        if (rows.Count == 0)
+        {
+            var cols = string.Join(", ", columnNames.Select(n => $"NULL AS {n}"));
+            return $"SELECT {cols} WHERE 1 = 0";
         }
 
         return $"SELECT * FROM (VALUES {string.Join(", ", rows)}) AS t({string.Join(", ", columnNames)})";
