@@ -97,7 +97,7 @@ public class DuckDbDialect : ISqlDialect
             "unixtime_milliseconds_todatetime" => $"EPOCH_MS(CAST({args[0]} AS BIGINT))",
             "unixtime_microseconds_todatetime" => $"MAKE_TIMESTAMP(CAST({args[0]} AS BIGINT))",
             "unixtime_nanoseconds_todatetime" => $"MAKE_TIMESTAMP(CAST({args[0]} AS BIGINT) / 1000)",
-            "datetime_part" => $"EXTRACT({args[0].Trim('\'')} FROM {args[1]})",
+            "datetime_part" => $"EXTRACT({args[0].Trim('\'')} FROM CAST({args[1]} AS TIMESTAMP))",
             "format_timespan" => $"CAST({args[0]} AS VARCHAR)",
 
             // String functions
