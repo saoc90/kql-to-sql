@@ -15,10 +15,20 @@ public class KqlToSqlConverter
     private readonly OperatorDispatcher _operators;
     private readonly CommandSqlTranslator _commands;
     private readonly Dictionary<string, (string sql, bool materialized)> _ctes = new();
+    /// <summary>Tracks the KQL AST expression used to build each CTE, enabling structural column enumeration
+    /// (e.g. for join-duplicate suffixing) without re-parsing emitted SQL.</summary>
+    private readonly Dictionary<string, Expression> _cteExpressions = new();
     /// <summary>Adds or replaces a CTE. Exposed for operators that bind pipeline output to a name (e.g. `| as t1`).</summary>
     internal void AddCte(string name, string sql, bool materialized = false) => _ctes[name] = (sql, materialized);
     /// <summary>Peeks a CTE by name.</summary>
     internal bool TryGetCte(string name, out (string sql, bool materialized) cte) => _ctes.TryGetValue(name, out cte);
+    /// <summary>Peeks the KQL AST expression used to build a CTE (if known).</summary>
+    internal bool TryGetCteExpression(string name, out Expression expression)
+    {
+        if (_cteExpressions.TryGetValue(name, out var e)) { expression = e; return true; }
+        expression = null!;
+        return false;
+    }
     /// <summary>Renames a CTE (preserving insertion order is not guaranteed — acceptable for this use).</summary>
     internal void RenameCte(string oldName, string newName)
     {
@@ -51,6 +61,7 @@ public class KqlToSqlConverter
         var root = code.Syntax;
 
         _ctes.Clear();
+        _cteExpressions.Clear();
         _scalarLets.Clear();
         _userFunctions.Clear();
         _operators.ExpressionBuilder.ClearIntervalColumns();
@@ -218,6 +229,9 @@ public class KqlToSqlConverter
         }
 
         _ctes[name] = (sql, materialized);
+        // Record the AST expression used to build this CTE so structural column enumeration
+        // (for join-duplicate suffixing and similar) can recursively inspect it.
+        _cteExpressions[name] = expression is MaterializeExpression me ? me.Expression : expression;
     }
 
     private bool TryConvertScalarLet(string name, Expression expression)
