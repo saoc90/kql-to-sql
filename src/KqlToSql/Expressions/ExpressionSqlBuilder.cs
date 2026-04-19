@@ -86,7 +86,7 @@ internal class ExpressionSqlBuilder
             BinaryExpression bin when bin.Kind == SyntaxKind.MultiplyExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} * {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.DivideExpression =>
-                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} / {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+                ConvertDivide(bin, leftAlias, rightAlias),
             BinaryExpression bin when bin.Kind == SyntaxKind.ModuloExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} % {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.AndExpression =>
@@ -917,6 +917,35 @@ internal class ExpressionSqlBuilder
 
     private static bool IsIntervalExpression(string sql)
         => sql.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase);
+
+    private string ConvertDivide(BinaryExpression bin, string? leftAlias, string? rightAlias)
+    {
+        var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
+        var right = ConvertExpression(bin.Right, leftAlias, rightAlias);
+        // DuckDB rejects TIMESTAMP/INTERVAL and INTERVAL/INTERVAL directly. KQL allows these
+        // to express 'how many intervals fit in this duration / distance from epoch'.
+        // Convert both operands to epoch-milliseconds when we detect interval-typed operands.
+        bool rightIsInterval = IsIntervalExpression(right);
+        bool leftIsInterval = IsIntervalExpression(left);
+        bool leftIsTimestampLike = bin.Left is NameReference || bin.Left is LiteralExpression lit &&
+                                   lit.Kind == SyntaxKind.DateTimeLiteralExpression;
+
+        if (rightIsInterval && leftIsInterval)
+        {
+            return $"(EXTRACT(EPOCH FROM ({left})) / EXTRACT(EPOCH FROM ({right})))";
+        }
+        if (rightIsInterval && (leftIsTimestampLike || LooksLikeTimestampExpression(left)))
+        {
+            return $"(EPOCH_MS(CAST({left} AS TIMESTAMP)) / EXTRACT(MILLISECOND FROM ({right})))";
+        }
+        return $"{left} / {right}";
+    }
+
+    private static bool LooksLikeTimestampExpression(string sql)
+    {
+        return sql.Contains("TIMESTAMP '", StringComparison.OrdinalIgnoreCase) ||
+               sql.Contains("CAST(", StringComparison.OrdinalIgnoreCase) && sql.Contains("AS TIMESTAMP", StringComparison.OrdinalIgnoreCase);
+    }
 
     internal static string ExtractLeftKey(Expression expr)
     {
