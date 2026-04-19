@@ -369,6 +369,11 @@ public class DuckDbDialect : ISqlDialect
                 return $"SELECT * FROM ({innerSql}) QUALIFY {condition}";
             return $"{innerSql} QUALIFY {condition}";
         }
+        // innerSql does not start with SELECT — it may be a bare table name, a CTE reference,
+        // or a set-op expression like "(SELECT ...) UNION ALL BY NAME (SELECT ...)".
+        // Never blindly append QUALIFY; always wrap so the clause attaches to a fresh SELECT.
+        if (HasTopLevelSetOp(innerSql))
+            return $"SELECT * FROM ({innerSql}) QUALIFY {condition}";
         return $"SELECT * FROM {innerSql} QUALIFY {condition}";
     }
 
@@ -401,6 +406,11 @@ public class DuckDbDialect : ISqlDialect
         var inner = filter is null ? $"SUM({ms})" : $"SUM({ms}) FILTER (WHERE {filter})";
         return $"(({inner}) * INTERVAL '1 millisecond')";
     }
+
+    private static bool HasTopLevelSetOp(string sql)
+        => HasTopLevelTail(sql, " UNION ") ||
+           HasTopLevelTail(sql, " EXCEPT ") ||
+           HasTopLevelTail(sql, " INTERSECT ");
 
     private static bool HasTopLevelTail(string sql, string clause)
     {
