@@ -15,6 +15,7 @@ internal sealed class OperatorDispatcher
     private readonly AggregationHandlers _aggregation;
     private readonly ParseHandlers _parse;
     private readonly AdvancedHandlers _advanced;
+    private readonly ScanHandler _scan;
 
     internal ExpressionSqlBuilder ExpressionBuilder { get; }
 
@@ -27,6 +28,7 @@ internal sealed class OperatorDispatcher
         _aggregation = new AggregationHandlers(converter, ExpressionBuilder);
         _parse = new ParseHandlers(converter, ExpressionBuilder);
         _advanced = new AdvancedHandlers(converter, ExpressionBuilder);
+        _scan = new ScanHandler(converter, ExpressionBuilder);
     }
 
     internal string ApplyOperator(string leftSql, QueryOperator op, Expression? leftExpression = null)
@@ -72,6 +74,7 @@ internal sealed class OperatorDispatcher
             SampleDistinctOperator sampleDistinct => _advanced.ApplySampleDistinct(leftSql, sampleDistinct),
             SerializeOperator serialize => _advanced.ApplySerialize(leftSql, serialize),
             GetSchemaOperator => _advanced.ApplyGetSchema(leftSql),
+            ScanOperator scanOp => _scan.ApplyScan(leftSql, scanOp),
 
             // Invoke: calls a stored function on the current result set
             InvokeOperator invoke => ApplyInvoke(leftSql, invoke),
