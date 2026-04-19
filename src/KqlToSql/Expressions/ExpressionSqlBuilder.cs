@@ -164,7 +164,7 @@ internal class ExpressionSqlBuilder
             LiteralExpression lit when lit.Kind == SyntaxKind.StringLiteralExpression =>
                 ConvertStringLiteral(lit),
             LiteralExpression lit when lit.Kind == SyntaxKind.NullLiteralExpression => "NULL",
-            LiteralExpression lit => lit.ToString().Trim(),
+            LiteralExpression lit => ConvertNumericOrOtherLiteral(lit),
             CompoundStringLiteralExpression cs => ConvertCompoundString(cs),
             PrefixUnaryExpression pu when pu.Kind == SyntaxKind.UnaryMinusExpression =>
                 $"(-{ConvertExpression(pu.Expression, leftAlias, rightAlias)})",
@@ -665,6 +665,31 @@ internal class ExpressionSqlBuilder
         return $"{left} {like} {pattern}";
     }
 
+    private string ConvertNumericOrOtherLiteral(LiteralExpression lit)
+    {
+        // KQL typed null literals: long(null), int(null), double(null), real(null), bool(null)
+        // are parsed as LongLiteralExpression / IntLiteralExpression / RealLiteralExpression / BooleanLiteralExpression
+        // with LiteralValue == null and text like "long(null)". Emit proper typed NULL casts.
+        if (lit.LiteralValue == null)
+        {
+            var text = lit.ToString().Trim();
+            if (text.Contains("null", StringComparison.OrdinalIgnoreCase))
+            {
+                var sqlType = lit.Kind switch
+                {
+                    SyntaxKind.LongLiteralExpression => "BIGINT",
+                    SyntaxKind.IntLiteralExpression => "INTEGER",
+                    SyntaxKind.RealLiteralExpression => "DOUBLE",
+                    SyntaxKind.BooleanLiteralExpression => "BOOLEAN",
+                    SyntaxKind.DecimalLiteralExpression => "DECIMAL",
+                    _ => null
+                };
+                return sqlType != null ? $"CAST(NULL AS {sqlType})" : "NULL";
+            }
+        }
+        return lit.ToString().Trim();
+    }
+
     internal static string ConvertDateTimeLiteral(LiteralExpression lit)
     {
         var text = lit.ToString().Trim();
@@ -935,7 +960,7 @@ internal class ExpressionSqlBuilder
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression => ConvertDateTimeLiteral(lit),
             LiteralExpression lit when lit.Kind == SyntaxKind.BooleanLiteralExpression => lit.ToString().Trim().ToLowerInvariant() == "true" ? "TRUE" : "FALSE",
             LiteralExpression lit when lit.Kind == SyntaxKind.NullLiteralExpression => "NULL",
-            LiteralExpression lit => lit.ToString().Trim(),
+            LiteralExpression lit => ConvertNumericOrOtherLiteral(lit),
             CompoundStringLiteralExpression cs => ConvertCompoundString(cs),
             _ => ConvertExpression(expr)
         };
