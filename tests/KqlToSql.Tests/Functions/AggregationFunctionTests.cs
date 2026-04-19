@@ -749,4 +749,36 @@ public class AggregationFunctionTests
         var sql = new KqlToSqlConverter().Convert("T | summarize arg_max(Timestamp, MyCol=Value) by X");
         Assert.Contains("ARG_MAX(Value, Timestamp) AS MyCol", sql);
     }
+
+    // Live Kusto: repeated arg_max/arg_min with the same key column suffixes the 2nd+ key alias.
+    //   arg_max(Timestamp, V), arg_max(Timestamp, N), arg_max(Timestamp, U) by K
+    //     → K, Timestamp, V, Timestamp1, N, Timestamp2, U
+    [Fact]
+    public void ArgMax_Repeated_Same_Key_Suffixes_Subsequent_Keys()
+    {
+        var sql = new KqlToSqlConverter().Convert(
+            "T | summarize arg_max(Timestamp, Value), arg_max(Timestamp, Name), arg_max(Timestamp, Uid) by K");
+        Assert.Contains("MAX(Timestamp) AS Timestamp,", sql);
+        Assert.Contains("MAX(Timestamp) AS Timestamp1,", sql);
+        Assert.Contains("MAX(Timestamp) AS Timestamp2,", sql);
+    }
+
+    [Fact]
+    public void ArgMax_Single_Key_No_Suffix()
+    {
+        var sql = new KqlToSqlConverter().Convert("T | summarize arg_max(Timestamp, Value) by K");
+        Assert.Contains("MAX(Timestamp) AS Timestamp", sql);
+        Assert.DoesNotContain("Timestamp1", sql);
+    }
+
+    [Fact]
+    public void ArgMax_Distinct_Keys_No_Suffix()
+    {
+        var sql = new KqlToSqlConverter().Convert(
+            "T | summarize arg_max(TsA, Value), arg_max(TsB, Name) by K");
+        Assert.Contains("MAX(TsA) AS TsA", sql);
+        Assert.Contains("MAX(TsB) AS TsB", sql);
+        Assert.DoesNotContain("TsA1", sql);
+        Assert.DoesNotContain("TsB1", sql);
+    }
 }

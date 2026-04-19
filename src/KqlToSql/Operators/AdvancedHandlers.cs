@@ -200,10 +200,12 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
     internal string ApplyMvExpand(string leftSql, MvExpandOperator mvExpand)
     {
-        // Each mv-expand slot may be either a bare column reference (mv-expand bag)
-        // or a named assignment (mv-expand name = expr). Track both so EXCLUDE names
-        // stay valid identifiers and unnest sources pick up the expression form.
-        var columns = new List<(string Name, string Source)>();
+        // Each mv-expand slot is either a bare column, `name = expr`, or a bare expression.
+        // For a bare expression Kusto names the output as the innermost identifier (same rule
+        // toreal/tostring/parse_json auto-naming uses) — treat that identifier as the column
+        // being replaced in place so EXCLUDE picks it up.
+        var columns = new List<(string Name, string Source, bool ExcludeName)>();
+        int fallbackIndex = 0;
         foreach (var se in mvExpand.Expressions)
         {
             if (se.Element is not MvExpandExpression mve)
@@ -213,12 +215,21 @@ internal class AdvancedHandlers : OperatorHandlerBase
             {
                 var name = sne.Name.ToString().Trim();
                 var sourceSql = Expr.ConvertExpression(sne.Expression);
-                columns.Add((name, sourceSql));
+                columns.Add((name, sourceSql, false));
+            }
+            else if (mve.Expression is NameReference nr)
+            {
+                var bare = nr.Name.ToString().Trim();
+                columns.Add((bare, bare, true));
             }
             else
             {
-                var colName = mve.Expression.ToString().Trim();
-                columns.Add((colName, colName));
+                var sourceSql = Expr.ConvertExpression(mve.Expression);
+                var innerName = TryGetInnerIdentifier(mve.Expression);
+                if (innerName != null)
+                    columns.Add((innerName, sourceSql, true));
+                else
+                    columns.Add(($"col_{fallbackIndex++}", sourceSql, false));
             }
         }
 
@@ -229,13 +240,13 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
         if (columns.Count == 1)
         {
-            var (name, source) = columns[0];
+            var (name, source, excludeName) = columns[0];
             var unnestAlias = "u";
-            var excludeClause = Dialect.SelectExclude(new[] { name });
-            // When source differs from name, the column doesn't yet exist on the LHS — use source directly.
             var unnestSource = source == name ? $"{sourceAlias}.{name}" : source;
             var unnestClause = $"CROSS JOIN UNNEST({unnestSource}) AS {unnestAlias}(value)";
-            var excludePart = source == name ? $"{sourceAlias}.{excludeClause}" : $"{sourceAlias}.*";
+            var excludePart = excludeName
+                ? $"{sourceAlias}.{Dialect.SelectExclude(new[] { name })}"
+                : $"{sourceAlias}.*";
             return $"SELECT {excludePart}, {unnestAlias}.value AS {name} FROM {aliasedFrom} {unnestClause}";
         }
 
@@ -243,11 +254,11 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var clauses = new List<string>();
         for (int i = 0; i < columns.Count; i++)
         {
-            var (name, source) = columns[i];
+            var (name, source, _) = columns[i];
             var unnestSource = source == name ? $"{sourceAlias}.{name}" : source;
             clauses.Add($"CROSS JOIN UNNEST({unnestSource}) AS u{i}(value)");
         }
-        var existingNames = columns.Where(c => c.Source == c.Name).Select(c => c.Name).ToArray();
+        var existingNames = columns.Where(c => c.ExcludeName).Select(c => c.Name).ToArray();
         var excludeAll = existingNames.Length > 0 ? Dialect.SelectExclude(existingNames) : "*";
         var selectCols = string.Join(", ", columns.Select((c, i) => $"u{i}.value AS {c.Name}"));
         return $"SELECT {sourceAlias}.{excludeAll}, {selectCols} FROM {aliasedFrom} {string.Join(" ", clauses)}";
@@ -525,6 +536,24 @@ internal class AdvancedHandlers : OperatorHandlerBase
         }
 
         return $"SELECT * FROM (VALUES {string.Join(", ", rows)}) AS t({string.Join(", ", columnNames)})";
+    }
+
+    private static string? TryGetInnerIdentifier(SyntaxNode node)
+    {
+        // Drill through single-arg conversion wrappers (tostring/toreal/parse_json/...)
+        // to the inner identifier — same rule live Kusto uses to auto-name mv-expand output.
+        SyntaxNode? current = node;
+        while (current is FunctionCallExpression fce && fce.ArgumentList.Expressions.Count == 1)
+        {
+            var fname = fce.Name.ToString().Trim().ToLowerInvariant();
+            if (fname is "tostring" or "toreal" or "todouble" or "toint" or "tolong"
+                or "tobool" or "tofloat" or "todatetime" or "todynamic" or "parse_json" or "parsejson")
+                current = fce.ArgumentList.Expressions[0].Element;
+            else break;
+        }
+        if (current is NameReference nr)
+            return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.ToString().Trim());
+        return null;
     }
 
     internal string ConvertExternalData(ExternalDataExpression ed)

@@ -25,4 +25,30 @@ public class MvExpandOperatorTests
         }
         Assert.Equal(new[] {1, 2, 3}, results);
     }
+
+    [Fact]
+    public void MvExpand_ParseJsonTostring_ExcludesInnerIdentifier()
+    {
+        // Kusto auto-names mv-expand parse_json(tostring(Value)) output as 'Value'
+        // (innermost identifier). The EXCLUDE clause must use 'Value', not the raw expression.
+        var converter = new KqlToSqlConverter();
+        var kql = "datatable(Value:string) [ \"[1,2,3]\" ] | mv-expand parse_json(tostring(Value))";
+        var sql = converter.Convert(kql);
+        Assert.Contains("EXCLUDE (Value)", sql);
+        Assert.DoesNotContain("EXCLUDE (parse_json", sql);
+        Assert.Contains("u.value AS Value", sql);
+    }
+
+    [Fact]
+    public void MvExpand_ParseJsonOfStringColumn_OutputsInnerIdentifier()
+    {
+        // mv-expand parse_json(X) where X is a string column: Kusto names the output 'X'
+        // (innermost identifier). Verifies the EXCLUDE/output-alias wiring, not execution —
+        // our parse_json translates to CAST AS JSON which isn't directly UNNEST-able.
+        var converter = new KqlToSqlConverter();
+        var kql = "datatable(X:string) [ \"[1,2,3]\" ] | mv-expand parse_json(X)";
+        var sql = converter.Convert(kql);
+        Assert.Contains("EXCLUDE (X)", sql);
+        Assert.Contains("u.value AS X", sql);
+    }
 }

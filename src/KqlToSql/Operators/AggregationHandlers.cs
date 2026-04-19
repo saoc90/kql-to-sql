@@ -41,9 +41,11 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         }
 
         var aggregates = new List<string>();
+        // Live Kusto suffixes repeated arg_max/arg_min key aliases: Timestamp, Timestamp1, Timestamp2, ...
+        var keyAliasCounts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var agg in summarize.Aggregates)
         {
-            aggregates.AddRange(ConvertAggregate(agg.Element));
+            aggregates.AddRange(ConvertAggregate(agg.Element, keyAliasCounts));
         }
 
         var selectList = string.Join(", ", byColumns.Select(b => b.Select).Concat(aggregates));
@@ -103,6 +105,9 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
     }
 
     internal IEnumerable<string> ConvertAggregate(SyntaxNode node)
+        => ConvertAggregate(node, null);
+
+    internal IEnumerable<string> ConvertAggregate(SyntaxNode node, Dictionary<string, int>? keyAliasCounts)
     {
         string? alias = null;
         Expression expr;
@@ -130,7 +135,10 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 // Outer alias applies to the key output: (K = arg_max(key, v1))  → key output named K.
                 var keyNode = fce.ArgumentList.Expressions[0].Element;
                 var extremumExpr = Expr.ConvertExpression(keyNode);
-                var keyAlias = alias ?? (keyNode is NameReference knr ? knr.Name.ToString().Trim() : name);
+                var baseKeyAlias = alias ?? (keyNode is NameReference knr ? knr.Name.ToString().Trim() : name);
+                // Live Kusto: repeated auto-named columns in one summarize suffix 2nd/3rd as <name>1, <name>2, ...
+                // Explicit outer alias (alias != null) bypasses the counter on the key.
+                var keyAlias = SuffixIfCollides(baseKeyAlias, alias != null, keyAliasCounts);
                 var keyAgg = name == "arg_max" ? "MAX" : "MIN";
                 var results = new List<string> { $"{keyAgg}({extremumExpr}) AS {keyAlias}" };
 
@@ -139,10 +147,12 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                     var argNode = fce.ArgumentList.Expressions[i].Element;
                     string innerExpr;
                     string resultAlias;
+                    bool explicitValueAlias = false;
                     if (argNode is SimpleNamedExpression vsne)
                     {
                         innerExpr = Expr.ConvertExpression(vsne.Expression);
                         resultAlias = vsne.Name.ToString().Trim();
+                        explicitValueAlias = true;
                     }
                     else
                     {
@@ -151,6 +161,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                         // (e.g. todouble(Value) → Value, toreal(X) → X, bare V → V).
                         resultAlias = TryGetInnerIdentifier(argNode) ?? $"{name}_{i}";
                     }
+                    resultAlias = SuffixIfCollides(resultAlias, explicitValueAlias, keyAliasCounts);
                     results.Add($"{name.ToUpperInvariant()}({innerExpr}, {extremumExpr}) AS {resultAlias}");
                 }
                 return results;
@@ -256,6 +267,15 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         if (alias != null && Expr.IsIntervalExpression(exprSql2))
             Expr.MarkIntervalColumn(alias.Trim('"'));
         return new[] { $"{exprSql2} AS {alias ?? "expr"}" };
+    }
+
+    private static string SuffixIfCollides(string baseAlias, bool isExplicit, Dictionary<string, int>? counts)
+    {
+        // Explicit aliases (user-chosen) bypass the auto-suffix counter — user's choice wins even on collision.
+        if (counts == null || isExplicit) return baseAlias;
+        counts.TryGetValue(baseAlias, out var n);
+        counts[baseAlias] = n + 1;
+        return n == 0 ? baseAlias : $"{baseAlias}{n}";
     }
 
     private static string? TryGetInnerIdentifier(SyntaxNode node)
