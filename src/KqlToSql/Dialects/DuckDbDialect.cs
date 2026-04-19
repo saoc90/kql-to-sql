@@ -249,6 +249,16 @@ public class DuckDbDialect : ISqlDialect
             "avgif" when args.Length >= 2 => $"AVG({args[0]}) FILTER (WHERE {args[1]})",
             "minif" => $"MIN({args[0]}) FILTER (WHERE {args[1]})",
             "maxif" => $"MAX({args[0]}) FILTER (WHERE {args[1]})",
+            "percentile" when args.Length == 2 => $"quantile_cont({args[0]}, {args[1]} / 100.0)",
+            "percentilew" when args.Length == 3 => $"quantile_cont({args[0]}, {args[2]} / 100.0)",
+            "dcount" => $"APPROX_COUNT_DISTINCT({args[0]})",
+            "dcountif" => $"APPROX_COUNT_DISTINCT({args[0]}) FILTER (WHERE {args[1]})",
+            "count_distinct" => $"COUNT(DISTINCT {args[0]})",
+            "count_distinctif" => $"COUNT(DISTINCT {args[0]}) FILTER (WHERE {args[1]})",
+            "stdev" => $"STDDEV_SAMP({args[0]})",
+            "stdevp" => $"STDDEV_POP({args[0]})",
+            "variance" => $"VAR_SAMP({args[0]})",
+            "variancep" => $"VAR_POP({args[0]})",
 
             _ => null
         };
