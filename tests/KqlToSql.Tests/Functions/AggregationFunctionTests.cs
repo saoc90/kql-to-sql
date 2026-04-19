@@ -721,4 +721,32 @@ public class AggregationFunctionTests
         var kql = $"StormEvents | summarize {aggregate}";
         Assert.Throws<NotSupportedException>(() => converter.Convert(kql));
     }
+
+    // Live Kusto auto-names the non-key arg of arg_max/arg_min as the inner identifier
+    // (verified against buhleracptd1kusto.westeurope.kusto.windows.net):
+    //   arg_max(Timestamp, Value)           → columns: X, Timestamp, Value
+    //   arg_max(Timestamp, todouble(Value)) → columns: X, Timestamp, Value
+    //   arg_max(Timestamp, MyCol=Value)     → columns: X, Timestamp, MyCol
+    [Fact]
+    public void ArgMax_Bare_Identifier_AutoNames_To_Identifier()
+    {
+        var sql = new KqlToSqlConverter().Convert("T | summarize arg_max(Timestamp, Value) by X");
+        Assert.Contains("ARG_MAX(Value, Timestamp) AS Value", sql);
+        Assert.DoesNotContain("arg_max_1", sql);
+    }
+
+    [Fact]
+    public void ArgMax_Conversion_Wrapper_AutoNames_To_Inner_Identifier()
+    {
+        var sql = new KqlToSqlConverter().Convert("T | summarize arg_max(Timestamp, todouble(Value)) by X");
+        Assert.Contains(") AS Value", sql);
+        Assert.DoesNotContain("arg_max_1", sql);
+    }
+
+    [Fact]
+    public void ArgMax_Explicit_Alias_Wins_Over_Inner_Identifier()
+    {
+        var sql = new KqlToSqlConverter().Convert("T | summarize arg_max(Timestamp, MyCol=Value) by X");
+        Assert.Contains("ARG_MAX(Value, Timestamp) AS MyCol", sql);
+    }
 }
