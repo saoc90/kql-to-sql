@@ -90,7 +90,7 @@ public class ScalarFunctionImprovementTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("T | extend idx = indexof(State, 'TX')");
-        Assert.Equal("SELECT *, (INSTR(State, 'TX') - 1) AS idx FROM T", sql);
+        Assert.Equal("SELECT *, (INSTR(CAST(State AS VARCHAR), 'TX') - 1) AS idx FROM T", sql);
     }
 
     [Fact]
