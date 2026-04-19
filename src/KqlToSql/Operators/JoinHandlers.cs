@@ -221,7 +221,9 @@ internal class JoinHandlers : OperatorHandlerBase
             parts.Add($"({sql})");
         }
 
-        return string.Join(" UNION ALL ", parts);
+        // Use DuckDB 'UNION ALL BY NAME' so column sets can differ — missing columns fill NULL.
+        // KQL's union semantics are by-name, not positional.
+        return string.Join(" UNION ALL BY NAME ", parts);
     }
 
     internal string ConvertUnion(UnionOperator union)
@@ -241,6 +243,8 @@ internal class JoinHandlers : OperatorHandlerBase
             parts.Add($"({sql})");
         }
 
-        return string.Join(" UNION ALL ", parts);
+        // Use DuckDB 'UNION ALL BY NAME' so column sets can differ — missing columns fill NULL.
+        // KQL's union semantics are by-name, not positional.
+        return string.Join(" UNION ALL BY NAME ", parts);
     }
 }
