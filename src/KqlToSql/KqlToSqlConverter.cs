@@ -15,6 +15,8 @@ public class KqlToSqlConverter
     private readonly OperatorDispatcher _operators;
     private readonly CommandSqlTranslator _commands;
     private readonly Dictionary<string, (string sql, bool materialized)> _ctes = new();
+    /// <summary>Adds or replaces a CTE. Exposed for operators that bind pipeline output to a name (e.g. `| as t1`).</summary>
+    internal void AddCte(string name, string sql, bool materialized = false) => _ctes[name] = (sql, materialized);
     private readonly Dictionary<string, string> _scalarLets = new();
     private readonly Dictionary<string, (string[] paramNames, FunctionBody body)> _userFunctions = new();
 

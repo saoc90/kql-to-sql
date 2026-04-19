@@ -16,11 +16,13 @@ internal sealed class OperatorDispatcher
     private readonly ParseHandlers _parse;
     private readonly AdvancedHandlers _advanced;
     private readonly ScanHandler _scan;
+    private readonly KqlToSqlConverter _converter;
 
     internal ExpressionSqlBuilder ExpressionBuilder { get; }
 
     internal OperatorDispatcher(KqlToSqlConverter converter)
     {
+        _converter = converter;
         ExpressionBuilder = new ExpressionSqlBuilder(converter.Dialect);
         ExpressionBuilder.SetNodeConverter(node => converter.ConvertNode(node));
         _tabular = new TabularHandlers(converter, ExpressionBuilder);
@@ -82,13 +84,25 @@ internal sealed class OperatorDispatcher
             // Partition: run subquery per group, then UNION ALL the results
             PartitionOperator partition => ApplyPartition(leftSql, partition),
 
-            // Pass-through operators
-            AsOperator => leftSql,
+            // | as Name — register the pipeline output as a CTE so later references to Name work.
+            AsOperator asOp => RegisterAsCte(leftSql, asOp),
             ConsumeOperator => leftSql,
             RenderOperator => leftSql,
 
             _ => throw new NotSupportedException($"Unsupported operator {op.Kind}")
         };
+    }
+
+    private string RegisterAsCte(string leftSql, AsOperator asOp)
+    {
+        var nameNode = asOp.GetDescendants<Kusto.Language.Syntax.NameDeclaration>().FirstOrDefault();
+        var name = nameNode?.Name?.ToString().Trim();
+        if (!string.IsNullOrEmpty(name))
+        {
+            // Capture the current pipeline result under the given name; later operators can reference it.
+            _converter.AddCte(name, leftSql, materialized: false);
+        }
+        return leftSql;
     }
 
     private string ApplyPartition(string leftSql, PartitionOperator partition)
