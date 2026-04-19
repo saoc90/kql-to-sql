@@ -201,12 +201,22 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 return new[] { $"quantile_cont({args[0]}, [{percentileList}]) AS {alias}" };
             }
 
+            // Match real Kusto's auto-naming conventions (verified against a live cluster):
+            //   count()           → count_
+            //   countif(x>2)      → countif_
+            //   sum(x)/avg(x)/... → <name>_<col>
+            //   percentile(x, 50) → percentile_x_50  (col before percentile)
+            //   make_list(x)      → list_x           (strip "make_" prefix)
+            //   make_set(x)       → set_x
             alias ??= name switch
             {
-                "count" => "count",
-                "countif" => "countif",
-                "percentile" => $"percentile_{args[1]}_{SafeAliasPart(args[0])}",
-                "percentilew" => $"percentilew_{args[2]}_{SafeAliasPart(args[0])}",
+                "count" => "count_",
+                "countif" => "countif_",
+                "percentile" => $"percentile_{SafeAliasPart(args[0])}_{args[1]}",
+                "percentilew" => $"percentilew_{SafeAliasPart(args[0])}_{args[2]}",
+                "make_list" or "makelist" or "make_list_if" or "make_list_with_nulls" => $"list_{SafeAliasPart(args[0])}",
+                "make_set" or "makeset" or "make_set_if" => $"set_{SafeAliasPart(args[0])}",
+                "make_bag" or "make_bag_if" => $"bag_{SafeAliasPart(args[0])}",
                 _ when args.Length > 0 => $"{name}_{SafeAliasPart(args[0])}",
                 _ => name
             };
