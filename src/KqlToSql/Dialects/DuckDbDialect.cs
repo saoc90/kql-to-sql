@@ -324,8 +324,34 @@ public class DuckDbDialect : ISqlDialect
     public string Qualify(string innerSql, string condition)
     {
         if (innerSql.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase))
+        {
+            // QUALIFY must come before ORDER BY / LIMIT. If the SELECT already has a trailing
+            // top-level ORDER BY or LIMIT, wrap it in a subquery so QUALIFY stays at the
+            // right position.
+            if (HasTopLevelTail(innerSql, " ORDER BY ") ||
+                HasTopLevelTail(innerSql, " LIMIT "))
+                return $"SELECT * FROM ({innerSql}) QUALIFY {condition}";
             return $"{innerSql} QUALIFY {condition}";
+        }
         return $"SELECT * FROM {innerSql} QUALIFY {condition}";
+    }
+
+    private static bool HasTopLevelTail(string sql, string clause)
+    {
+        int depth = 0;
+        bool inStr = false;
+        char quote = ' ';
+        for (int i = 0; i <= sql.Length - clause.Length; i++)
+        {
+            var c = sql[i];
+            if (inStr) { if (c == quote) inStr = false; continue; }
+            if (c == '\'' || c == '"') { inStr = true; quote = c; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (depth == 0 && string.Compare(sql, i, clause, 0, clause.Length, StringComparison.OrdinalIgnoreCase) == 0)
+                return true;
+        }
+        return false;
     }
 
     public string GenerateSeries(string alias, string start, string end, string step)
