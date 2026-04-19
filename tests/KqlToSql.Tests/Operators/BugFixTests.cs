@@ -97,4 +97,13 @@ public class BugFixTests
         var sql = converter.Convert("StormEvents | extend result = iif(InjuriesDirect > 0, 'Yes', 'No')");
         Assert.Equal("SELECT *, CASE WHEN InjuriesDirect > 0 THEN 'Yes' ELSE 'No' END AS result FROM StormEvents", sql);
     }
+
+    [Fact]
+    public void BoolTypedLiteral_EmitsTrueOrFalse_NotFunctionCall()
+    {
+        var converter = new KqlToSqlConverter();
+        var sql = converter.Convert("StormEvents | where bool(true)");
+        Assert.Contains("TRUE", sql);
+        Assert.DoesNotContain("bool(", sql);
+    }
 }
