@@ -35,10 +35,41 @@ internal class TabularHandlers : OperatorHandlerBase
         {
             if (se.Element is SimpleNamedExpression sne)
                 return $"{Expr.ConvertExpression(sne.Expression)} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.ToString().Trim())}";
-            return Expr.ConvertExpression(se.Element);
+            // Bare JSON / path access (project DataMetadata.SectionName) → KQL auto-names
+            // the output column as the underscore-joined path.
+            var synthesized = SynthesizePathAlias(se.Element);
+            var sql = Expr.ConvertExpression(se.Element);
+            return synthesized != null ? $"{sql} AS {synthesized}" : sql;
         }).ToArray();
 
         return ReplaceSelectStar(leftSql, string.Join(", ", columns));
+    }
+
+    private static string? SynthesizePathAlias(SyntaxElement element)
+    {
+        // Drill through single-arg conversion wrappers like tostring(...), toreal(...), toint(...) —
+        // KQL auto-names 'tostring(DataMetadata.SectionName)' as 'DataMetadata_SectionName' too.
+        SyntaxNode? current = element as SyntaxNode;
+        while (current is FunctionCallExpression fce && fce.ArgumentList.Expressions.Count == 1)
+        {
+            var fname = fce.Name.ToString().Trim().ToLowerInvariant();
+            if (fname is "tostring" or "toreal" or "todouble" or "toint" or "tolong" or "tobool" or "tofloat" or "todatetime" or "todynamic")
+                current = fce.ArgumentList.Expressions[0].Element;
+            else break;
+        }
+
+        var segments = new List<string>();
+        while (current is PathExpression pe)
+        {
+            segments.Insert(0, pe.Selector.ToString().Trim());
+            current = pe.Expression;
+        }
+        if (segments.Count == 0) return null;
+        if (current is NameReference nr)
+            segments.Insert(0, nr.Name.ToString().Trim());
+        else
+            return null;
+        return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(string.Join("_", segments));
     }
 
     internal string ApplyProjectAway(string leftSql, ProjectAwayOperator projectAway)
