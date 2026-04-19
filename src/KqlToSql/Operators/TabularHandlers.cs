@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Kusto.Language.Syntax;
 using KqlToSql.Expressions;
 
@@ -11,9 +12,49 @@ internal class TabularHandlers : OperatorHandlerBase
     internal TabularHandlers(KqlToSqlConverter converter, ExpressionSqlBuilder expr)
         : base(converter, expr) { }
 
+    // Matches a window-function call followed by OVER (...), e.g. LAG(x) OVER () or LEAD(x,1) OVER (PARTITION BY y ORDER BY z)
+    private static readonly Regex _windowFnRe = new(
+        @"((?:LAG|LEAD|ROW_NUMBER|RANK|DENSE_RANK|NTILE|FIRST_VALUE|LAST_VALUE|NTH_VALUE)\s*\((?:[^()]|\([^()]*\))*\)\s*OVER\s*\((?:[^()]|\([^()]*\))*\))",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// If <paramref name="condition"/> contains window functions (LAG/LEAD/…OVER(…)),
+    /// hoists them to computed columns in a subquery and rewrites the condition to reference aliases.
+    /// Returns null if no window functions detected.
+    /// </summary>
+    private static (string innerSql, string rewrittenCondition)? HoistWindowFunctions(string leftSql, string condition)
+    {
+        var matches = _windowFnRe.Matches(condition);
+        if (matches.Count == 0) return null;
+
+        var extras = new List<string>();
+        var rewritten = condition;
+        // Replace each unique window expression with an alias _w_0, _w_1, …
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+        int idx = 0;
+        foreach (Match m in matches)
+        {
+            var expr = m.Value;
+            if (!seen.TryGetValue(expr, out var alias))
+            {
+                alias = $"_w_{idx++}";
+                seen[expr] = alias;
+                extras.Add($"{expr} AS {alias}");
+            }
+            rewritten = rewritten.Replace(expr, alias);
+        }
+
+        var inner = $"SELECT *, {string.Join(", ", extras)} FROM ({leftSql})";
+        return (inner, rewritten);
+    }
+
     internal string ApplyFilter(string leftSql, FilterOperator filter)
     {
         var condition = Expr.ConvertExpression(filter.Condition);
+
+        // If condition contains window functions, hoist them into an inner subquery
+        if (HoistWindowFunctions(leftSql, condition) is var hoisted && hoisted.HasValue)
+            return $"SELECT * FROM ({hoisted.Value.innerSql}) WHERE {hoisted.Value.rewrittenCondition}";
 
         // Only append WHERE directly if there's no ORDER BY, LIMIT, or GROUP BY trailing
         if (IsSimpleSelectStar(leftSql) &&

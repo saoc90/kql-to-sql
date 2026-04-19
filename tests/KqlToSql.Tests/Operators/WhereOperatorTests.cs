@@ -6,6 +6,29 @@ namespace KqlToSql.Tests.Operators;
 public class WhereOperatorTests
 {
     [Fact]
+    public void Where_PrevNotEqual_HoistsWindowFunctionAndExecutes()
+    {
+        // KQL prev() maps to LAG() OVER () — DuckDB forbids window fns in WHERE;
+        // the translator must hoist them to a computed column in an inner subquery.
+        var converter = new KqlToSqlConverter();
+        var kql = "StormEvents | sort by State asc | where prev(State) != State | project State";
+        var sql = converter.Convert(kql);
+
+        // Window expression must NOT appear directly after WHERE
+        Assert.DoesNotContain("WHERE LAG(", sql, StringComparison.OrdinalIgnoreCase);
+        // Must be wrapped as inner subquery with _w_0 alias
+        Assert.Contains("_w_0", sql);
+        Assert.Contains("WHERE _w_0 <>", sql, StringComparison.OrdinalIgnoreCase);
+
+        // Must execute without error on DuckDB and return rows
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+    }
+
+    [Fact]
     public void Converts_Where_And_Project_With_StormEvents()
     {
         var converter = new KqlToSqlConverter();
