@@ -96,10 +96,26 @@ internal sealed class OperatorDispatcher
         var byCol = ExpressionBuilder.ConvertExpression(partition.ByExpression);
         if (partition.Operand is PartitionSubquery sub)
         {
-            // The subquery is a chain of operators (e.g. "top 3 by X"). Convert it
-            // by piping leftSql through it as if it were a continuation.
-            var subSql = ApplyOperator(leftSql, (QueryOperator)sub.Subquery);
-            return subSql;
+            // The subquery may be a QueryOperator OR a PipeExpression (chain of operators).
+            // Handle both: for pipe, walk its chain applying each operator to leftSql.
+            if (sub.Subquery is QueryOperator qOp)
+                return ApplyOperator(leftSql, qOp);
+            if (sub.Subquery is PipeExpression pipe)
+            {
+                // Reconstruct the pipeline by walking the pipe chain
+                var sql = leftSql;
+                var current = pipe;
+                var ops = new List<QueryOperator>();
+                // Collect operators left-to-right
+                while (current != null)
+                {
+                    ops.Insert(0, current.Operator);
+                    current = current.Expression as PipeExpression;
+                }
+                foreach (var op in ops)
+                    sql = ApplyOperator(sql, op);
+                return sql;
+            }
         }
         return leftSql;
     }

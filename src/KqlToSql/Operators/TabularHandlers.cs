@@ -81,6 +81,18 @@ internal class TabularHandlers : OperatorHandlerBase
                 var name = sne.Name.ToString().Trim();
                 extras.Add(($"{Expr.ConvertExpression(sne.Expression)} AS {name}", name));
             }
+            else if (se.Element is CompoundNamedExpression cne)
+            {
+                // (a, b) = expr — expand each name as indexed access
+                var rhs = Expr.ConvertExpression(cne.Expression);
+                int idx = 0;
+                foreach (var nameNode in cne.Names.Names)
+                {
+                    var n = nameNode.Element.ToString().Trim();
+                    extras.Add(($"{rhs}[{idx + 1}] AS {n}", n));
+                    idx++;
+                }
+            }
             else
             {
                 // Bare column reference (identity extend) — just pass through, no-op

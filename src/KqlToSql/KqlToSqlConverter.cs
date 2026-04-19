@@ -16,7 +16,7 @@ public class KqlToSqlConverter
     private readonly CommandSqlTranslator _commands;
     private readonly Dictionary<string, (string sql, bool materialized)> _ctes = new();
     private readonly Dictionary<string, string> _scalarLets = new();
-    private readonly Dictionary<string, (string[] paramNames, Expression body)> _userFunctions = new();
+    private readonly Dictionary<string, (string[] paramNames, FunctionBody body)> _userFunctions = new();
 
     /// <summary>The SQL dialect used for engine-specific translations.</summary>
     public ISqlDialect Dialect { get; }
@@ -156,13 +156,9 @@ public class KqlToSqlConverter
 
             if (parameters.Length > 0)
             {
-                // Parameterized function (with or without view keyword) — store for inline expansion
-                var bodyExpr = funcDecl.Body.GetDescendants<Expression>().FirstOrDefault();
-                if (bodyExpr != null)
-                {
-                    _userFunctions[name] = (parameters, bodyExpr);
-                    return;
-                }
+                // Store the whole FunctionBody — it may have nested lets that need scoping at call time
+                _userFunctions[name] = (parameters, funcDecl.Body);
+                return;
             }
 
             sql = ConvertNode(funcDecl.Body);
@@ -318,6 +314,8 @@ public class KqlToSqlConverter
             FunctionBody fb => ConvertFunctionBody(fb),
             // Standalone operators (not piped) — wrap in a subquery
             QueryOperator op => _operators.ApplyOperator("SELECT *", op),
+            // toscalar() in non-let context — wrap as a SELECT
+            ToScalarExpression tse => $"SELECT {_operators.ExpressionBuilder.ConvertExpression(tse)} AS Value",
             // Scalar expressions that appear as standalone nodes (e.g. in let statements)
             Expression expr when expr is BinaryExpression or LiteralExpression or DynamicExpression =>
                 $"SELECT {_operators.ExpressionBuilder.ConvertExpression(expr)} AS value",
@@ -369,41 +367,32 @@ public class KqlToSqlConverter
 
     private string ConvertFunctionBody(FunctionBody fb)
     {
-        // FunctionBody contains let statements, expressions, and a final result expression.
-        // First check if it has nested let statements that need processing as CTEs/scalars.
-        var nestedLets = fb.GetDescendants<LetStatement>().ToList();
+        // FunctionBody has direct children: Statements (let bindings) and Expression (result)
         var savedCtes = new Dictionary<string, (string, bool)>(_ctes);
         var savedScalars = new Dictionary<string, string>(_scalarLets);
-        var savedFuncs = new Dictionary<string, (string[], Expression)>(_userFunctions);
+        var savedFuncs = new Dictionary<string, (string[], FunctionBody)>(_userFunctions);
         try
         {
-            foreach (var ls in nestedLets)
+            // Process only the IMMEDIATE let statements (not nested ones in deeper bodies)
+            foreach (var stmt in fb.Statements)
             {
-                ProcessLetStatement(ls);
+                if (stmt.Element is LetStatement ls)
+                    ProcessLetStatement(ls);
             }
 
-            // Find the result expression (last non-let statement)
-            var pipeExpression = fb.GetDescendants<PipeExpression>().FirstOrDefault();
-            if (pipeExpression != null)
-                return ConvertNode(pipeExpression);
+            // The Expression property is the result
+            if (fb.Expression != null)
+                return ConvertNode(fb.Expression);
 
+            // Fallback: look for a name reference (simple table reference)
             var nameReference = fb.GetDescendants<NameReference>().FirstOrDefault();
             if (nameReference != null)
                 return ConvertNode(nameReference);
-
-            // Fall back to any expression we can find
-            var anyExpr = fb.GetDescendants<Expression>().FirstOrDefault(e => e is not NameReference);
-            if (anyExpr != null)
-            {
-                try { return _operators.ExpressionBuilder.ConvertExpression(anyExpr); }
-                catch { }
-            }
 
             throw new NotSupportedException($"Function body contains no recognizable query pattern. Content: '{fb}'");
         }
         finally
         {
-            // Restore outer scope
             _ctes.Clear();
             foreach (var kv in savedCtes) _ctes[kv.Key] = kv.Value;
             _scalarLets.Clear();
