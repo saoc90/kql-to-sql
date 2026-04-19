@@ -53,6 +53,7 @@ public class KqlToSqlConverter
         _ctes.Clear();
         _scalarLets.Clear();
         _userFunctions.Clear();
+        _operators.ExpressionBuilder.ClearIntervalColumns();
         
         if (root is CommandBlock)
         {

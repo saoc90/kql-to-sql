@@ -32,6 +32,8 @@ internal class ExpressionSqlBuilder
     internal void MarkIntervalColumn(string name) => _intervalColumns.Add(name);
     /// <summary>Returns true if the named column was previously marked as interval-typed.</summary>
     internal bool IsIntervalColumn(string name) => _intervalColumns.Contains(name);
+    /// <summary>Clears interval column tracking — call once per top-level Convert() to avoid cross-query stale state.</summary>
+    internal void ClearIntervalColumns() => _intervalColumns.Clear();
 
     private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.FunctionBody body)>? _userFunctions;
     /// <summary>Sets user-defined parameterized functions for inline expansion.</summary>
@@ -1071,8 +1073,9 @@ internal class ExpressionSqlBuilder
         return $"FLOOR(({value} - {fixedPoint})/({size}))*({size}) + {fixedPoint}";
     }
 
-    private static bool IsIntervalExpression(string sql)
-        => sql.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase);
+    internal bool IsIntervalExpression(string sql)
+        => sql.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase)
+           || (IsBareIdentifier(sql) && IsIntervalColumn(sql.Trim('"')));
 
     private string ConvertDivide(BinaryExpression bin, string? leftAlias, string? rightAlias)
     {

@@ -226,11 +226,13 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             if (name == "sum" && args.Length == 1 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
             {
                 var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
+                Expr.MarkIntervalColumn(alias.Trim('"'));
                 return new[] { $"((SUM({ms})) * INTERVAL '1 millisecond') AS {alias}" };
             }
             if (name == "sumif" && args.Length == 2 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
             {
                 var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
+                Expr.MarkIntervalColumn(alias.Trim('"'));
                 return new[] { $"((SUM({ms}) FILTER (WHERE {args[1]})) * INTERVAL '1 millisecond') AS {alias}" };
             }
 
@@ -254,6 +256,8 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
 
         // Non-function expression in summarize (e.g. arithmetic on aggregates)
         var exprSql2 = Expr.ConvertExpression(expr);
+        if (alias != null && Expr.IsIntervalExpression(exprSql2))
+            Expr.MarkIntervalColumn(alias.Trim('"'));
         return new[] { $"{exprSql2} AS {alias ?? "expr"}" };
     }
 
