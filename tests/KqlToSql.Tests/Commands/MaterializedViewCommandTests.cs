@@ -12,21 +12,21 @@ public class MaterializedViewCommandTests
     public void Translates_Create_Materialized_View()
     {
         var sql = _converter.Convert(".create materialized-view MyView on table StormEvents { StormEvents | summarize count() by State }");
-        Assert.Equal("CREATE MATERIALIZED VIEW MyView AS SELECT State, COUNT(*) AS count FROM StormEvents GROUP BY ALL", sql);
+        Assert.Equal("CREATE MATERIALIZED VIEW MyView AS SELECT State, COUNT(*) AS count_ FROM StormEvents GROUP BY ALL", sql);
     }
 
     [Fact]
     public void Translates_Create_Materialized_View_With_Properties()
     {
         var sql = _converter.Convert(".create materialized-view with (backfill=true) MyView on table StormEvents { StormEvents | summarize count() by State }");
-        Assert.Equal("CREATE MATERIALIZED VIEW MyView AS SELECT State, COUNT(*) AS count FROM StormEvents GROUP BY ALL", sql);
+        Assert.Equal("CREATE MATERIALIZED VIEW MyView AS SELECT State, COUNT(*) AS count_ FROM StormEvents GROUP BY ALL", sql);
     }
 
     [Fact]
     public void Translates_Create_Or_Alter_Materialized_View()
     {
         var sql = _converter.Convert(".create-or-alter materialized-view MyView on table StormEvents { StormEvents | summarize count() by State }");
-        Assert.Equal("DROP MATERIALIZED VIEW IF EXISTS MyView; CREATE MATERIALIZED VIEW MyView AS SELECT State, COUNT(*) AS count FROM StormEvents GROUP BY ALL", sql);
+        Assert.Equal("DROP MATERIALIZED VIEW IF EXISTS MyView; CREATE MATERIALIZED VIEW MyView AS SELECT State, COUNT(*) AS count_ FROM StormEvents GROUP BY ALL", sql);
     }
 
     [Fact]

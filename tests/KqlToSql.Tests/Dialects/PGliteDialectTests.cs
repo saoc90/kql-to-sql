@@ -708,7 +708,7 @@ public class PGliteDialectTests
     public void PGlite_Summarize_Count_ByState()
     {
         var sql = _converter.Convert("StormEvents | summarize count() by STATE");
-        Assert.Equal("SELECT STATE, COUNT(*) AS count FROM StormEvents GROUP BY STATE", sql);
+        Assert.Equal("SELECT STATE, COUNT(*) AS count_ FROM StormEvents GROUP BY STATE", sql);
     }
 
     // --- Type mapping tests ---
