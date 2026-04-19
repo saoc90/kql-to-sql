@@ -122,7 +122,7 @@ public class ScalarFunctionImprovementTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("T | extend s = split(State, ',')");
-        Assert.Equal("SELECT *, STRING_SPLIT(State, ',') AS s FROM T", sql);
+        Assert.Equal("SELECT *, STRING_SPLIT(CAST(State AS VARCHAR), ',') AS s FROM T", sql);
     }
 
     [Fact]
