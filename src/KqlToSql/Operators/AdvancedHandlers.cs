@@ -261,18 +261,33 @@ internal class AdvancedHandlers : OperatorHandlerBase
         if (mvApply.Expressions[0].Element is not MvApplyExpression mae)
             throw new NotSupportedException("Unexpected mv-apply expression type");
 
-        var column = mae.Expression.ToString().Trim();
+        // mv-apply alias = expr on (...) — the LHS name is the column inside the subquery;
+        // the RHS is the source expression in the outer scope.
+        string columnName;
+        string sourceSql;
+        if (mae.Expression is SimpleNamedExpression sne)
+        {
+            columnName = sne.Name.ToString().Trim();
+            sourceSql = Expr.ConvertExpression(sne.Expression);
+        }
+        else
+        {
+            var bare = mae.Expression.ToString().Trim();
+            columnName = bare;
+            sourceSql = bare;
+        }
 
         var subquerySql = Converter.ConvertNode(mvApply.Subquery.Expression);
 
         string sourceAlias = "t";
-        var fromSql = ExtractFrom(leftSql);
+        var fromSql = ExtractFromAsRelation(leftSql);
         var aliasedFrom = $"{fromSql} AS {sourceAlias}";
 
         var unnestAlias = "u";
-        var unnestClause = Dialect.Unnest(sourceAlias, column, unnestAlias);
+        var unnestSource = sourceSql == columnName ? $"{sourceAlias}.{columnName}" : sourceSql;
+        var unnestClause = $"CROSS JOIN UNNEST({unnestSource}) AS {unnestAlias}(value)";
 
-        return $"SELECT {sourceAlias}.*, _sub.* FROM {aliasedFrom} {unnestClause}, LATERAL ({subquerySql.Replace($"FROM {column}", $"FROM (SELECT {unnestAlias}.value AS {column})")}) AS _sub";
+        return $"SELECT {sourceAlias}.*, _sub.* FROM {aliasedFrom} {unnestClause}, LATERAL ({subquerySql.Replace($"FROM {columnName}", $"FROM (SELECT {unnestAlias}.value AS {columnName})")}) AS _sub";
     }
 
     internal string ApplyTopHitters(string leftSql, TopHittersOperator topHitters)
