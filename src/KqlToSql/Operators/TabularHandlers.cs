@@ -248,7 +248,12 @@ internal class TabularHandlers : OperatorHandlerBase
 
     internal string ApplyDistinct(string leftSql, DistinctOperator distinct)
     {
-        var cols = string.Join(", ", distinct.Expressions.Select(e => Expr.ConvertExpression(e.Element)));
+        var cols = string.Join(", ", distinct.Expressions.Select(e =>
+        {
+            var sql = Expr.ConvertExpression(e.Element);
+            var synthesized = SynthesizePathAlias(e.Element);
+            return synthesized != null ? $"{sql} AS {synthesized}" : sql;
+        }));
         return ReplaceSelectStar(leftSql, $"DISTINCT {cols}");
     }
 }
