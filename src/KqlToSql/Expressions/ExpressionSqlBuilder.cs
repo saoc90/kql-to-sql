@@ -458,9 +458,25 @@ internal class ExpressionSqlBuilder
         }
 
         var condition = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
-        var trueExpr = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
-        var falseExpr = ConvertExpression(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
-        return $"CASE WHEN {condition} THEN {trueExpr} ELSE {falseExpr} END";
+        // KQL permits inline aliasing of the true/false branch: iif(cond, alias = X, Y) / iif(cond, X, alias = Y).
+        // SimpleNamedExpression inside function args would naively emit "X AS alias" *inside* the CASE branch,
+        // producing invalid SQL (CASE WHEN ... THEN X AS alias ELSE ... END). Extract aliases and attach
+        // them to the outer CASE expression instead.
+        var (trueExpr, trueAlias) = ConvertBranchExtractAlias(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
+        var (falseExpr, falseAlias) = ConvertBranchExtractAlias(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
+        var caseSql = $"CASE WHEN {condition} THEN {trueExpr} ELSE {falseExpr} END";
+        var outerAlias = trueAlias ?? falseAlias;
+        return outerAlias != null ? $"{caseSql} AS {QuoteIdentifierIfReserved(outerAlias)}" : caseSql;
+    }
+
+    private (string Expr, string? Alias) ConvertBranchExtractAlias(Expression expr, string? leftAlias, string? rightAlias)
+    {
+        if (expr is SimpleNamedExpression sne)
+        {
+            var inner = ConvertExpression(sne.Expression, leftAlias, rightAlias);
+            return (inner, sne.Name.ToString().Trim());
+        }
+        return (ConvertExpression(expr, leftAlias, rightAlias), null);
     }
 
     private string ConvertCase(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
