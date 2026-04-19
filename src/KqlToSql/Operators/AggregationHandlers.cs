@@ -77,8 +77,29 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             return ($"{inner} AS {name}", inner);
         }
 
+        // Bare path (DataMetadata.Section) — auto-name as KQL does.
+        var synthesized = SynthesizePathAliasForBy(expr);
         var exp = Expr.ConvertExpression(expr);
+        if (synthesized != null)
+            return ($"{exp} AS {synthesized}", exp);
         return (exp, exp);
+    }
+
+    private static string? SynthesizePathAliasForBy(Expression expr)
+    {
+        var segments = new List<string>();
+        Expression? current = expr;
+        while (current is PathExpression pe)
+        {
+            segments.Insert(0, pe.Selector.ToString().Trim());
+            current = pe.Expression;
+        }
+        if (segments.Count == 0) return null;
+        if (current is NameReference baseRef)
+            segments.Insert(0, baseRef.Name.ToString().Trim());
+        else
+            return null;
+        return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(string.Join("_", segments));
     }
 
     internal IEnumerable<string> ConvertAggregate(SyntaxNode node)
