@@ -71,10 +71,12 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             return ($"{inner} AS {name}", inner);
         }
 
-        if (expr is FunctionCallExpression fce && fce.Name.ToString().Trim().Equals("bin", StringComparison.OrdinalIgnoreCase) &&
+        if (expr is FunctionCallExpression fce &&
+            (fce.Name.ToString().Trim().Equals("bin", StringComparison.OrdinalIgnoreCase) ||
+             fce.Name.ToString().Trim().Equals("bin_at", StringComparison.OrdinalIgnoreCase)) &&
             fce.ArgumentList.Expressions.Count > 0 && fce.ArgumentList.Expressions[0].Element is NameReference nr)
         {
-            var inner = Expr.ConvertBin(fce, null, null);
+            var inner = Expr.ConvertExpression(fce);
             var name = nr.Name.ToString().Trim();
             return ($"{inner} AS {name}", inner);
         }
