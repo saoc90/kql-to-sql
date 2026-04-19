@@ -182,9 +182,9 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             {
                 "count" => "count",
                 "countif" => "countif",
-                "percentile" => $"percentile_{args[1]}_{args[0]}",
-                "percentilew" => $"percentilew_{args[2]}_{args[0]}",
-                _ when args.Length > 0 => $"{name}_{args[0]}",
+                "percentile" => $"percentile_{args[1]}_{SafeAliasPart(args[0])}",
+                "percentilew" => $"percentilew_{args[2]}_{SafeAliasPart(args[0])}",
+                _ when args.Length > 0 => $"{name}_{SafeAliasPart(args[0])}",
                 _ => name
             };
 
@@ -209,5 +209,17 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         // Non-function expression in summarize (e.g. arithmetic on aggregates)
         var exprSql2 = Expr.ConvertExpression(expr);
         return new[] { $"{exprSql2} AS {alias ?? "expr"}" };
+    }
+
+    private static string SafeAliasPart(string sqlFragment)
+    {
+        // Aliases must be identifier-safe. When the argument is a function call / expression,
+        // strip to word characters so e.g. 'STRING_SPLIT(Category, ''-'')' becomes 'STRING_SPLIT_Category'.
+        var sb = new System.Text.StringBuilder();
+        foreach (var c in sqlFragment)
+            sb.Append(char.IsLetterOrDigit(c) || c == '_' ? c : '_');
+        var s = sb.ToString().Trim('_');
+        while (s.Contains("__")) s = s.Replace("__", "_");
+        return string.IsNullOrEmpty(s) ? "expr" : s;
     }
 }
