@@ -77,7 +77,7 @@
 - [x] render
 - [x] sample
 - [x] sample-distinct
-- [ ] ~~scan~~ (not supported — see below)
+- [x] scan (partial — single-step patterns: cumulative sum, forward fill, cumulative-with-reset)
 - [x] search
 - [x] serialize
 - [x] sort
@@ -332,7 +332,7 @@ These operators have no SQL equivalent or require capabilities beyond single-que
 | `macro-expand` | Expands macros — compile-time construct with no SQL equivalent |
 | `partition` | Executes sub-pipelines per partition independently — would require dynamic SQL generation per group |
 | `reduce` | Clusters string patterns using heuristics — algorithmic operation with no SQL equivalent |
-| `scan` | Stateful sequential row processing with match conditions — would require recursive CTEs with complex state, not reliably translatable |
+| `scan` (multi-step pattern matching) | Sequence detection across rows with multiple named steps and match-id — full state-machine semantics can't be expressed with standard window functions. Single-step scans (cumulative sum, forward fill, conditional reset) are supported; multi-step pattern matching is not. |
 | `project-by-names` | Selects columns matching a wildcard pattern — requires schema introspection at translation time |
 | `find` | Searches across multiple tables in a database — requires catalog access not available at translation time |
 | `evaluate autocluster()` | Machine-learning clustering plugin — no SQL equivalent |
