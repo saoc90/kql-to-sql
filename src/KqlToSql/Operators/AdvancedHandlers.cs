@@ -287,7 +287,15 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var unnestSource = sourceSql == columnName ? $"{sourceAlias}.{columnName}" : sourceSql;
         var unnestClause = $"CROSS JOIN UNNEST({unnestSource}) AS {unnestAlias}(value)";
 
-        return $"SELECT {sourceAlias}.*, _sub.* FROM {aliasedFrom} {unnestClause}, LATERAL ({subquerySql.Replace($"FROM {columnName}", $"FROM (SELECT {unnestAlias}.value AS {columnName})")}) AS _sub";
+        // KQL's mv-apply subquery operates on an implicit "virtual table" named after the element column.
+        // The inner pipeline might emit FROM {columnName} (when it starts with a name-bound operator) or
+        // it might emit FROM (SELECT *) (when it starts with extend/project/summarize with no source). We
+        // patch both forms so the subquery has a concrete row source.
+        var virtualSource = $"(SELECT {unnestAlias}.value AS {columnName})";
+        var patched = subquerySql
+            .Replace($"FROM {columnName}", $"FROM {virtualSource}")
+            .Replace("FROM (SELECT *)", $"FROM {virtualSource}");
+        return $"SELECT {sourceAlias}.*, _sub.* FROM {aliasedFrom} {unnestClause}, LATERAL ({patched}) AS _sub";
     }
 
     internal string ApplyTopHitters(string leftSql, TopHittersOperator topHitters)
