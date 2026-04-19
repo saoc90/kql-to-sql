@@ -615,7 +615,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize take_any(State)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT ANY_VALUE(State) AS take_any_State FROM StormEvents", sql);
+        Assert.Equal("SELECT ANY_VALUE(State) AS State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -632,7 +632,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize take_anyif(State, InjuriesDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT ANY_VALUE(State) FILTER (WHERE InjuriesDirect > 0) AS take_anyif_State FROM StormEvents", sql);
+        Assert.Equal("SELECT ANY_VALUE(State) FILTER (WHERE InjuriesDirect > 0) AS State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

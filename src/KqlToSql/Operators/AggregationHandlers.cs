@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kusto.Language;
+using Kusto.Language.Symbols;
 using Kusto.Language.Syntax;
 using KqlToSql.Expressions;
 
@@ -20,8 +22,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         if (summarize.Aggregates.Count == 1 &&
             summarize.Aggregates[0].Element is Expression aggExpr &&
             aggExpr is FunctionCallExpression fce &&
-            (fce.Name.ToString().Trim().Equals("arg_max", StringComparison.OrdinalIgnoreCase) ||
-             fce.Name.ToString().Trim().Equals("arg_min", StringComparison.OrdinalIgnoreCase)) &&
+            (fce.Is(Aggregates.ArgMax) || fce.Is(Aggregates.ArgMin)) &&
             fce.ArgumentList.Expressions.Count == 2 &&
             fce.ArgumentList.Expressions[1].Element is StarExpression)
         {
@@ -32,8 +33,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 ? $"PARTITION BY {string.Join(", ", byColumns.Select(b => b.Group))} "
                 : string.Empty;
 
-            var direction = fce.Name.ToString().Trim().Equals("arg_min", StringComparison.OrdinalIgnoreCase)
-                ? "ASC" : "DESC";
+            var direction = fce.Is(Aggregates.ArgMin) ? "ASC" : "DESC";
 
             var qualifyCondition = $"ROW_NUMBER() OVER ({partition}ORDER BY {extremumExpr} {direction}) = 1";
             var innerSql = IsFullyParenthesized(fromSql) ? fromSql.Substring(1, fromSql.Length - 2) : $"SELECT * FROM {fromSql}";
@@ -72,12 +72,11 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         }
 
         if (expr is FunctionCallExpression fce &&
-            (fce.Name.ToString().Trim().Equals("bin", StringComparison.OrdinalIgnoreCase) ||
-             fce.Name.ToString().Trim().Equals("bin_at", StringComparison.OrdinalIgnoreCase)) &&
+            (fce.Is(Functions.Bin) || fce.Is(Functions.BinAt)) &&
             fce.ArgumentList.Expressions.Count > 0 && fce.ArgumentList.Expressions[0].Element is NameReference nr)
         {
             var inner = Expr.ConvertExpression(fce);
-            var name = nr.Name.ToString().Trim();
+            var name = nr.Name.SimpleName;
             return ($"{inner} AS {name}", inner);
         }
 
@@ -129,19 +128,19 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
 
         if (expr is FunctionCallExpression fce)
         {
-            var name = fce.Name.ToString().Trim().ToLowerInvariant();
-            if (name == "arg_max" || name == "arg_min")
+            var name = fce.Name.SimpleName.ToLowerInvariant();
+            if (fce.Is(Aggregates.ArgMax) || fce.Is(Aggregates.ArgMin))
             {
                 // KQL: arg_max(key, v1, v2=alias, ...) by ...
                 //   output includes key (max/min of key) + each value at the extremum row.
                 // Outer alias applies to the key output: (K = arg_max(key, v1))  → key output named K.
                 var keyNode = fce.ArgumentList.Expressions[0].Element;
                 var extremumExpr = Expr.ConvertExpression(keyNode);
-                var baseKeyAlias = alias ?? (keyNode is NameReference knr ? knr.Name.ToString().Trim() : name);
+                var baseKeyAlias = alias ?? (keyNode is NameReference knr ? knr.Name.SimpleName : name);
                 // Live Kusto: repeated auto-named columns in one summarize suffix 2nd/3rd as <name>1, <name>2, ...
                 // Explicit outer alias (alias != null) bypasses the counter on the key.
                 var keyAlias = SuffixIfCollides(baseKeyAlias, alias != null, keyAliasCounts);
-                var keyAgg = name == "arg_max" ? "MAX" : "MIN";
+                var keyAgg = fce.Is(Aggregates.ArgMax) ? "MAX" : "MIN";
                 var results = new List<string> { $"{keyAgg}({extremumExpr}) AS {keyAlias}" };
 
                 for (int i = 1; i < fce.ArgumentList.Expressions.Count; i++)
@@ -153,7 +152,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                     if (argNode is SimpleNamedExpression vsne)
                     {
                         innerExpr = Expr.ConvertExpression(vsne.Expression);
-                        resultAlias = vsne.Name.ToString().Trim();
+                        resultAlias = vsne.Name.SimpleName;
                         explicitValueAlias = true;
                     }
                     else
@@ -171,9 +170,9 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
 
             var args = fce.ArgumentList.Expressions.Select(a => Expr.ConvertExpression(a.Element)).ToArray();
 
-            if (name == "percentiles")
+            if (fce.Is(Aggregates.Percentiles))
             {
-                var baseName = alias ?? (fce.ArgumentList.Expressions[0].Element is NameReference nr ? nr.Name.ToString().Trim() : "expr");
+                var baseName = alias ?? (fce.ArgumentList.Expressions[0].Element is NameReference nr ? nr.Name.SimpleName : "expr");
                 var results = new List<string>();
                 for (int i = 1; i < args.Length; i++)
                 {
@@ -184,9 +183,9 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 return results;
             }
 
-            if (name == "percentilesw")
+            if (fce.Is(Aggregates.PercentilesW))
             {
-                var baseName = alias ?? (fce.ArgumentList.Expressions[0].Element is NameReference nr ? nr.Name.ToString().Trim() : "expr");
+                var baseName = alias ?? (fce.ArgumentList.Expressions[0].Element is NameReference nr ? nr.Name.SimpleName : "expr");
                 var results = new List<string>();
                 for (int i = 2; i < args.Length; i++)
                 {
@@ -197,49 +196,31 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 return results;
             }
 
-            if (name == "percentiles_array")
+            if (fce.Is(Aggregates.PercentilesArray))
             {
                 var percentileList = string.Join(", ", args.Skip(1).Select(p => $"{p} / 100.0"));
                 alias ??= "percentiles_array";
                 return new[] { $"quantile_cont({args[0]}, [{percentileList}]) AS {alias}" };
             }
 
-            if (name == "percentilesw_array")
+            if (fce.Is(Aggregates.PercentilesWArray))
             {
                 var percentileList = string.Join(", ", args.Skip(2).Select(p => $"{p} / 100.0"));
                 alias ??= "percentilesw_array";
                 return new[] { $"quantile_cont({args[0]}, [{percentileList}]) AS {alias}" };
             }
 
-            // Match real Kusto's auto-naming conventions (verified against a live cluster):
-            //   count()           → count_
-            //   countif(x>2)      → countif_
-            //   sum(x)/avg(x)/... → <name>_<col>
-            //   percentile(x, 50) → percentile_x_50  (col before percentile)
-            //   make_list(x)      → list_x           (strip "make_" prefix)
-            //   make_set(x)       → set_x
-            alias ??= name switch
-            {
-                "count" => "count_",
-                "countif" => "countif_",
-                "percentile" => $"percentile_{SafeAliasPart(args[0])}_{args[1]}",
-                "percentilew" => $"percentilew_{SafeAliasPart(args[0])}_{args[2]}",
-                "make_list" or "makelist" or "make_list_if" or "make_list_with_nulls" => $"list_{SafeAliasPart(args[0])}",
-                "make_set" or "makeset" or "make_set_if" => $"set_{SafeAliasPart(args[0])}",
-                "make_bag" or "make_bag_if" => $"bag_{SafeAliasPart(args[0])}",
-                _ when args.Length > 0 => $"{name}_{SafeAliasPart(args[0])}",
-                _ => name
-            };
+            alias ??= DeriveAutoAlias(fce, name, args);
 
             // When summing a column we recorded as interval-typed upstream, rewrite to epoch-ms math
             // before dispatching to the dialect so the emission bypasses the plain SUM path.
-            if (name == "sum" && args.Length == 1 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
+            if (fce.Is(Aggregates.Sum) && args.Length == 1 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
             {
                 var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
                 Expr.MarkIntervalColumn(alias.Trim('"'));
                 return new[] { $"((SUM({ms})) * INTERVAL '1 millisecond') AS {alias}" };
             }
-            if (name == "sumif" && args.Length == 2 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
+            if (fce.Is(Aggregates.SumIf) && args.Length == 2 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
             {
                 var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
                 Expr.MarkIntervalColumn(alias.Trim('"'));
@@ -280,6 +261,33 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         return n == 0 ? baseAlias : $"{baseAlias}{n}";
     }
 
+    private string DeriveAutoAlias(FunctionCallExpression fce, string name, string[] args)
+    {
+        // Match real Kusto's auto-naming (verified against a live cluster):
+        //   count() / countif(..)          → count_ / countif_
+        //   sum(x)/avg(x)/dcount(x)/...    → <name>_<col>
+        //   percentile(x, 50)              → percentile_x_50   (col before percentile)
+        //   make_list(x) / make_set(x)     → list_x / set_x    (strip 'make_' prefix)
+        //   take_any(x) / take_anyif(x,..) → x                 (inner identifier)
+        if (fce.Is(Aggregates.Count))   return "count_";
+        if (fce.Is(Aggregates.CountIf)) return "countif_";
+        if (fce.Is(Aggregates.Percentile))  return $"percentile_{SafeAliasPart(args[0])}_{args[1]}";
+        if (fce.Is(Aggregates.PercentileW)) return $"percentilew_{SafeAliasPart(args[0])}_{args[2]}";
+        if (fce.IsAny(Aggregates.MakeList, Aggregates.MakeListIf, Aggregates.MakeListWithNulls, Aggregates.MakeList_Deprecated))
+            return $"list_{SafeAliasPart(args[0])}";
+        if (fce.IsAny(Aggregates.MakeSet, Aggregates.MakeSetIf, Aggregates.MakeSet_Deprecated))
+            return $"set_{SafeAliasPart(args[0])}";
+        if (fce.IsAny(Aggregates.MakeBag, Aggregates.MakeBagIf))
+            return $"bag_{SafeAliasPart(args[0])}";
+        if (fce.IsAny(Aggregates.TakeAny, Aggregates.TakeAnyIf) && fce.ArgumentList.Expressions.Count > 0)
+        {
+            var inner = TryGetInnerIdentifier(fce.ArgumentList.Expressions[0].Element);
+            if (inner != null) return inner;
+        }
+        if (args.Length > 0) return $"{name}_{SafeAliasPart(args[0])}";
+        return name;
+    }
+
     private static string? TryGetInnerIdentifier(SyntaxNode node)
     {
         // Drill through single-arg conversion wrappers (toreal/todouble/tostring/...) to the
@@ -287,14 +295,14 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         SyntaxNode? current = node;
         while (current is FunctionCallExpression fce && fce.ArgumentList.Expressions.Count == 1)
         {
-            var fname = fce.Name.ToString().Trim().ToLowerInvariant();
-            if (fname is "tostring" or "toreal" or "todouble" or "toint" or "tolong"
-                or "tobool" or "tofloat" or "todatetime" or "todynamic")
+            if (fce.IsAny(Functions.ToString, Functions.ToReal, Functions.ToDouble,
+                          Functions.ToInt, Functions.ToLong, Functions.ToBool,
+                          Functions.ToDateTime, Functions.ToDynamic_, Functions.ParseJson))
                 current = fce.ArgumentList.Expressions[0].Element;
             else break;
         }
         if (current is NameReference nr)
-            return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.ToString().Trim());
+            return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.SimpleName);
         return null;
     }
 
