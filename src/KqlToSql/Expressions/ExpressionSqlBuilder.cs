@@ -1154,6 +1154,7 @@ internal class ExpressionSqlBuilder
         {
             LiteralExpression lit when lit.Kind == SyntaxKind.StringLiteralExpression => ConvertStringLiteral(lit),
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression => ConvertDateTimeLiteral(lit),
+            LiteralExpression lit when lit.Kind == SyntaxKind.TimespanLiteralExpression => ConvertTimespanLiteral(lit),
             LiteralExpression lit when lit.Kind == SyntaxKind.BooleanLiteralExpression => lit.ToString().Trim().ToLowerInvariant() == "true" ? "TRUE" : "FALSE",
             LiteralExpression lit when lit.Kind == SyntaxKind.NullLiteralExpression => "NULL",
             LiteralExpression lit => ConvertNumericOrOtherLiteral(lit),
