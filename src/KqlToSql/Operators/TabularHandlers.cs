@@ -112,7 +112,6 @@ internal class TabularHandlers : OperatorHandlerBase
     {
         var extras = new List<(string Expr, string Name)>();
         // KQL auto-numbers anonymous (unnamed, non-path, non-identifier) extend results Column1, Column2, ...
-        // The counter advances only when we emit an auto-name, not for every extras entry.
         int anonCounter = 0;
         foreach (var se in extend.Expressions)
         {
@@ -155,7 +154,8 @@ internal class TabularHandlers : OperatorHandlerBase
                 }
                 else
                 {
-                    var autoName = $"Column{extras.Count + 1}";
+                    anonCounter++;
+                    var autoName = $"Column{anonCounter}";
                     extras.Add(($"{colSql} AS {autoName}", autoName));
                 }
             }
