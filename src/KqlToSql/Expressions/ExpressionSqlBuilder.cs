@@ -238,9 +238,15 @@ internal class ExpressionSqlBuilder
     {
         var baseExpr = ConvertExpression(ee.Expression, leftAlias, rightAlias);
         // The selector is a BracketedExpression wrapping the index
-        var indexExpr = ee.Selector is BracketedExpression be
-            ? ConvertExpression(be.Expression, leftAlias, rightAlias)
-            : ConvertExpression(ee.Selector, leftAlias, rightAlias);
+        var indexNode = ee.Selector is BracketedExpression be ? be.Expression : ee.Selector;
+        var indexExpr = ConvertExpression(indexNode, leftAlias, rightAlias);
+
+        // String index → JSON dict access (KQL: dict["key"] or dict[strCol])
+        // Integer index → LIST element access (KQL arrays are 0-based, DuckDB LIST is 1-based)
+        bool isStringIndex =
+            indexNode is LiteralExpression lit && lit.Kind == SyntaxKind.StringLiteralExpression
+            || indexNode is CompoundStringLiteralExpression
+            || indexNode is FunctionCallExpression fce && IsStringReturningFunction(fce);
 
         // If the base is a JSON object (e.g. from dynamic({...})), the bracket access needs a json path lookup
         // rather than LIST indexing. Detect the ::JSON suffix produced by ConvertDynamic.
@@ -248,10 +254,23 @@ internal class ExpressionSqlBuilder
         {
             return $"json_extract_string({baseExpr}, '$.' || {indexExpr})";
         }
+        // String index on an arbitrary base → JSON dict access. Use json_extract (not
+        // _string) so numeric comparisons like `dict[key] > 0` still bind — DuckDB can
+        // compare its JSON type against numbers; trim(both '"' ...) elsewhere still
+        // handles string equality for keys that are quoted.
+        if (isStringIndex)
+        {
+            return $"json_extract({baseExpr}, '$.' || {indexExpr})";
+        }
 
         // KQL uses 0-based indexing, DuckDB LIST uses 1-based
         return $"{baseExpr}[{indexExpr} + 1]";
     }
+
+    private static bool IsStringReturningFunction(FunctionCallExpression fce) =>
+        fce.IsAny(Functions.ToString, Functions.Strcat, Functions.ToUpper, Functions.ToLower,
+                  Functions.Substring, Functions.Replace, Functions.Trim, Functions.TrimStart,
+                  Functions.TrimEnd);
 
     private string ConvertDynamic(DynamicExpression de, string? leftAlias, string? rightAlias)
     {
