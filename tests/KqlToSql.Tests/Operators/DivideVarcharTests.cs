@@ -26,6 +26,20 @@ public class DivideVarcharTests
     }
 
     [Fact]
+    public void Numeric_Divided_By_CastToDouble_Does_Not_Emit_DatePart()
+    {
+        // Regression: TOTAL_TIME = (EndTime - StartTime) / 1s / 60.0 produces DOUBLE.
+        // OnCount / toreal(TOTAL_TIME) must emit plain division, not EXTRACT(MILLISECOND FROM DOUBLE).
+        var converter = new KqlToSqlConverter();
+        var kql = "let StartTime = datetime(2025-01-01); let EndTime = datetime(2025-01-02);" +
+                  "let TOTAL_TIME = (EndTime - StartTime) / 1s / 60.0;" +
+                  "T | summarize OnCount = countif(v > 0) by x | project Value = OnCount / toreal(TOTAL_TIME) * 100";
+        var sql = converter.Convert(kql);
+        Assert.DoesNotContain("EXTRACT(MILLISECOND FROM (TRY_CAST(", sql);
+        Assert.DoesNotContain("EXTRACT(MILLISECOND FROM (TRY_CAST(", sql);
+    }
+
+    [Fact]
     public void Summarize_IntervalColumn_Divided_By_Interval_Uses_EpochExtract()
     {
         // countif(...) * 1h produces INTERVAL in summarize; dividing two intervals must use EXTRACT not bare /
