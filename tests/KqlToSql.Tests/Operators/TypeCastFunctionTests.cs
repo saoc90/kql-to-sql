@@ -118,4 +118,13 @@ public class TypeCastFunctionTests
         var result = (string)cmd.ExecuteScalar()!;
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData("print bool(true)", "TRUE")]
+    [InlineData("print bool(false)", "FALSE")]
+    public void BoolLiteral_EmitsTrueOrFalse(string kql, string expected)
+    {
+        var sql = new KqlToSqlConverter().Convert(kql);
+        Assert.Contains(expected, sql, StringComparison.Ordinal);
+    }
 }

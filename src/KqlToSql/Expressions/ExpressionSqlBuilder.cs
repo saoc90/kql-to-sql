@@ -868,6 +868,11 @@ internal class ExpressionSqlBuilder
         if (lit.LiteralValue == null)
         {
             var text = lit.ToString().Trim();
+            if (lit.Kind == SyntaxKind.BooleanLiteralExpression)
+            {
+                if (text.Contains("true", StringComparison.OrdinalIgnoreCase)) return "TRUE";
+                if (text.Contains("false", StringComparison.OrdinalIgnoreCase)) return "FALSE";
+            }
             if (text.Contains("null", StringComparison.OrdinalIgnoreCase))
             {
                 var sqlType = lit.Kind switch
