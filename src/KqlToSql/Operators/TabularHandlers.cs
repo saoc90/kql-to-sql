@@ -110,10 +110,13 @@ internal class TabularHandlers : OperatorHandlerBase
 
         // KQL extend replaces columns with the same name.
         // Check if any extended column name already exists in the left SQL (from a prior extend).
+        // Match both unquoted (` AS Name`) and quoted (` AS "Name"`) forms so reserved-word columns
+        // are detected.
         var columnsToExclude = extras
             .Where(e => leftSql.Contains($" AS {e.Name}", StringComparison.OrdinalIgnoreCase)
-                     || leftSql.Contains($" AS {e.Name},", StringComparison.OrdinalIgnoreCase))
-            .Select(e => e.Name)
+                     || leftSql.Contains($" AS {e.Name},", StringComparison.OrdinalIgnoreCase)
+                     || leftSql.Contains($" AS \"{e.Name}\"", StringComparison.OrdinalIgnoreCase))
+            .Select(e => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(e.Name))
             .ToArray();
 
         var joined = string.Join(", ", extras.Select(e => e.Expr));
