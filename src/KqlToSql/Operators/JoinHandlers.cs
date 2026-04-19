@@ -52,7 +52,18 @@ internal class JoinHandlers : OperatorHandlerBase
             }
             else
             {
-                throw new NotSupportedException("Unsupported join condition");
+                // Try to convert as a generic expression (e.g. $left.X == $right.Y)
+                try
+                {
+                    var convertedSql = Expr.ConvertExpression(expr, "L", "R");
+                    conditions.Add(convertedSql);
+                    // Best-effort: extract the left key from the expression for innerunique partitioning
+                    leftKeys.Add(ExpressionSqlBuilder.ExtractLeftKey(expr));
+                }
+                catch
+                {
+                    throw new NotSupportedException("Unsupported join condition");
+                }
             }
         }
 

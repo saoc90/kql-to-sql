@@ -200,22 +200,39 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
     internal string ApplyMvExpand(string leftSql, MvExpandOperator mvExpand)
     {
-        if (mvExpand.Expressions.Count != 1)
-            throw new NotSupportedException("mv-expand with multiple expressions is not supported");
+        // Collect all columns being expanded
+        var columns = new List<string>();
+        foreach (var se in mvExpand.Expressions)
+        {
+            if (se.Element is MvExpandExpression mve)
+                columns.Add(mve.Expression.ToString().Trim());
+            else
+                throw new NotSupportedException("Unexpected mv-expand expression type");
+        }
 
-        if (mvExpand.Expressions[0].Element is not MvExpandExpression mve)
-            throw new NotSupportedException("Unexpected mv-expand expression type");
-
-        var column = mve.Expression.ToString().Trim();
-
+        // Single-column case: simple unnest
         string sourceAlias = "t";
         var fromSql = ExtractFrom(leftSql);
         var aliasedFrom = $"{fromSql} AS {sourceAlias}";
 
-        var unnestAlias = "u";
-        var excludeClause = Dialect.SelectExclude(new[] { column });
-        var unnestClause = Dialect.Unnest(sourceAlias, column, unnestAlias);
-        return $"SELECT {sourceAlias}.{excludeClause}, {unnestAlias}.value AS {column} FROM {aliasedFrom} {unnestClause}";
+        if (columns.Count == 1)
+        {
+            var column = columns[0];
+            var unnestAlias = "u";
+            var excludeClause = Dialect.SelectExclude(new[] { column });
+            var unnestClause = Dialect.Unnest(sourceAlias, column, unnestAlias);
+            return $"SELECT {sourceAlias}.{excludeClause}, {unnestAlias}.value AS {column} FROM {aliasedFrom} {unnestClause}";
+        }
+
+        // Multi-column: chain unnests, each as a separate CROSS JOIN
+        var clauses = new List<string>();
+        for (int i = 0; i < columns.Count; i++)
+        {
+            clauses.Add(Dialect.Unnest(sourceAlias, columns[i], $"u{i}"));
+        }
+        var excludeAll = Dialect.SelectExclude(columns.ToArray());
+        var selectCols = string.Join(", ", columns.Select((c, i) => $"u{i}.value AS {c}"));
+        return $"SELECT {sourceAlias}.{excludeAll}, {selectCols} FROM {aliasedFrom} {string.Join(" ", clauses)}";
     }
 
     internal string ApplyMvApply(string leftSql, MvApplyOperator mvApply)

@@ -154,9 +154,9 @@ public class KqlToSqlConverter
 
             var viewKeyword = funcDecl.ViewKeyword?.ToString().Trim().ToLowerInvariant();
 
-            if (parameters.Length > 0 && viewKeyword != "view")
+            if (parameters.Length > 0)
             {
-                // Parameterized function — store body expression for inline expansion at call sites
+                // Parameterized function (with or without view keyword) — store for inline expansion
                 var bodyExpr = funcDecl.Body.GetDescendants<Expression>().FirstOrDefault();
                 if (bodyExpr != null)
                 {
@@ -169,8 +169,9 @@ public class KqlToSqlConverter
         }
         else if (expression is FunctionCallExpression fce)
         {
-            var functionName = fce.Name.ToString().Trim().ToLowerInvariant();
-            if (functionName == "view")
+            var functionName = fce.Name.ToString().Trim();
+            var functionNameLower = functionName.ToLowerInvariant();
+            if (functionNameLower == "view")
             {
                 materialized = false;
                 if (fce.ArgumentList.Expressions.Count != 1)
@@ -178,6 +179,19 @@ public class KqlToSqlConverter
                     throw new NotSupportedException("view() expects exactly one argument");
                 }
                 sql = ConvertNode(fce.ArgumentList.Expressions[0].Element);
+            }
+            else if (_userFunctions.ContainsKey(functionName))
+            {
+                // User-defined parameterized function call returning tabular result.
+                // Inline the body with parameter substitution.
+                materialized = false;
+                sql = _operators.ExpressionBuilder.ConvertExpression(fce);
+                // If the result isn't a SELECT statement, wrap it
+                if (!sql.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) &&
+                    !sql.TrimStart().StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
+                {
+                    sql = $"SELECT * FROM ({sql})";
+                }
             }
             else
             {
@@ -234,10 +248,11 @@ public class KqlToSqlConverter
             var fnameLower = fname.ToLowerInvariant();
 
             // User-defined function call: let x = myFunc(arg)
+            // Skip if it's a user function — those should be handled as CTEs (tabular result)
+            // by ProcessLetStatement's main flow, not stored as scalar substitutions.
             if (_userFunctions.ContainsKey(fname))
             {
-                _scalarLets[name] = exprBuilder.ConvertExpression(fce2);
-                return true;
+                return false;
             }
 
             // Try converting any function call as a scalar expression.
@@ -301,6 +316,8 @@ public class KqlToSqlConverter
             DataTableExpression dt => _operators.ConvertDataTable(dt),
             ExternalDataExpression ed => _operators.ConvertExternalData(ed),
             FunctionBody fb => ConvertFunctionBody(fb),
+            // Standalone operators (not piped) — wrap in a subquery
+            QueryOperator op => _operators.ApplyOperator("SELECT *", op),
             // Scalar expressions that appear as standalone nodes (e.g. in let statements)
             Expression expr when expr is BinaryExpression or LiteralExpression or DynamicExpression =>
                 $"SELECT {_operators.ExpressionBuilder.ConvertExpression(expr)} AS value",
@@ -328,30 +345,72 @@ public class KqlToSqlConverter
             return $"SELECT * FROM {functionName}";
         }
 
-        throw new NotSupportedException($"Unsupported function {functionName}");
+        // User-defined parameterized function call → inline body, wrap as query
+        if (_userFunctions.ContainsKey(functionName))
+        {
+            var inlined = _operators.ExpressionBuilder.ConvertExpression(fce);
+            if (inlined.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) ||
+                inlined.TrimStart().StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
+                return inlined;
+            return $"SELECT * FROM ({inlined})";
+        }
+
+        // Try the expression builder (handles case, iif, scalar functions, etc.)
+        try
+        {
+            var sql = _operators.ExpressionBuilder.ConvertExpression(fce);
+            return $"SELECT {sql} AS Value";
+        }
+        catch
+        {
+            throw new NotSupportedException($"Unsupported function {functionName}");
+        }
     }
 
     private string ConvertFunctionBody(FunctionBody fb)
     {
-        // FunctionBody doesn't use the Statements collection for view functions
-        // The actual query is stored as descendants. Look for PipeExpression or other query nodes
-        
-        // Try to find a PipeExpression first (most common case)
-        var pipeExpression = fb.GetDescendants<PipeExpression>().FirstOrDefault();
-        if (pipeExpression != null)
+        // FunctionBody contains let statements, expressions, and a final result expression.
+        // First check if it has nested let statements that need processing as CTEs/scalars.
+        var nestedLets = fb.GetDescendants<LetStatement>().ToList();
+        var savedCtes = new Dictionary<string, (string, bool)>(_ctes);
+        var savedScalars = new Dictionary<string, string>(_scalarLets);
+        var savedFuncs = new Dictionary<string, (string[], Expression)>(_userFunctions);
+        try
         {
-            return ConvertNode(pipeExpression);
+            foreach (var ls in nestedLets)
+            {
+                ProcessLetStatement(ls);
+            }
+
+            // Find the result expression (last non-let statement)
+            var pipeExpression = fb.GetDescendants<PipeExpression>().FirstOrDefault();
+            if (pipeExpression != null)
+                return ConvertNode(pipeExpression);
+
+            var nameReference = fb.GetDescendants<NameReference>().FirstOrDefault();
+            if (nameReference != null)
+                return ConvertNode(nameReference);
+
+            // Fall back to any expression we can find
+            var anyExpr = fb.GetDescendants<Expression>().FirstOrDefault(e => e is not NameReference);
+            if (anyExpr != null)
+            {
+                try { return _operators.ExpressionBuilder.ConvertExpression(anyExpr); }
+                catch { }
+            }
+
+            throw new NotSupportedException($"Function body contains no recognizable query pattern. Content: '{fb}'");
         }
-        
-        // If no pipe expression, look for a NameReference (simple table reference)
-        var nameReference = fb.GetDescendants<NameReference>().FirstOrDefault();
-        if (nameReference != null)
+        finally
         {
-            return ConvertNode(nameReference);
+            // Restore outer scope
+            _ctes.Clear();
+            foreach (var kv in savedCtes) _ctes[kv.Key] = kv.Value;
+            _scalarLets.Clear();
+            foreach (var kv in savedScalars) _scalarLets[kv.Key] = kv.Value;
+            _userFunctions.Clear();
+            foreach (var kv in savedFuncs) _userFunctions[kv.Key] = kv.Value;
         }
-        
-        // If no recognizable query pattern found
-        throw new NotSupportedException($"Function body contains no recognizable query pattern. Content: '{fb}'");
     }
 
     private string ConvertPipe(PipeExpression pipe)
