@@ -18,6 +18,9 @@ public class DuckDbDialect : ISqlDialect
         return name switch
         {
             "bag_pack" or "pack" => $"json_object({string.Join(", ", args)})",
+            // bag_pack_columns packs named columns: bag_pack_columns(a, b) → {"a": a, "b": b}
+            "bag_pack_columns" => args.Length == 0 ? "json_object()" :
+                $"json_object({string.Join(", ", args.Select(a => $"'{a}', {a}"))})",
             "tolower" => $"LOWER({args[0]})",
             "toupper" => $"UPPER({args[0]})",
             "strlen" => $"LENGTH({args[0]})",
