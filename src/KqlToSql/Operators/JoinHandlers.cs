@@ -47,6 +47,7 @@ internal class JoinHandlers : OperatorHandlerBase
                 // Strip brackets from ["ColName"] → "ColName" (quoted identifier for DuckDB)
                 if (name.StartsWith("[") && name.EndsWith("]"))
                     name = name.Substring(1, name.Length - 2);
+                name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
                 leftKeys.Add(name);
                 conditions.Add($"L.{name} = R.{name}");
             }
@@ -55,7 +56,7 @@ internal class JoinHandlers : OperatorHandlerBase
                 var left = Expr.ConvertExpression(be.Left, "L", "R");
                 var right = Expr.ConvertExpression(be.Right, "L", "R");
                 conditions.Add($"{left} = {right}");
-                leftKeys.Add(ExpressionSqlBuilder.ExtractLeftKey(be.Left));
+                leftKeys.Add(ExpressionSqlBuilder.QuoteIdentifierIfReserved(ExpressionSqlBuilder.ExtractLeftKey(be.Left)));
             }
             else
             {
@@ -65,7 +66,7 @@ internal class JoinHandlers : OperatorHandlerBase
                     var convertedSql = Expr.ConvertExpression(expr, "L", "R");
                     conditions.Add(convertedSql);
                     // Best-effort: extract the left key from the expression for innerunique partitioning
-                    leftKeys.Add(ExpressionSqlBuilder.ExtractLeftKey(expr));
+                    leftKeys.Add(ExpressionSqlBuilder.QuoteIdentifierIfReserved(ExpressionSqlBuilder.ExtractLeftKey(expr)));
                 }
                 catch
                 {
@@ -120,6 +121,7 @@ internal class JoinHandlers : OperatorHandlerBase
                 // Strip brackets from ["ColName"] → "ColName" (quoted identifier for DuckDB)
                 if (name.StartsWith("[") && name.EndsWith("]"))
                     name = name.Substring(1, name.Length - 2);
+                name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
                 leftKeys.Add(name);
                 conditions.Add($"L.{name} = R.{name}");
             }
@@ -128,7 +130,7 @@ internal class JoinHandlers : OperatorHandlerBase
                 var left = Expr.ConvertExpression(be.Left, "L", "R");
                 var right = Expr.ConvertExpression(be.Right, "L", "R");
                 conditions.Add($"{left} = {right}");
-                leftKeys.Add(ExpressionSqlBuilder.ExtractLeftKey(be.Left));
+                leftKeys.Add(ExpressionSqlBuilder.QuoteIdentifierIfReserved(ExpressionSqlBuilder.ExtractLeftKey(be.Left)));
             }
             else
             {
