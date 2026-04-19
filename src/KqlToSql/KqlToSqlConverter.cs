@@ -17,6 +17,17 @@ public class KqlToSqlConverter
     private readonly Dictionary<string, (string sql, bool materialized)> _ctes = new();
     /// <summary>Adds or replaces a CTE. Exposed for operators that bind pipeline output to a name (e.g. `| as t1`).</summary>
     internal void AddCte(string name, string sql, bool materialized = false) => _ctes[name] = (sql, materialized);
+    /// <summary>Peeks a CTE by name.</summary>
+    internal bool TryGetCte(string name, out (string sql, bool materialized) cte) => _ctes.TryGetValue(name, out cte);
+    /// <summary>Renames a CTE (preserving insertion order is not guaranteed — acceptable for this use).</summary>
+    internal void RenameCte(string oldName, string newName)
+    {
+        if (_ctes.TryGetValue(oldName, out var val))
+        {
+            _ctes.Remove(oldName);
+            _ctes[newName] = val;
+        }
+    }
     private readonly Dictionary<string, string> _scalarLets = new();
     private readonly Dictionary<string, (string[] paramNames, FunctionBody body)> _userFunctions = new();
 
