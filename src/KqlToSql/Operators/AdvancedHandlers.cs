@@ -454,6 +454,16 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
         var colCount = columnNames.Count;
         var values = dt.Values;
+
+        // Handle empty schema: datatable()[...] — infer columns as col0, col1, ...
+        // Detect column count from value types if possible; otherwise assume 2 (key, value pairs)
+        if (colCount == 0)
+        {
+            // Try to infer by looking at literal value types — pairs of string/int are common
+            colCount = values.Count >= 2 ? 2 : 1;
+            for (int k = 0; k < colCount; k++) columnNames.Add($"col{k}");
+        }
+
         var rows = new List<string>();
 
         for (int i = 0; i < values.Count; i += colCount)
