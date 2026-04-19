@@ -807,6 +807,13 @@ internal class ExpressionSqlBuilder
         }
 
         var size = ConvertExpression(sizeExpr, leftAlias, rightAlias);
+        // If the size is an INTERVAL-typed expression (from a timespan let or inline timespan arithmetic),
+        // bare arithmetic TIMESTAMP / INTERVAL is illegal. Reduce both to milliseconds and round-trip.
+        if (IsIntervalExpression(size))
+        {
+            var sizeMs = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({size}) AS TIMESTAMP))";
+            return $"EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST({value} AS TIMESTAMP))/{sizeMs})*{sizeMs} AS BIGINT))";
+        }
         return $"FLOOR(({value})/({size}))*({size})";
     }
 
@@ -830,8 +837,17 @@ internal class ExpressionSqlBuilder
         }
 
         var size = ConvertExpression(sizeExpr, leftAlias, rightAlias);
+        if (IsIntervalExpression(size))
+        {
+            var sizeMs = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({size}) AS TIMESTAMP))";
+            var fixedMs = $"EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP))";
+            return $"EPOCH_MS(CAST(FLOOR((EPOCH_MS(CAST({value} AS TIMESTAMP)) - {fixedMs})/{sizeMs})*{sizeMs} + {fixedMs} AS BIGINT))";
+        }
         return $"FLOOR(({value} - {fixedPoint})/({size}))*({size}) + {fixedPoint}";
     }
+
+    private static bool IsIntervalExpression(string sql)
+        => sql.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase);
 
     internal static string ExtractLeftKey(Expression expr)
     {
