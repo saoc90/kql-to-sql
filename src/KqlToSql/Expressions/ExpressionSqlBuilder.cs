@@ -562,13 +562,15 @@ internal class ExpressionSqlBuilder
         var text = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
         var start = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
         var startExpr = $"({start}) + 1";
+        // KQL substring() accepts numeric/other types and coerces to string; DuckDB's SUBSTR requires VARCHAR.
+        var textCast = $"CAST({text} AS VARCHAR)";
         if (fce.ArgumentList.Expressions.Count == 3)
         {
             var length = ConvertExpression(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
-            return $"SUBSTR({text}, {startExpr}, {length})";
+            return $"SUBSTR({textCast}, {startExpr}, {length})";
         }
 
-        return $"SUBSTR({text}, {startExpr})";
+        return $"SUBSTR({textCast}, {startExpr})";
     }
 
     private string ConvertAgo(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
