@@ -228,6 +228,14 @@ internal class ExpressionSqlBuilder
         var indexExpr = ee.Selector is BracketedExpression be
             ? ConvertExpression(be.Expression, leftAlias, rightAlias)
             : ConvertExpression(ee.Selector, leftAlias, rightAlias);
+
+        // If the base is a JSON object (e.g. from dynamic({...})), the bracket access needs a json path lookup
+        // rather than LIST indexing. Detect the ::JSON suffix produced by ConvertDynamic.
+        if (baseExpr.TrimEnd().EndsWith("::JSON", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"json_extract_string({baseExpr}, '$.' || {indexExpr})";
+        }
+
         // KQL uses 0-based indexing, DuckDB LIST uses 1-based
         return $"{baseExpr}[{indexExpr} + 1]";
     }
