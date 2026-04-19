@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Kusto.Language;
 using Kusto.Language.Syntax;
 using KqlToSql.Expressions;
 
@@ -94,8 +95,8 @@ internal class TabularHandlers : OperatorHandlerBase
         bool drilledWrapper = false;
         while (current is FunctionCallExpression fce && fce.ArgumentList.Expressions.Count == 1)
         {
-            var fname = fce.Name.ToString().Trim().ToLowerInvariant();
-            if (fname is "tostring" or "toreal" or "todouble" or "toint" or "tolong" or "tobool" or "tofloat" or "todatetime" or "todynamic")
+            if (fce.IsAny(Functions.ToString, Functions.ToReal, Functions.ToDouble, Functions.ToInt, Functions.ToLong, Functions.ToBool, Functions.ToDateTime, Functions.ToDynamic_)
+                || fce.Name.SimpleName.Equals("tofloat", StringComparison.OrdinalIgnoreCase)) // TODO: no Kusto.Language symbol for 'tofloat'
             { current = fce.ArgumentList.Expressions[0].Element; drilledWrapper = true; }
             else break;
         }
