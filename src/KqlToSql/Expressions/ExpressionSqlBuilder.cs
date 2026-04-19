@@ -27,6 +27,12 @@ internal class ExpressionSqlBuilder
     /// <summary>Sets the CTE definitions for body-inspection heuristics (e.g. detecting array-producing CTEs).</summary>
     internal void SetCtes(Dictionary<string, (string sql, bool materialized)> ctes) => _ctes = ctes;
 
+    private readonly HashSet<string> _intervalColumns = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Records a column as interval-typed (from extend/project) so later sum() calls know to use epoch math.</summary>
+    internal void MarkIntervalColumn(string name) => _intervalColumns.Add(name);
+    /// <summary>Returns true if the named column was previously marked as interval-typed.</summary>
+    internal bool IsIntervalColumn(string name) => _intervalColumns.Contains(name);
+
     private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.FunctionBody body)>? _userFunctions;
     /// <summary>Sets user-defined parameterized functions for inline expansion.</summary>
     internal void SetUserFunctions(Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.FunctionBody body)> funcs) => _userFunctions = funcs;

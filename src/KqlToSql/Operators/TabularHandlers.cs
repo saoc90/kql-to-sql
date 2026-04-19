@@ -117,7 +117,10 @@ internal class TabularHandlers : OperatorHandlerBase
             {
                 var name = sne.Name.ToString().Trim();
                 var quotedName = Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
-                extras.Add(($"{Expr.ConvertExpression(sne.Expression)} AS {quotedName}", name));
+                var convertedSql = Expr.ConvertExpression(sne.Expression);
+                if (LooksLikeIntervalResult(sne.Expression, convertedSql))
+                    Expr.MarkIntervalColumn(name);
+                extras.Add(($"{convertedSql} AS {quotedName}", name));
             }
             else if (se.Element is CompoundNamedExpression cne)
             {
@@ -195,6 +198,23 @@ internal class TabularHandlers : OperatorHandlerBase
         if (HasTrailingOrderBy(leftSql))
             return $"SELECT * FROM ({leftSql}) ORDER BY {string.Join(", ", orderings)}";
         return $"{leftSql} ORDER BY {string.Join(", ", orderings)}";
+    }
+
+    private static bool LooksLikeIntervalResult(Expression sourceExpr, string convertedSql)
+    {
+        // Interval-producing emission signatures we recognize at the outer level:
+        //   '(N * INTERVAL '1 ms')' — from our timespan literal emission
+        //   'X - Y' where X,Y are timestamps → INTERVAL (detect via AST)
+        //   'datetime_diff(...) * (N * INTERVAL ...)' → INTERVAL
+        if (System.Text.RegularExpressions.Regex.IsMatch(convertedSql, @"^\s*\(\s*\d+\s*\*\s*INTERVAL\s+'")) return true;
+        if (convertedSql.TrimEnd().EndsWith("millisecond')", StringComparison.OrdinalIgnoreCase)) return true;
+        if (sourceExpr is BinaryExpression bin && bin.Kind == SyntaxKind.SubtractExpression)
+        {
+            bool leftLooksLikeTs = bin.Left is NameReference || (bin.Left is LiteralExpression ll && ll.Kind == SyntaxKind.DateTimeLiteralExpression);
+            bool rightLooksLikeTs = bin.Right is NameReference || (bin.Right is LiteralExpression lr && lr.Kind == SyntaxKind.DateTimeLiteralExpression);
+            if (leftLooksLikeTs && rightLooksLikeTs) return true;
+        }
+        return false;
     }
 
     private static bool HasTrailingOrderBy(string sql)
