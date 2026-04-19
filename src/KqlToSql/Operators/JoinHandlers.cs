@@ -24,6 +24,10 @@ internal class JoinHandlers : OperatorHandlerBase
             "leftouter" => "LEFT OUTER JOIN",
             "rightouter" => "RIGHT OUTER JOIN",
             "fullouter" => "FULL OUTER JOIN",
+            "leftsemi" => "LEFT SEMI JOIN",
+            "rightsemi" => "RIGHT SEMI JOIN",
+            "leftanti" or "anti" => "LEFT ANTI JOIN",
+            "rightanti" => "RIGHT ANTI JOIN",
             _ => throw new NotSupportedException($"Unsupported join kind {kind}")
         };
 
@@ -40,6 +44,9 @@ internal class JoinHandlers : OperatorHandlerBase
             if (expr is NameReference nr)
             {
                 var name = nr.Name.ToString().Trim();
+                // Strip brackets from ["ColName"] → "ColName" (quoted identifier for DuckDB)
+                if (name.StartsWith("[") && name.EndsWith("]"))
+                    name = name.Substring(1, name.Length - 2);
                 leftKeys.Add(name);
                 conditions.Add($"L.{name} = R.{name}");
             }
@@ -110,6 +117,9 @@ internal class JoinHandlers : OperatorHandlerBase
             if (expr is NameReference nr)
             {
                 var name = nr.Name.ToString().Trim();
+                // Strip brackets from ["ColName"] → "ColName" (quoted identifier for DuckDB)
+                if (name.StartsWith("[") && name.EndsWith("]"))
+                    name = name.Substring(1, name.Length - 2);
                 leftKeys.Add(name);
                 conditions.Add($"L.{name} = R.{name}");
             }

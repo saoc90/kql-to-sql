@@ -23,9 +23,9 @@ internal class ExpressionSqlBuilder
     /// <summary>Sets the scalar let bindings for inline substitution.</summary>
     internal void SetScalarLets(Dictionary<string, string> scalarLets) => _scalarLets = scalarLets;
 
-    private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.Expression body)>? _userFunctions;
+    private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.FunctionBody body)>? _userFunctions;
     /// <summary>Sets user-defined parameterized functions for inline expansion.</summary>
-    internal void SetUserFunctions(Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.Expression body)> funcs) => _userFunctions = funcs;
+    internal void SetUserFunctions(Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.FunctionBody body)> funcs) => _userFunctions = funcs;
 
     private static readonly Dictionary<string, string> CastFunctionMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -154,6 +154,7 @@ internal class ExpressionSqlBuilder
                 ConvertBetween(be, leftAlias, rightAlias, true),
             InExpression inExpr => ConvertInExpression(inExpr, leftAlias, rightAlias),
             NameReference nr => ResolveNameReference(nr, leftAlias, rightAlias),
+            NameDeclaration nd => nd.Name.ToString().Trim(),
             PathExpression pe =>
                 $"{ConvertExpression(pe.Expression, leftAlias, rightAlias)}.{pe.Selector}",
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression =>
@@ -175,6 +176,7 @@ internal class ExpressionSqlBuilder
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
             DynamicExpression de => ConvertDynamic(de, leftAlias, rightAlias),
             SimpleNamedExpression sne2 => $"{ConvertExpression(sne2.Expression, leftAlias, rightAlias)} AS {sne2.Name.ToString().Trim()}",
+            CompoundNamedExpression cne2 => ConvertExpression(cne2.Expression, leftAlias, rightAlias),
             PipeExpression pe2 when _nodeConverter != null => $"({_nodeConverter(pe2)})",
             ElementExpression ee => ConvertElementAccess(ee, leftAlias, rightAlias),
             BracketedExpression be => ConvertExpression(be.Expression, leftAlias, rightAlias),
@@ -215,7 +217,9 @@ internal class ExpressionSqlBuilder
 
     internal bool IsKnownScalarFunction(string name) =>
         KnownScalarFunctions.Contains(name) ||
-        (_userFunctions != null && _userFunctions.ContainsKey(name));
+        (_userFunctions != null &&
+         (_userFunctions.ContainsKey(name) ||
+          _userFunctions.Keys.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase))));
 
     private string ConvertElementAccess(ElementExpression ee, string? leftAlias, string? rightAlias)
     {
@@ -338,9 +342,14 @@ internal class ExpressionSqlBuilder
         }
 
         // User-defined parameterized function: inline the body with arg substitution
-        if (_userFunctions != null && _userFunctions.TryGetValue(name, out var userFunc))
+        var actualName = name;
+        if (_userFunctions != null && !_userFunctions.ContainsKey(name))
         {
-            // Temporarily bind parameter names to the converted argument values
+            var match = _userFunctions.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+            if (match != null) actualName = match;
+        }
+        if (_userFunctions != null && _userFunctions.TryGetValue(actualName, out var userFunc))
+        {
             var savedScalars = new Dictionary<string, string>();
             for (int i = 0; i < Math.Min(userFunc.paramNames.Length, args.Length); i++)
             {
@@ -351,9 +360,46 @@ internal class ExpressionSqlBuilder
                 _scalarLets[pname] = args[i];
             }
 
-            var result = ConvertExpression(userFunc.body, leftAlias, rightAlias);
+            // Process nested let statements in the function body as scalar bindings
+            var nestedLets = userFunc.body.GetDescendants<LetStatement>().ToList();
+            var addedLets = new List<string>();
+            foreach (var ls in nestedLets)
+            {
+                var lname = ls.Name.ToString().Trim();
+                try
+                {
+                    // Try to convert as a scalar binding
+                    if (ls.Expression is LiteralExpression || ls.Expression is FunctionCallExpression ||
+                        ls.Expression is BinaryExpression || ls.Expression is ElementExpression ||
+                        ls.Expression is DynamicExpression)
+                    {
+                        _scalarLets[lname] = ConvertExpression(ls.Expression, leftAlias, rightAlias);
+                        addedLets.Add(lname);
+                    }
+                }
+                catch { }
+            }
 
-            // Restore previous scalar values
+            // Find the result expression: the last non-let expression in the body
+            string result;
+            try
+            {
+                var tail = userFunc.body.GetDescendants<Expression>()
+                    .LastOrDefault(e => e.Parent is FunctionBody
+                                       || (e.Parent is not LetStatement && e.Parent?.Parent is FunctionBody));
+                if (tail != null)
+                    result = ConvertExpression(tail, leftAlias, rightAlias);
+                else if (_nodeConverter != null)
+                    result = _nodeConverter(userFunc.body);
+                else
+                    result = name;
+            }
+            catch
+            {
+                result = name;
+            }
+
+            // Restore previous scalar values for params
             foreach (var pname in userFunc.paramNames)
             {
                 if (savedScalars.TryGetValue(pname, out var prev))
@@ -361,6 +407,8 @@ internal class ExpressionSqlBuilder
                 else
                     _scalarLets?.Remove(pname);
             }
+            // Remove scoped nested let bindings
+            foreach (var lname in addedLets) _scalarLets?.Remove(lname);
 
             return result;
         }
@@ -713,7 +761,9 @@ internal class ExpressionSqlBuilder
             NameReference nr => nr.Name.ToString().Trim(),
             PathExpression pe when pe.Expression is NameReference nr && nr.Name.ToString().Trim() == "$left" => pe.Selector.ToString().Trim(),
             BinaryExpression be when be.Kind == SyntaxKind.EqualExpression => ExtractLeftKey(be.Left),
-            _ => throw new NotSupportedException("Unsupported join key expression")
+            BinaryExpression be when be.Kind == SyntaxKind.AndExpression => ExtractLeftKey(be.Left),
+            ParenthesizedExpression pe2 => ExtractLeftKey(pe2.Expression),
+            _ => "_joinkey"
         };
     }
 
