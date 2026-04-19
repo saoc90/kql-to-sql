@@ -219,10 +219,12 @@ public class KqlToSqlConverter
 
             var viewKeyword = funcDecl.ViewKeyword?.ToString().Trim().ToLowerInvariant();
 
+            // Always register the function so downstream call sites (X() or X(args)) can
+            // inline its body, regardless of whether it has parameters.
+            _userFunctions[name] = (parameters, funcDecl.Body);
+
             if (parameters.Length > 0)
             {
-                // Store the whole FunctionBody — it may have nested lets that need scoping at call time
-                _userFunctions[name] = (parameters, funcDecl.Body);
                 return;
             }
 
