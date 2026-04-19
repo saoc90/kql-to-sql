@@ -272,11 +272,7 @@ internal class ExpressionSqlBuilder
                 .Select(p =>
                 {
                     var key = p.Name.ValueText.Replace("\\", "\\\\").Replace("\"", "\\\"");
-                    string val;
-                    if (p.Value is LiteralExpression le && le.LiteralValue is string sv)
-                        val = "\"" + sv.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
-                    else
-                        val = ConvertExpression(p.Value, leftAlias, rightAlias);
+                    var val = ConvertDynamicValue(p.Value);
                     return $"\"{key}\":{val}";
                 });
             return $"'{{{string.Join(",", pairs)}}}'::JSON";
@@ -288,6 +284,29 @@ internal class ExpressionSqlBuilder
             return "NULL";
 
         return $"'{text}'::JSON";
+    }
+
+    // Serialize a dynamic({}) dict value as JSON-compatible text (no SQL expressions).
+    private static string ConvertDynamicValue(Expression expr)
+    {
+        if (expr is LiteralExpression lit)
+        {
+            if (lit.Kind == SyntaxKind.NullLiteralExpression) return "null";
+            if (lit.Kind == SyntaxKind.BooleanLiteralExpression)
+                return lit.LiteralValue is true ? "true" : "false";
+            if (lit.Kind is SyntaxKind.LongLiteralExpression or SyntaxKind.IntLiteralExpression
+                    or SyntaxKind.RealLiteralExpression or SyntaxKind.DecimalLiteralExpression)
+                return System.Convert.ToString(lit.LiteralValue, CultureInfo.InvariantCulture) ?? "null";
+            if (lit.Kind == SyntaxKind.StringLiteralExpression && lit.LiteralValue is string sv)
+            {
+                var escaped = sv.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                return $"\"{escaped}\"";
+            }
+            // Timespan, DateTime, or any other literal: wrap raw text as JSON string
+            var raw = lit.ToString().Trim().Trim('"', '\'');
+            return $"\"{raw.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
+        }
+        return "null";
     }
 
     private static readonly HashSet<string> DuckDbReservedWords = new(StringComparer.OrdinalIgnoreCase)

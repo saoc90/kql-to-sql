@@ -275,4 +275,14 @@ public class DuckDbDialectTests
         Assert.DoesNotContain("'1'", sql);
         Assert.Contains("\"foo\"", sql);
     }
+
+    [Fact]
+    public void DuckDb_Dynamic_TimespanValue_SerializesAsJsonString_NotSqlInterval()
+    {
+        // dynamic({'a': 1h}) must not emit INTERVAL inside the JSON literal
+        var sql = _converter.Convert("print x = dynamic({'a': 1h})");
+        Assert.DoesNotContain("INTERVAL", sql);
+        Assert.Contains("\"a\"", sql);
+        Assert.Contains("\"1h\"", sql);
+    }
 }
