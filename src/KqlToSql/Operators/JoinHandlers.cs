@@ -328,7 +328,21 @@ internal class JoinHandlers : OperatorHandlerBase
                     try { return EnumerateColumns(cteExpr, visiting); }
                     finally { visiting.Remove(name); }
                 }
+                if (Converter.TryGetWellKnownColumns(name, out var cols))
+                    return cols.ToList();
                 return null; // base table — unknown schema
+            }
+            case FunctionCallExpression fce:
+            {
+                var fname = fce.Name.ToString().Trim();
+                if (visiting.Contains(fname)) return null;  // recursion guard
+                if (Converter.TryGetUserFunctionBody(fname, out var body) && body.Expression != null)
+                {
+                    visiting.Add(fname);
+                    try { return EnumerateColumns(body.Expression, visiting); }
+                    finally { visiting.Remove(fname); }
+                }
+                return null;
             }
             default:
                 return null;
@@ -403,7 +417,20 @@ internal class JoinHandlers : OperatorHandlerBase
                 }
                 return cols;
             }
-            case DistinctOperator:
+            case DistinctOperator dist:
+            {
+                // `distinct *` (no args) keeps the input column set; `distinct Col1, Col2, …`
+                // narrows to those expressions' names (bare NameReference or Name = expr).
+                if (dist.Expressions.Count == 0) return input;
+                var names = new List<string>();
+                foreach (var se in dist.Expressions)
+                {
+                    if (se.Element is NameReference dnr) names.Add(dnr.Name.ToString().Trim());
+                    else if (se.Element is SimpleNamedExpression dsne) names.Add(dsne.Name.ToString().Trim());
+                    else return null;
+                }
+                return names;
+            }
             case FilterOperator:
             case SortOperator:
             case TakeOperator:
@@ -411,6 +438,23 @@ internal class JoinHandlers : OperatorHandlerBase
             case SerializeOperator:
             case AsOperator:
                 return input;
+            case MvExpandOperator mve:
+            {
+                // mv-expand keeps the input column set when the target is an existing column.
+                // When the target is `name = expr` and name is new, it's added to the set.
+                if (input == null) return null;
+                var existing = new HashSet<string>(input, StringComparer.OrdinalIgnoreCase);
+                var result = new List<string>(input);
+                foreach (var se in mve.Expressions)
+                {
+                    if (se.Element is MvExpandExpression mvx && mvx.Expression is SimpleNamedExpression sne)
+                    {
+                        var n = sne.Name.ToString().Trim();
+                        if (!existing.Contains(n)) { result.Add(n); existing.Add(n); }
+                    }
+                }
+                return result;
+            }
             default:
                 return null;
         }

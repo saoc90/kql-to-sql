@@ -180,6 +180,42 @@ public class JoinOperatorTests
         Assert.DoesNotContain("AS RightOnly1", sql);
     }
 
+    [Fact]
+    public void Converts_Join_BareTable_WithRegisteredSchema_Suffixes_Duplicates()
+    {
+        // When a join side is a bare table reference whose schema was registered,
+        // structural column enumeration resolves it and duplicates get the `1` suffix.
+        var converter = new KqlToSqlConverter();
+        converter.RegisterTableColumns("MyTable", new[] { "Key", "Value" });
+        var kql = "let A = MyTable | project Key, Value; A | join MyTable on Key";
+        var sql = converter.Convert(kql);
+        Assert.Contains("R.Value AS Value1", sql);
+    }
+
+    [Fact]
+    public void Converts_Join_WellKnown_Telemetry_Suffixes_Duplicates()
+    {
+        // Telemetry is pre-registered with the Bühler columns; joining two Telemetry-derived
+        // CTEs should suffix overlapping columns (Timestamp) as Timestamp1.
+        var converter = new KqlToSqlConverter();
+        var kql = "let Left = Telemetry | where Timestamp > ago(1h); Left | join Telemetry on DeviceId";
+        var sql = converter.Convert(kql);
+        Assert.Contains("R.Timestamp AS Timestamp1", sql);
+    }
+
+    [Fact]
+    public void Converts_Join_UserFunction_Body_Enumerates_Columns()
+    {
+        // When the join RHS is a call to a user-defined function, enumerate the body
+        // so duplicate columns get the `1` suffix.
+        var converter = new KqlToSqlConverter();
+        var kql = "let GetItems = (p:string) { X | project Key, Value };"
+                + " let A = X | project Key, Value;"
+                + " A | join GetItems(\"foo\") on Key";
+        var sql = converter.Convert(kql);
+        Assert.Contains("R.Value AS Value1", sql);
+    }
+
     private static void CreateJoinTables(DuckDBConnection conn)
     {
         using var cmd = conn.CreateCommand();

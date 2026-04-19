@@ -41,6 +41,44 @@ public class KqlToSqlConverter
     private readonly Dictionary<string, string> _scalarLets = new();
     private readonly Dictionary<string, (string[] paramNames, FunctionBody body)> _userFunctions = new();
 
+    /// <summary>Well-known table → column name registry used by structural column enumeration
+    /// (e.g. join-duplicate suffixing) when a join side references a base table whose schema
+    /// isn't known from CTEs. Case-insensitive lookup.</summary>
+    private readonly Dictionary<string, string[]> _wellKnownTableColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Bühler Telemetry — matches the CREATE TABLE in the benchmark harness and production schema.
+        ["Telemetry"] = new[]
+        {
+            "Timestamp", "LocalDeviceTimestamp", "AgentTimestamp", "DeviceTimestamp", "IngestionTimestamp",
+            "Value", "Name", "Text", "Uid", "DeviceId", "PlantId", "MessageType", "MessageId",
+            "Severity", "Source", "Unit", "Active", "State", "Key",
+            "MessageMetadata", "DataMetadata", "Origin", "CustomDimensions"
+        }
+    };
+
+    /// <summary>Registers or replaces a well-known table schema so structural column enumeration can
+    /// resolve bare table references on join sides.</summary>
+    public void RegisterTableColumns(string table, string[] columns) => _wellKnownTableColumns[table] = columns;
+
+    /// <summary>Looks up a well-known table's columns. Returns false if the table isn't registered.</summary>
+    internal bool TryGetWellKnownColumns(string name, out string[] cols)
+    {
+        if (_wellKnownTableColumns.TryGetValue(name, out var v)) { cols = v; return true; }
+        cols = Array.Empty<string>();
+        return false;
+    }
+
+    /// <summary>Peeks a user-defined function's body by name (case-sensitive then case-insensitive fallback),
+    /// used by structural column enumeration on join sides whose RHS is a user function call.</summary>
+    internal bool TryGetUserFunctionBody(string name, out FunctionBody body)
+    {
+        if (_userFunctions.TryGetValue(name, out var fn)) { body = fn.body; return true; }
+        var match = _userFunctions.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+        if (match != null) { body = _userFunctions[match].body; return true; }
+        body = null!;
+        return false;
+    }
+
     /// <summary>The SQL dialect used for engine-specific translations.</summary>
     public ISqlDialect Dialect { get; }
 
