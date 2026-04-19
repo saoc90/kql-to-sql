@@ -48,7 +48,9 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
 
         var selectList = string.Join(", ", byColumns.Select(b => b.Select).Concat(aggregates));
 
-        var sql = $"SELECT {selectList} FROM {ExtractFrom(leftSql)}";
+        // Use ExtractFromAsRelation so a trailing ORDER BY / LIMIT on leftSql doesn't emit
+        // 'FROM T ORDER BY X GROUP BY ALL' (which DuckDB rejects).
+        var sql = $"SELECT {selectList} FROM {ExtractFromAsRelation(leftSql)}";
         if (byColumns.Length > 0)
         {
             sql += Dialect.SupportsGroupByAll
