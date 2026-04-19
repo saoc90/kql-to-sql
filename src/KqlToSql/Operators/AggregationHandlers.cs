@@ -85,7 +85,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         Expression expr;
         if (node is SimpleNamedExpression sne)
         {
-            alias = sne.Name.ToString().Trim();
+            alias = Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.ToString().Trim());
             expr = sne.Expression;
         }
         else if (node is Expression e)

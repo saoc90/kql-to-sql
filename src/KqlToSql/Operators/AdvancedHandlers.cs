@@ -448,7 +448,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         {
             if (col.Element is NameAndTypeDeclaration nat)
             {
-                columnNames.Add(nat.Name.ToString().Trim());
+                columnNames.Add(Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nat.Name.ToString().Trim()));
             }
         }
 
