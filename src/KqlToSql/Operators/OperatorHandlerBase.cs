@@ -68,9 +68,23 @@ internal abstract class OperatorHandlerBase
         var idx = sql.LastIndexOf(" WHERE ", StringComparison.OrdinalIgnoreCase);
         if (idx < 0) return false;
         var after = sql[idx..];
-        return !after.Contains(" ORDER BY ", StringComparison.OrdinalIgnoreCase) &&
-               !after.Contains(" GROUP BY ", StringComparison.OrdinalIgnoreCase) &&
-               !after.Contains(" HAVING ", StringComparison.OrdinalIgnoreCase) &&
-               !after.Contains(" LIMIT ", StringComparison.OrdinalIgnoreCase);
+        if (after.Contains(" ORDER BY ", StringComparison.OrdinalIgnoreCase) ||
+            after.Contains(" GROUP BY ", StringComparison.OrdinalIgnoreCase) ||
+            after.Contains(" HAVING ", StringComparison.OrdinalIgnoreCase) ||
+            after.Contains(" LIMIT ", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Ensure the WHERE we found is at the top level of the final SELECT — not nested
+        // inside a subquery / CTE. If parens are unbalanced after the WHERE (more closers
+        // than openers), the WHERE belongs to an inner query and appending AND ... would
+        // attach to the wrong scope.
+        int depth = 0;
+        foreach (var c in after)
+        {
+            if (c == '\'' || c == '"') continue; // ignore content inside simple string quoting (approximation)
+            if (c == '(') depth++;
+            else if (c == ')') { depth--; if (depth < 0) return false; }
+        }
+        return true;
     }
 }
