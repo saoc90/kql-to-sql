@@ -136,18 +136,24 @@ internal class TabularHandlers : OperatorHandlerBase
             }
             else
             {
-                // Bare column reference (identity extend) — just pass through, no-op
-                // For path expressions (DataMetadata.Section), synthesize an alias so the column
-                // is addressable by its KQL auto-name.
+                // Bare expression in extend — KQL auto-names:
+                //   DataMetadata.Section  → DataMetadata_Section (path join)
+                //   NameReference         → unchanged (already a column)
+                //   Anything else (CASE/iif/arithmetic) → Column1, Column2, ... (positional)
                 var synthesized = SynthesizePathAlias(se.Element);
                 var colSql = Expr.ConvertExpression(se.Element);
                 if (synthesized != null)
                 {
                     extras.Add(($"{colSql} AS {synthesized}", synthesized));
                 }
-                else
+                else if (se.Element is NameReference)
                 {
                     extras.Add((colSql, colSql));
+                }
+                else
+                {
+                    var autoName = $"Column{extras.Count + 1}";
+                    extras.Add(($"{colSql} AS {autoName}", autoName));
                 }
             }
         }
