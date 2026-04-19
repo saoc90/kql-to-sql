@@ -23,7 +23,7 @@ public class DuckDbDialect : ISqlDialect
                 $"json_object({string.Join(", ", args.Select(a => $"'{a}', {a}"))})",
             "tolower" => $"LOWER({args[0]})",
             "toupper" => $"UPPER({args[0]})",
-            "strlen" => $"LENGTH({args[0]})",
+            "strlen" => $"LENGTH(CAST({args[0]} AS VARCHAR))",
             "now" => "NOW()",
             "pack_array" => $"LIST_VALUE({string.Join(", ", args)})",
             "isempty" => $"({args[0]} IS NULL OR CAST({args[0]} AS VARCHAR) = '')",
