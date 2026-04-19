@@ -224,7 +224,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
         // Single-column case: simple unnest
         string sourceAlias = "t";
-        var fromSql = ExtractFrom(leftSql);
+        var fromSql = ExtractFromAsRelation(leftSql);
         var aliasedFrom = $"{fromSql} AS {sourceAlias}";
 
         if (columns.Count == 1)

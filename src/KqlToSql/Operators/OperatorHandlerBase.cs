@@ -32,6 +32,43 @@ internal abstract class OperatorHandlerBase
         return $"({sql})";
     }
 
+    /// <summary>Always returns a form safe to follow with 'AS alias CROSS JOIN …' or similar.
+    /// If the FROM-source contains a trailing WHERE / ORDER / GROUP / LIMIT / QUALIFY,
+    /// wraps in parens; otherwise returns the bare source.</summary>
+    protected static string ExtractFromAsRelation(string sql)
+    {
+        if (IsSimpleSelectStar(sql))
+        {
+            var rest = sql.Substring(SelectStarPrefix.Length);
+            if (!HasTopLevelTail(rest, " WHERE ") &&
+                !HasTopLevelTail(rest, " ORDER BY ") &&
+                !HasTopLevelTail(rest, " GROUP BY ") &&
+                !HasTopLevelTail(rest, " HAVING ") &&
+                !HasTopLevelTail(rest, " LIMIT ") &&
+                !HasTopLevelTail(rest, " QUALIFY "))
+                return rest;
+        }
+        return $"({sql})";
+    }
+
+    private static bool HasTopLevelTail(string sql, string clause)
+    {
+        int depth = 0;
+        bool inStr = false;
+        char quote = ' ';
+        for (int i = 0; i <= sql.Length - clause.Length; i++)
+        {
+            var c = sql[i];
+            if (inStr) { if (c == quote) inStr = false; continue; }
+            if (c == '\'' || c == '"') { inStr = true; quote = c; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (depth == 0 && string.Compare(sql, i, clause, 0, clause.Length, StringComparison.OrdinalIgnoreCase) == 0)
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>Unwraps simple table references for JOIN clauses. Complex queries get parenthesized.</summary>
     protected static string UnwrapFrom(string sql)
     {
