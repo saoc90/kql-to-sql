@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kusto.Language;
 using Kusto.Language.Syntax;
 using KqlToSql.Expressions;
 
@@ -545,14 +546,15 @@ internal class AdvancedHandlers : OperatorHandlerBase
         SyntaxNode? current = node;
         while (current is FunctionCallExpression fce && fce.ArgumentList.Expressions.Count == 1)
         {
-            var fname = fce.Name.ToString().Trim().ToLowerInvariant();
-            if (fname is "tostring" or "toreal" or "todouble" or "toint" or "tolong"
-                or "tobool" or "tofloat" or "todatetime" or "todynamic" or "parse_json" or "parsejson")
+            if (fce.IsAny(Functions.ToString, Functions.ToReal, Functions.ToDouble, Functions.ToInt, Functions.ToLong,
+                    Functions.ToBool, Functions.ToDateTime, Functions.ToDynamic_, Functions.ParseJson)
+                || fce.Name.SimpleName.Equals("tofloat", StringComparison.OrdinalIgnoreCase) // TODO: no Kusto.Language symbol for 'tofloat'
+                || fce.Name.SimpleName.Equals("parsejson", StringComparison.OrdinalIgnoreCase)) // deprecated alias
                 current = fce.ArgumentList.Expressions[0].Element;
             else break;
         }
         if (current is NameReference nr)
-            return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.ToString().Trim());
+            return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.SimpleName);
         return null;
     }
 
