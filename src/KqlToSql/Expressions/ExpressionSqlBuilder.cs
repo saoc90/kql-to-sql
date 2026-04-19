@@ -513,6 +513,9 @@ internal class ExpressionSqlBuilder
     private static bool IsBareIdentifier(string expr) =>
         System.Text.RegularExpressions.Regex.IsMatch(expr, @"^[A-Za-z_][A-Za-z0-9_]*$");
 
+    private static string CoerceBranch(string expr, string t) =>
+        IsBareIdentifier(expr) ? $"TRY_CAST({expr} AS {t})" : expr;
+
     private static (string True, string False) AlignStringBranches(string trueExpr, string falseExpr)
     {
         bool trueIsString = IsStringLiteral(trueExpr);
@@ -522,6 +525,22 @@ internal class ExpressionSqlBuilder
         if (falseIsString && IsBareIdentifier(trueExpr))
             return ($"TRY_CAST({trueExpr} AS VARCHAR)", falseExpr);
         return (trueExpr, falseExpr);
+    }
+
+    // Detect pattern: isnotempty(A) / isempty(A) paired with THEN=A → A is confirmed VARCHAR.
+    // Returns identifiers known to be VARCHAR from such pairs.
+    private static HashSet<string> StringContextFromConditions(IReadOnlyList<SeparatedElement<Expression>> args)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < args.Count - 1; i += 2)
+            if (args[i].Element is FunctionCallExpression c &&
+                c.Name.ToString().Trim().ToLowerInvariant() is "isnotempty" or "isempty" &&
+                c.ArgumentList.Expressions.Count == 1 &&
+                c.ArgumentList.Expressions[0].Element is NameReference ca &&
+                args[i + 1].Element is NameReference th &&
+                ca.Name.ToString().Trim() == th.Name.ToString().Trim())
+                ids.Add(th.Name.ToString().Trim());
+        return ids;
     }
 
     private string ConvertCase(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
@@ -540,13 +559,23 @@ internal class ExpressionSqlBuilder
         }
         var defaultExpr = ConvertExpression(args[^1].Element, leftAlias, rightAlias);
 
-        // If any THEN/ELSE branch is a string literal and another is a bare identifier, cast identifiers to VARCHAR.
+        // If any THEN/ELSE branch is a string literal, cast all bare-identifier branches to VARCHAR.
         var allBranches = thenExprs.Append(defaultExpr).ToList();
         bool hasStringLiteral = allBranches.Any(IsStringLiteral);
         if (hasStringLiteral)
         {
-            thenExprs = thenExprs.Select(e => IsBareIdentifier(e) ? $"TRY_CAST({e} AS VARCHAR)" : e).ToList();
-            if (IsBareIdentifier(defaultExpr)) defaultExpr = $"TRY_CAST({defaultExpr} AS VARCHAR)";
+            thenExprs = thenExprs.Select(e => CoerceBranch(e, "VARCHAR")).ToList();
+            defaultExpr = CoerceBranch(defaultExpr, "VARCHAR");
+        }
+        else
+        {
+            // Pattern: case(isnotempty(A), A, B) — A is VARCHAR; wrap only branches that are bare ids != A.
+            var strIds = StringContextFromConditions(args);
+            if (strIds.Count > 0)
+            {
+                thenExprs = thenExprs.Select(e => !strIds.Contains(e) ? CoerceBranch(e, "VARCHAR") : e).ToList();
+                if (!strIds.Contains(defaultExpr)) defaultExpr = CoerceBranch(defaultExpr, "VARCHAR");
+            }
         }
 
         for (var i = 0; i < args.Count - 1; i += 2)

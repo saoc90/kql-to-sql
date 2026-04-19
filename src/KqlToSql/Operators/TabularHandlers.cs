@@ -258,11 +258,22 @@ internal class TabularHandlers : OperatorHandlerBase
         //   'datetime_diff(...) * (N * INTERVAL ...)' → INTERVAL
         if (System.Text.RegularExpressions.Regex.IsMatch(convertedSql, @"^\s*\(\s*\d+\s*\*\s*INTERVAL\s+'")) return true;
         if (convertedSql.TrimEnd().EndsWith("millisecond')", StringComparison.OrdinalIgnoreCase)) return true;
-        if (sourceExpr is BinaryExpression bin && bin.Kind == SyntaxKind.SubtractExpression)
+        if (sourceExpr is BinaryExpression bin)
         {
-            bool leftLooksLikeTs = bin.Left is NameReference || (bin.Left is LiteralExpression ll && ll.Kind == SyntaxKind.DateTimeLiteralExpression);
-            bool rightLooksLikeTs = bin.Right is NameReference || (bin.Right is LiteralExpression lr && lr.Kind == SyntaxKind.DateTimeLiteralExpression);
-            if (leftLooksLikeTs && rightLooksLikeTs) return true;
+            if (bin.Kind == SyntaxKind.SubtractExpression)
+            {
+                bool leftLooksLikeTs = bin.Left is NameReference || (bin.Left is LiteralExpression ll && ll.Kind == SyntaxKind.DateTimeLiteralExpression);
+                bool rightLooksLikeTs = bin.Right is NameReference || (bin.Right is LiteralExpression lr && lr.Kind == SyntaxKind.DateTimeLiteralExpression);
+                if (leftLooksLikeTs && rightLooksLikeTs) return true;
+            }
+            // datetime_diff(...) * <timespan> — outermost multiply with a raw timespan literal on either side
+            if (bin.Kind == SyntaxKind.MultiplyExpression)
+            {
+                bool leftIsTimespan = bin.Left is LiteralExpression lt && lt.Kind == SyntaxKind.TimespanLiteralExpression;
+                bool rightIsTimespan = bin.Right is LiteralExpression rt && rt.Kind == SyntaxKind.TimespanLiteralExpression;
+                System.Console.Error.WriteLine($"DEBUG MultiplyExpr: left={bin.Left.GetType().Name}({bin.Left.Kind}) rightIsTimespan={rightIsTimespan} leftIsTimespan={leftIsTimespan} sql={convertedSql.Substring(0, Math.Min(80, convertedSql.Length))}");
+                if (leftIsTimespan || rightIsTimespan) return true;
+            }
         }
         return false;
     }
