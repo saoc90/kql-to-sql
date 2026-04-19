@@ -79,7 +79,8 @@ internal class TabularHandlers : OperatorHandlerBase
             if (se.Element is SimpleNamedExpression sne)
             {
                 var name = sne.Name.ToString().Trim();
-                extras.Add(($"{Expr.ConvertExpression(sne.Expression)} AS {name}", name));
+                var quotedName = Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
+                extras.Add(($"{Expr.ConvertExpression(sne.Expression)} AS {quotedName}", name));
             }
             else if (se.Element is CompoundNamedExpression cne)
             {

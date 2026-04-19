@@ -75,8 +75,13 @@ public class KqlToSqlConverter
     private string ConvertQueryBlock(QueryBlock queryBlock)
     {
         var statements = queryBlock.GetDescendants<Statement>().ToList();
-        
-        // Process let statements first to build CTEs and scalar bindings
+
+        // Wire the (initially empty) dictionaries to the expression builder FIRST,
+        // so substitutions work while processing each subsequent let statement.
+        _operators.ExpressionBuilder.SetScalarLets(_scalarLets);
+        _operators.ExpressionBuilder.SetUserFunctions(_userFunctions);
+
+        // Now process let statements in order — each can reference earlier scalars.
         foreach (var statement in statements)
         {
             if (statement is LetStatement letStatement)
@@ -84,10 +89,6 @@ public class KqlToSqlConverter
                 ProcessLetStatement(letStatement);
             }
         }
-
-        // Make scalar lets and user functions available to the expression builder
-        _operators.ExpressionBuilder.SetScalarLets(_scalarLets);
-        _operators.ExpressionBuilder.SetUserFunctions(_userFunctions);
         
         // Find the main query (the last statement that's not a let statement)
         var mainStatement = statements.LastOrDefault(s => s is not LetStatement);

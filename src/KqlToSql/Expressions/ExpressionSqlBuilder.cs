@@ -260,6 +260,26 @@ internal class ExpressionSqlBuilder
         return $"'{text}'::JSON";
     }
 
+    private static readonly HashSet<string> DuckDbReservedWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "end", "order", "group", "having", "where", "select", "from", "join", "union",
+        "case", "when", "then", "else", "and", "or", "not", "null", "true", "false",
+        "as", "on", "in", "between", "like", "is", "by", "asc", "desc", "distinct",
+        "primary", "foreign", "key", "references", "all", "any", "some", "exists",
+        "limit", "offset", "with", "into", "values", "inner", "outer", "left", "right",
+        "full", "cross", "natural", "using", "window", "over", "partition"
+    };
+
+    internal static string QuoteIdentifierIfReserved(string name)
+    {
+        // Strip existing brackets like ["foo"]
+        if (name.StartsWith("[") && name.EndsWith("]"))
+            name = name.Substring(1, name.Length - 2);
+        if (name.StartsWith("\"") && name.EndsWith("\""))
+            return name;
+        return DuckDbReservedWords.Contains(name) ? $"\"{name}\"" : name;
+    }
+
     private string ResolveNameReference(NameReference nr, string? leftAlias, string? rightAlias)
     {
         var name = nr.Name.ToString().Trim();
@@ -267,7 +287,7 @@ internal class ExpressionSqlBuilder
         if (name == "$right") return rightAlias ?? "$right";
         if (_scalarLets != null && _scalarLets.TryGetValue(name, out var scalarSql))
             return scalarSql;
-        return name;
+        return QuoteIdentifierIfReserved(name);
     }
 
     private static string ConvertStringLiteral(LiteralExpression lit)
