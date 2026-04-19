@@ -577,33 +577,37 @@ internal class ExpressionSqlBuilder
 
     private string ConvertHasAny(HasAnyExpression expr, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated = false)
     {
-        var left = ConvertExpression(expr.Left, leftAlias, rightAlias);
-        var list = expr.Right;
-        var like = caseSensitive ? "LIKE" : _dialect.CaseInsensitiveLike;
-        var conditions = new List<string>();
-        foreach (var e in list.Expressions)
-        {
-            var term = ConvertExpression(e.Element, leftAlias, rightAlias);
-            string pattern;
-            if (term.StartsWith("'", StringComparison.Ordinal) && term.EndsWith("'", StringComparison.Ordinal))
-            {
-                pattern = $"'%{term[1..^1]}%'";
-            }
-            else
-            {
-                pattern = $"'%' || {term} || '%'";
-            }
-            conditions.Add(negated ? $"{left} NOT {like} {pattern}" : $"{left} {like} {pattern}");
-        }
-        var sep = negated ? " AND " : " OR ";
-        return string.Join(sep, conditions);
+        return ConvertHasAnyAll(expr.Left, expr.Right, leftAlias, rightAlias, caseSensitive, negated, isAny: true);
     }
 
     private string ConvertHasAll(HasAllExpression expr, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated = false)
     {
-        var left = ConvertExpression(expr.Left, leftAlias, rightAlias);
-        var list = expr.Right;
+        return ConvertHasAnyAll(expr.Left, expr.Right, leftAlias, rightAlias, caseSensitive, negated, isAny: false);
+    }
+
+    private string ConvertHasAnyAll(Expression leftExpr, ExpressionList list, string? leftAlias, string? rightAlias, bool caseSensitive, bool negated, bool isAny)
+    {
+        var left = ConvertExpression(leftExpr, leftAlias, rightAlias);
         var like = caseSensitive ? "LIKE" : _dialect.CaseInsensitiveLike;
+
+        // Detect single non-literal term that resolves to an array expression — emit a runtime
+        // list_filter/list_transform form so we don't produce the invalid '%' || LIST_VALUE(...) || '%'.
+        if (list.Expressions.Count == 1)
+        {
+            var onlyTerm = ConvertExpression(list.Expressions[0].Element, leftAlias, rightAlias);
+            bool isStringLiteral = onlyTerm.StartsWith("'", StringComparison.Ordinal) && onlyTerm.EndsWith("'", StringComparison.Ordinal);
+            if (!isStringLiteral)
+            {
+                var matchExpr = $"{left} {like} '%' || term || '%'";
+                var anyMatch = $"LEN(LIST_FILTER({onlyTerm}, term -> {matchExpr})) > 0";
+                if (isAny)
+                    return negated ? $"NOT ({anyMatch})" : anyMatch;
+                // has_all: every element must match. NOT has_all = some element fails to match.
+                var allMatch = $"LEN(LIST_FILTER({onlyTerm}, term -> NOT ({matchExpr}))) = 0";
+                return negated ? $"NOT ({allMatch})" : allMatch;
+            }
+        }
+
         var conditions = new List<string>();
         foreach (var e in list.Expressions)
         {
@@ -619,7 +623,9 @@ internal class ExpressionSqlBuilder
             }
             conditions.Add(negated ? $"{left} NOT {like} {pattern}" : $"{left} {like} {pattern}");
         }
-        var sep = negated ? " OR " : " AND ";
+        var sep = isAny
+            ? (negated ? " AND " : " OR ")
+            : (negated ? " OR " : " AND ");
         return string.Join(sep, conditions);
     }
 
