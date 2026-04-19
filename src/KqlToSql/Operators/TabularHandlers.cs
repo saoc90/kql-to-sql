@@ -50,11 +50,12 @@ internal class TabularHandlers : OperatorHandlerBase
         // Drill through single-arg conversion wrappers like tostring(...), toreal(...), toint(...) —
         // KQL auto-names 'tostring(DataMetadata.SectionName)' as 'DataMetadata_SectionName' too.
         SyntaxNode? current = element as SyntaxNode;
+        bool drilledWrapper = false;
         while (current is FunctionCallExpression fce && fce.ArgumentList.Expressions.Count == 1)
         {
             var fname = fce.Name.ToString().Trim().ToLowerInvariant();
             if (fname is "tostring" or "toreal" or "todouble" or "toint" or "tolong" or "tobool" or "tofloat" or "todatetime" or "todynamic")
-                current = fce.ArgumentList.Expressions[0].Element;
+            { current = fce.ArgumentList.Expressions[0].Element; drilledWrapper = true; }
             else break;
         }
 
@@ -64,11 +65,12 @@ internal class TabularHandlers : OperatorHandlerBase
             segments.Insert(0, pe.Selector.ToString().Trim());
             current = pe.Expression;
         }
-        if (segments.Count == 0) return null;
-        if (current is NameReference nr)
-            segments.Insert(0, nr.Name.ToString().Trim());
-        else
-            return null;
+        if (current is not NameReference nr) return null;
+        // Bare NameReference with no path: only synthesize alias if we drilled a conversion wrapper
+        // (KQL auto-names toreal(X) → X). A raw 'project X' needs no alias.
+        if (segments.Count == 0)
+            return drilledWrapper ? Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.ToString().Trim()) : null;
+        segments.Insert(0, nr.Name.ToString().Trim());
         return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(string.Join("_", segments));
     }
 

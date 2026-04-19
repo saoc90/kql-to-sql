@@ -15,7 +15,7 @@ public class TypeCastFunctionTests
 | extend year_str=tostring(EpisodeId)
 | project toint(year_str)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT TRY_CAST(year_str AS INTEGER) FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
+        Assert.Equal("SELECT TRY_CAST(year_str AS INTEGER) AS year_str FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -35,7 +35,7 @@ public class TypeCastFunctionTests
 | extend year_str=tostring(EpisodeId)
 | project tolong(year_str)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT TRY_CAST(year_str AS BIGINT) FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
+        Assert.Equal("SELECT TRY_CAST(year_str AS BIGINT) AS year_str FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -55,7 +55,7 @@ public class TypeCastFunctionTests
 | extend year_str=tostring(EpisodeId)
 | project todouble(year_str)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT TRY_CAST(year_str AS DOUBLE) FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
+        Assert.Equal("SELECT TRY_CAST(year_str AS DOUBLE) AS year_str FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -108,7 +108,7 @@ public class TypeCastFunctionTests
 | take 1
 | project tostring(EpisodeId)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT TRY_CAST(EpisodeId AS TEXT) FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT TRY_CAST(EpisodeId AS TEXT) AS EpisodeId FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -117,6 +117,14 @@ public class TypeCastFunctionTests
         cmd.CommandText = sql;
         var result = (string)cmd.ExecuteScalar()!;
         Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void Project_Toreal_AutoNames_Column()
+    {
+        // KQL: | project toreal(Value) → auto-names output column "Value" (inner identifier)
+        var sql = new KqlToSqlConverter().Convert("T | project toreal(Value)");
+        Assert.Equal("SELECT TRY_CAST(Value AS DOUBLE) AS Value FROM T", sql);
     }
 
     [Theory]
