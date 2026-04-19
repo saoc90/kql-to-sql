@@ -102,20 +102,36 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             var name = fce.Name.ToString().Trim().ToLowerInvariant();
             if (name == "arg_max" || name == "arg_min")
             {
-                var extremumExpr = Expr.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
-                var results = new List<string>();
+                // KQL: arg_max(key, v1, v2=alias, ...) by ...
+                //   output includes key (max/min of key) + each value at the extremum row.
+                // Outer alias applies to the key output: (K = arg_max(key, v1))  → key output named K.
+                var keyNode = fce.ArgumentList.Expressions[0].Element;
+                var extremumExpr = Expr.ConvertExpression(keyNode);
+                var keyAlias = alias ?? (keyNode is NameReference knr ? knr.Name.ToString().Trim() : name);
+                var keyAgg = name == "arg_max" ? "MAX" : "MIN";
+                var results = new List<string> { $"{keyAgg}({extremumExpr}) AS {keyAlias}" };
+
                 for (int i = 1; i < fce.ArgumentList.Expressions.Count; i++)
                 {
                     var argNode = fce.ArgumentList.Expressions[i].Element;
-                    var valueExpr = Expr.ConvertExpression(argNode);
+                    string innerExpr;
                     string resultAlias;
-                    if (i == 1 && alias != null)
-                        resultAlias = alias;
-                    else if (argNode is NameReference nr)
-                        resultAlias = nr.Name.ToString().Trim();
+                    if (argNode is SimpleNamedExpression vsne)
+                    {
+                        innerExpr = Expr.ConvertExpression(vsne.Expression);
+                        resultAlias = vsne.Name.ToString().Trim();
+                    }
+                    else if (argNode is NameReference vnr)
+                    {
+                        innerExpr = Expr.ConvertExpression(argNode);
+                        resultAlias = vnr.Name.ToString().Trim();
+                    }
                     else
-                        resultAlias = alias ?? $"{name}_{i}";
-                    results.Add($"{name}({valueExpr}, {extremumExpr}) AS {resultAlias}");
+                    {
+                        innerExpr = Expr.ConvertExpression(argNode);
+                        resultAlias = $"{name}_{i}";
+                    }
+                    results.Add($"{name.ToUpperInvariant()}({innerExpr}, {extremumExpr}) AS {resultAlias}");
                 }
                 return results;
             }

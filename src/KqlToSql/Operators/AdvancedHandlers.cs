@@ -175,7 +175,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 : $"LIST({a.Alias}_val ORDER BY _ts) AS {a.Alias}"));
 
         var dataAggSelect = string.Join(", ", aggParts.Select(a => $"{a.SelectExpr} AS {a.Alias}_val"));
-        var bucketExpr = $"TO_TIMESTAMP_MS(FLOOR(EPOCH_MS({onExpr})/{stepMs})*{stepMs})";
+        var bucketExpr = $"EPOCH_MS(CAST(FLOOR(EPOCH_MS({onExpr})/{stepMs})*{stepMs} AS BIGINT))";
 
         var groupByData = byColumns.Count > 0
             ? $"{string.Join(", ", byColumns)}, "
