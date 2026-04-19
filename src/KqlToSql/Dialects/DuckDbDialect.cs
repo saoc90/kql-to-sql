@@ -432,7 +432,7 @@ public class DuckDbDialect : ISqlDialect
 
     public string GenerateSeries(string alias, string start, string end, string step)
     {
-        return $"SELECT generate_series AS {alias} FROM generate_series({start}, {end}, {step})";
+        return $"SELECT generate_series AS {alias} FROM generate_series(CAST({start} AS BIGINT), CAST({end} AS BIGINT), CAST({step} AS BIGINT))";
     }
 
     public string Unnest(string sourceAlias, string column, string unnestAlias)
