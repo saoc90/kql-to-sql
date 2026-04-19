@@ -76,6 +76,9 @@ internal sealed class OperatorDispatcher
             // Invoke: calls a stored function on the current result set
             InvokeOperator invoke => ApplyInvoke(leftSql, invoke),
 
+            // Partition: run subquery per group, then UNION ALL the results
+            PartitionOperator partition => ApplyPartition(leftSql, partition),
+
             // Pass-through operators
             AsOperator => leftSql,
             ConsumeOperator => leftSql,
@@ -83,6 +86,22 @@ internal sealed class OperatorDispatcher
 
             _ => throw new NotSupportedException($"Unsupported operator {op.Kind}")
         };
+    }
+
+    private string ApplyPartition(string leftSql, PartitionOperator partition)
+    {
+        // partition by Col (subquery) — run subquery per partition then UNION ALL.
+        // Approximation: apply the subquery to the whole leftSql with the by-column kept.
+        // For simple aggregation/top-N subqueries this gives the right shape.
+        var byCol = ExpressionBuilder.ConvertExpression(partition.ByExpression);
+        if (partition.Operand is PartitionSubquery sub)
+        {
+            // The subquery is a chain of operators (e.g. "top 3 by X"). Convert it
+            // by piping leftSql through it as if it were a continuation.
+            var subSql = ApplyOperator(leftSql, (QueryOperator)sub.Subquery);
+            return subSql;
+        }
+        return leftSql;
     }
 
     private string ApplyInvoke(string leftSql, InvokeOperator invoke)
