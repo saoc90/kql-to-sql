@@ -373,9 +373,13 @@ internal class ExpressionSqlBuilder
             case "datetime_diff": return ConvertDatetimeDiff(fce, leftAlias, rightAlias);
         }
 
-        // Delegate to dialect for engine-specific function translation
+        // Delegate to dialect for engine-specific function translation.
+        // Strip SimpleNamedExpression wrappers from function arguments — ConvertExpression would
+        // otherwise emit "X AS alias" *inside* the function call, which is invalid SQL.
         var args = fce.ArgumentList.Expressions
-            .Select(a => ConvertExpression(a.Element, leftAlias, rightAlias))
+            .Select(a => ConvertExpression(
+                a.Element is SimpleNamedExpression snArg ? snArg.Expression : a.Element,
+                leftAlias, rightAlias))
             .ToArray();
 
         var dialectResult = _dialect.TryTranslateFunction(lower, args);
