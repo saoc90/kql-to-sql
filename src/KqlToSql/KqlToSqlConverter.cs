@@ -245,10 +245,23 @@ public class KqlToSqlConverter
             var fnameLower = fname.ToLowerInvariant();
 
             // User-defined function call: let x = myFunc(arg)
-            // Skip if it's a user function — those should be handled as CTEs (tabular result)
-            // by ProcessLetStatement's main flow, not stored as scalar substitutions.
-            if (_userFunctions.ContainsKey(fname))
+            // If the user function body is a scalar expression, inline as scalar let.
+            // If its body is tabular (no .Expression property), fall through to CTE handling.
+            if (_userFunctions.TryGetValue(fname, out var uf) ||
+                _userFunctions.Keys.FirstOrDefault(k => string.Equals(k, fname, StringComparison.OrdinalIgnoreCase)) is string match &&
+                _userFunctions.TryGetValue(match, out uf))
             {
+                if (uf.body.Expression == null) return false; // tabular — let CTE path handle it
+                try
+                {
+                    var scalarSql = exprBuilder.ConvertExpression(fce2);
+                    if (!LooksLikeTabular(scalarSql))
+                    {
+                        _scalarLets[name] = scalarSql;
+                        return true;
+                    }
+                }
+                catch { }
                 return false;
             }
 
@@ -294,6 +307,14 @@ public class KqlToSqlConverter
         }
 
         return false;
+    }
+
+    private static bool LooksLikeTabular(string sql)
+    {
+        var t = sql.TrimStart().TrimStart('(').TrimStart();
+        return t.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) ||
+               t.StartsWith("WITH", StringComparison.OrdinalIgnoreCase) ||
+               t.StartsWith("VALUES", StringComparison.OrdinalIgnoreCase);
     }
 
     internal string ConvertNode(SyntaxNode node)
