@@ -904,7 +904,7 @@ internal class ExpressionSqlBuilder
         if (fce.ArgumentList.Expressions.Count != 1)
             throw new NotSupportedException("toscalar() expects exactly one argument");
         var inner = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
-        return $"({inner} LIMIT 1)";
+        return WrapAsScalarSubquery(inner);
     }
 
     private string ConvertToScalar(ToScalarExpression tse, string? leftAlias, string? rightAlias)
@@ -915,10 +915,28 @@ internal class ExpressionSqlBuilder
         if (_nodeConverter != null)
         {
             var innerSql = _nodeConverter(tse.Expression);
-            return $"({innerSql} LIMIT 1)";
+            return WrapAsScalarSubquery(innerSql);
         }
         // Fallback for simple expressions
-        return $"({ConvertExpression(tse.Expression, leftAlias, rightAlias)} LIMIT 1)";
+        return WrapAsScalarSubquery(ConvertExpression(tse.Expression, leftAlias, rightAlias));
+    }
+
+    private static string WrapAsScalarSubquery(string inner)
+    {
+        var t = inner.TrimStart().TrimStart('(').TrimStart();
+        bool isTabular = t.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) ||
+                         t.StartsWith("WITH", StringComparison.OrdinalIgnoreCase) ||
+                         t.StartsWith("VALUES", StringComparison.OrdinalIgnoreCase);
+        if (!isTabular)
+        {
+            // Already a scalar expression (e.g. a scalar_let substitution or arithmetic) — don't re-wrap.
+            return inner;
+        }
+        // Avoid appending another LIMIT 1 if the inner SELECT already ends with one.
+        var innerTrimmed = inner.TrimEnd().TrimEnd(')').TrimEnd();
+        if (innerTrimmed.EndsWith("LIMIT 1", StringComparison.OrdinalIgnoreCase))
+            return inner.TrimStart().StartsWith("(") ? inner : $"({inner})";
+        return $"({inner} LIMIT 1)";
     }
 
     private string ConvertRound(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
