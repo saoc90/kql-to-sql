@@ -76,4 +76,24 @@ public class ArgMaxOperatorTests
         Assert.False(string.IsNullOrWhiteSpace(reader.GetString(1)));
         Assert.False(string.IsNullOrWhiteSpace(reader.GetString(2)));
     }
+
+    [Fact]
+    public void ArgMax_Wildcard_After_Union_Wraps_Qualify_In_Subquery()
+    {
+        // QUALIFY cannot attach to a set-op result — must be wrapped in SELECT * FROM (...)
+        var converter = new KqlToSqlConverter();
+        var kql = "(StormEvents | where State == 'ALABAMA' | take 5) | union (StormEvents | where State == 'TEXAS' | take 5) | summarize arg_max(EndTime, *) by State";
+        var sql = converter.Convert(kql);
+        // Correctly wrapped: SELECT * FROM (...UNION ALL...) QUALIFY ROW_NUMBER() ...
+        Assert.Contains("SELECT * FROM (", sql);
+        Assert.Contains(") QUALIFY ROW_NUMBER() OVER", sql);
+        // Must NOT end with QUALIFY directly on the UNION result (i.e. no bare UNION … QUALIFY at top level)
+        Assert.DoesNotContain("UNION ALL BY NAME (SELECT * FROM StormEvents WHERE State = 'TEXAS' LIMIT 5) QUALIFY", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+    }
 }
