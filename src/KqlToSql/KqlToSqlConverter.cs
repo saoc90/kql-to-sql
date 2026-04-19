@@ -80,6 +80,7 @@ public class KqlToSqlConverter
         // so substitutions work while processing each subsequent let statement.
         _operators.ExpressionBuilder.SetScalarLets(_scalarLets);
         _operators.ExpressionBuilder.SetUserFunctions(_userFunctions);
+        _operators.ExpressionBuilder.SetCtes(_ctes);
 
         // Now process let statements in order — each can reference earlier scalars.
         foreach (var statement in statements)

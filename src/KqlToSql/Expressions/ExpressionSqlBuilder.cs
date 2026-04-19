@@ -23,6 +23,10 @@ internal class ExpressionSqlBuilder
     /// <summary>Sets the scalar let bindings for inline substitution.</summary>
     internal void SetScalarLets(Dictionary<string, string> scalarLets) => _scalarLets = scalarLets;
 
+    private Dictionary<string, (string sql, bool materialized)>? _ctes;
+    /// <summary>Sets the CTE definitions for body-inspection heuristics (e.g. detecting array-producing CTEs).</summary>
+    internal void SetCtes(Dictionary<string, (string sql, bool materialized)> ctes) => _ctes = ctes;
+
     private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.FunctionBody body)>? _userFunctions;
     /// <summary>Sets user-defined parameterized functions for inline expansion.</summary>
     internal void SetUserFunctions(Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.FunctionBody body)> funcs) => _userFunctions = funcs;
@@ -565,6 +569,13 @@ internal class ExpressionSqlBuilder
             if (!isScalar && !string.Equals(refName, "$left", StringComparison.Ordinal) && !string.Equals(refName, "$right", StringComparison.Ordinal))
             {
                 var negate = inExpr.Kind == SyntaxKind.NotInExpression || inExpr.Kind == SyntaxKind.NotInCsExpression;
+                // If the referenced CTE wraps a single-row LIST aggregate, the value is an array —
+                // use list_contains instead of IN so DuckDB doesn't complain about T vs T[].
+                if (_ctes != null && _ctes.TryGetValue(refName, out var cte) && CteProducesArrayColumn(cte.sql))
+                {
+                    var match = $"LIST_CONTAINS((SELECT * FROM {refName}), {left})";
+                    return negate ? $"NOT ({match})" : match;
+                }
                 var inOp = negate ? "NOT IN" : "IN";
                 return $"{left} {inOp} (SELECT * FROM {refName})";
             }
@@ -633,6 +644,14 @@ internal class ExpressionSqlBuilder
         // ( SELECT LIST(...) FROM ... LIMIT 1 ) from toscalar-on-make_list
         if (sql.Contains("SELECT LIST(", StringComparison.OrdinalIgnoreCase) && sql.Contains("LIMIT 1")) return true;
         return false;
+    }
+
+    private static bool CteProducesArrayColumn(string cteSql)
+    {
+        // Heuristic: the CTE's outermost SELECT list contains a LIST(...) aggregate,
+        // meaning the column is an array. Not a full parser — good enough for common cases.
+        return cteSql.Contains("SELECT LIST(", StringComparison.OrdinalIgnoreCase) ||
+               cteSql.Contains(" LIST(", StringComparison.OrdinalIgnoreCase);
     }
 
     internal string ConvertBetween(BetweenExpression bin, string? leftAlias, string? rightAlias, bool negated)
