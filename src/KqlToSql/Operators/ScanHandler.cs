@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kusto.Language;
 using Kusto.Language.Syntax;
 using KqlToSql.Expressions;
 
@@ -113,7 +114,7 @@ internal sealed class ScanHandler : OperatorHandlerBase
         //   col = iff(s.col >= threshold, reset, s.col + delta)
         // Approximation using gaps-and-islands with prior-row state.
         if (value is FunctionCallExpression iffFce &&
-            (iffFce.Name.ToString().Trim().ToLowerInvariant() is "iff" or "iif") &&
+            (iffFce.Is(Functions.Iff) || iffFce.Is(Functions.Iif)) &&
             iffFce.ArgumentList.Expressions.Count == 3)
         {
             var cond = iffFce.ArgumentList.Expressions[0].Element;
@@ -191,8 +192,7 @@ internal sealed class ScanHandler : OperatorHandlerBase
         emptyKind = "isnull";
 
         if (value is not FunctionCallExpression fce) return false;
-        var fname = fce.Name.ToString().Trim().ToLowerInvariant();
-        if (fname != "iff" && fname != "iif") return false;
+        if (!fce.Is(Functions.Iff) && !fce.Is(Functions.Iif)) return false;
         if (fce.ArgumentList.Expressions.Count != 3) return false;
 
         var cond = fce.ArgumentList.Expressions[0].Element;
@@ -201,10 +201,9 @@ internal sealed class ScanHandler : OperatorHandlerBase
 
         // Condition must be isempty(X) or isnull(X)
         if (cond is not FunctionCallExpression condFce) return false;
-        var condName = condFce.Name.ToString().Trim().ToLowerInvariant();
-        if (condName != "isempty" && condName != "isnull") return false;
+        if (!condFce.Is(Functions.IsEmpty) && !condFce.Is(Functions.IsNull)) return false;
         if (condFce.ArgumentList.Expressions.Count != 1) return false;
-        emptyKind = condName;
+        emptyKind = condFce.Is(Functions.IsEmpty) ? "isempty" : "isnull";
 
         var sourceExpr = condFce.ArgumentList.Expressions[0].Element;
 
@@ -220,15 +219,15 @@ internal sealed class ScanHandler : OperatorHandlerBase
 
         if (falseBranch is FunctionCallExpression falseFce && falseFce.ArgumentList.Expressions.Count == 1)
         {
-            var castFname = falseFce.Name.ToString().Trim().ToLowerInvariant();
-            var typeMap = new Dictionary<string, string>
-            {
-                ["toint"] = "INTEGER", ["tolong"] = "BIGINT",
-                ["toreal"] = "DOUBLE", ["todouble"] = "DOUBLE",
-                ["tostring"] = "VARCHAR", ["tobool"] = "BOOLEAN",
-                ["todatetime"] = "TIMESTAMP", ["totimespan"] = "INTERVAL"
-            };
-            if (typeMap.TryGetValue(castFname, out var mappedType) &&
+            string? mappedType = null;
+            if (falseFce.Is(Functions.ToInt)) mappedType = "INTEGER";
+            else if (falseFce.Is(Functions.ToLong)) mappedType = "BIGINT";
+            else if (falseFce.Is(Functions.ToReal) || falseFce.Is(Functions.ToDouble)) mappedType = "DOUBLE";
+            else if (falseFce.Is(Functions.ToString)) mappedType = "VARCHAR";
+            else if (falseFce.Is(Functions.ToBool)) mappedType = "BOOLEAN";
+            else if (falseFce.Is(Functions.ToDateTime)) mappedType = "TIMESTAMP";
+            else if (falseFce.Is(Functions.ToTimespan)) mappedType = "INTERVAL";
+            if (mappedType != null &&
                 ExpressionsMatch(falseFce.ArgumentList.Expressions[0].Element, sourceExpr))
             {
                 fillSource = Expr.ConvertExpression(sourceExpr);
