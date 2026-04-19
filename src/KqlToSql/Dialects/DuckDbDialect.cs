@@ -58,7 +58,10 @@ public class DuckDbDialect : ISqlDialect
             "atan2" => $"ATAN2({args[0]}, {args[1]})",
             "sign" => $"SIGN({args[0]})",
             "rand" => "RANDOM()",
-            "parse_json" or "todynamic" => $"CAST({args[0]} AS JSON)",
+            // todynamic(X) parses a string as JSON. When X is already a list-producing expression
+            // (LIST_VALUE(...), scalar subquery returning a LIST, etc), casting to JSON strips LIST
+            // semantics and downstream LIST_FILTER/LIST_CONTAINS break. Pass through array-like sources.
+            "parse_json" or "todynamic" => IsArrayLikeText(args[0]) ? args[0] : $"CAST({args[0]} AS JSON)",
             "format_datetime" => $"STRFTIME({args[0]}, {args[1]})",
             "startofday" => $"DATE_TRUNC('day', {args[0]})",
             "startofweek" => $"DATE_TRUNC('week', {args[0]})",
@@ -349,6 +352,19 @@ public class DuckDbDialect : ISqlDialect
             return $"{innerSql} QUALIFY {condition}";
         }
         return $"SELECT * FROM {innerSql} QUALIFY {condition}";
+    }
+
+    private static bool IsArrayLikeText(string sql)
+    {
+        var t = sql.TrimStart('(').TrimEnd(')').TrimStart();
+        if (t.StartsWith("LIST_VALUE", StringComparison.OrdinalIgnoreCase)) return true;
+        if (t.StartsWith("LIST(", StringComparison.OrdinalIgnoreCase)) return true;
+        if (t.StartsWith("SELECT LIST(", StringComparison.OrdinalIgnoreCase)) return true;
+        if (sql.Contains("SELECT LIST(", StringComparison.OrdinalIgnoreCase) && sql.Contains("LIMIT 1")) return true;
+        // Scalar-let substitutions for dynamic arrays emit something like '(SELECT l_filled FROM ... LIMIT 1)'.
+        // We can't be 100% sure, but if the subquery selects a single column name that looks like a list,
+        // skip the cast.
+        return false;
     }
 
     /// <summary>DuckDB rejects sum(INTERVAL). Convert to epoch-ms sum and back.
