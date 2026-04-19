@@ -263,11 +263,23 @@ internal class ExpressionSqlBuilder
             return $"LIST_VALUE({string.Join(", ", elements)})";
         }
 
-        // dynamic({key:val}) → JSON object
+        // dynamic({key:val}) → strict JSON object with double-quoted keys/string values
         var obj = de.GetDescendants<JsonObjectExpression>().FirstOrDefault();
         if (obj != null)
         {
-            return $"'{de.ToString().Trim()}'::JSON";
+            var pairs = Enumerable.Range(0, obj.Pairs.Count)
+                .Select(i => obj.Pairs[i].Element)
+                .Select(p =>
+                {
+                    var key = p.Name.ValueText.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                    string val;
+                    if (p.Value is LiteralExpression le && le.LiteralValue is string sv)
+                        val = "\"" + sv.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+                    else
+                        val = ConvertExpression(p.Value, leftAlias, rightAlias);
+                    return $"\"{key}\":{val}";
+                });
+            return $"'{{{string.Join(",", pairs)}}}'::JSON";
         }
 
         // dynamic(null)

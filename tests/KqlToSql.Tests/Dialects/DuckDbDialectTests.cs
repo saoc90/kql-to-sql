@@ -265,4 +265,14 @@ public class DuckDbDialectTests
         var dialect = new DuckDbDialect();
         Assert.Null(dialect.TryTranslateAggregate("unknown_agg", new[] { "arg1" }));
     }
+
+    [Fact]
+    public void DuckDb_Dynamic_SingleQuotedObject_Uses_DoubleQuotedJson()
+    {
+        // single-quoted KQL keys/values must become double-quoted for DuckDB JSON parser
+        var sql = _converter.Convert("print x = dynamic({'1': 'foo', '2': 'bar'})");
+        Assert.Contains("\"1\"", sql);
+        Assert.DoesNotContain("'1'", sql);
+        Assert.Contains("\"foo\"", sql);
+    }
 }
