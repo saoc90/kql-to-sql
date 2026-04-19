@@ -241,7 +241,7 @@ public class DuckDbDialect : ISqlDialect
             "anyif" or "take_anyif" => $"ANY_VALUE({args[0]}) FILTER (WHERE {args[1]})",
             "make_list" or "makelist" => $"LIST({args[0]})",
             "make_set" or "makeset" => $"LIST(DISTINCT {args[0]})",
-            "sumif" => $"SUM({args[0]}) FILTER (WHERE {args[1]})",
+            "sumif" => SumPossiblyInterval(args[0], args[1]),
             "countif" => $"COUNT(*) FILTER (WHERE {args[0]})",
             "avgif" when args.Length >= 2 => $"AVG({args[0]}) FILTER (WHERE {args[1]})",
             "minif" => $"MIN({args[0]}) FILTER (WHERE {args[1]})",
@@ -256,7 +256,8 @@ public class DuckDbDialect : ISqlDialect
         return name switch
         {
             "count" => "COUNT(*)",
-            "sum" => $"SUM({args[0]})",
+            "sum" => SumPossiblyInterval(args[0], null),
+            "sumif" => SumPossiblyInterval(args[0], args.Length >= 2 ? args[1] : null),
             "avg" => $"AVG({args[0]})",
             "avgif" => $"AVG({args[0]}) FILTER (WHERE {args[1]})",
             "binary_all_and" => $"BIT_AND({args[0]})",
@@ -291,7 +292,6 @@ public class DuckDbDialect : ISqlDialect
             "stdev" => $"STDDEV_SAMP({args[0]})",
             "stdevif" => $"STDDEV_SAMP({args[0]}) FILTER (WHERE {args[1]})",
             "stdevp" => $"STDDEV_POP({args[0]})",
-            "sumif" => $"SUM({args[0]}) FILTER (WHERE {args[1]})",
             "any" or "take_any" => $"ANY_VALUE({args[0]})",
             "strcat_array" => $"STRING_AGG({args[0]}, {args[1]})",
             "anyif" or "take_anyif" => $"ANY_VALUE({args[0]}) FILTER (WHERE {args[1]})",
@@ -349,6 +349,23 @@ public class DuckDbDialect : ISqlDialect
             return $"{innerSql} QUALIFY {condition}";
         }
         return $"SELECT * FROM {innerSql} QUALIFY {condition}";
+    }
+
+    /// <summary>DuckDB rejects sum(INTERVAL). Convert to epoch-ms sum and back.
+    /// We detect intervals by the INTERVAL keyword appearing in the argument text — all
+    /// our timespan emissions go through '(N * INTERVAL 1 millisecond)'.</summary>
+    private static string SumPossiblyInterval(string valueExpr, string? filter)
+    {
+        bool isInterval = valueExpr.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase) ||
+                          valueExpr.Contains(" AS INTERVAL", StringComparison.OrdinalIgnoreCase);
+        if (!isInterval)
+        {
+            return filter is null ? $"SUM({valueExpr})" : $"SUM({valueExpr}) FILTER (WHERE {filter})";
+        }
+        // (timestamp 'epoch' + interval) → timestamp, then epoch_ms → BIGINT ms.
+        var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({valueExpr}) AS TIMESTAMP))";
+        var inner = filter is null ? $"SUM({ms})" : $"SUM({ms}) FILTER (WHERE {filter})";
+        return $"(({inner}) * INTERVAL '1 millisecond')";
     }
 
     private static bool HasTopLevelTail(string sql, string clause)
