@@ -32,7 +32,7 @@ public class DuckDbDialect : ISqlDialect
             "not" => $"NOT ({args[0]})",
             "strcat" => $"CONCAT({string.Join(", ", args)})",
             "replace_string" => $"REPLACE({string.Join(", ", args)})",
-            "indexof" => $"(INSTR({args[0]}, {args[1]}) - 1)",
+            "indexof" => $"(INSTR(CAST({args[0]} AS VARCHAR), {args[1]}) - 1)",
             "coalesce" => $"COALESCE({string.Join(", ", args)})",
             "countof" => $"(LENGTH({args[0]}) - LENGTH(REPLACE({args[0]}, {args[1]}, ''))) / LENGTH({args[1]})",
             "reverse" => $"REVERSE({args[0]})",
