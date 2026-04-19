@@ -903,6 +903,9 @@ internal class ExpressionSqlBuilder
             {
                 if (text.Contains("true", StringComparison.OrdinalIgnoreCase)) return "TRUE";
                 if (text.Contains("false", StringComparison.OrdinalIgnoreCase)) return "FALSE";
+                // bool(0) / bool(1) — numeric argument
+                var m = System.Text.RegularExpressions.Regex.Match(text, @"bool\s*\(\s*(-?\d+)\s*\)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (m.Success) return m.Groups[1].Value == "0" ? "FALSE" : "TRUE";
             }
             if (text.Contains("null", StringComparison.OrdinalIgnoreCase))
             {

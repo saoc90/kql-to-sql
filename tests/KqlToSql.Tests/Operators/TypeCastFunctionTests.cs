@@ -127,4 +127,14 @@ public class TypeCastFunctionTests
         var sql = new KqlToSqlConverter().Convert(kql);
         Assert.Contains(expected, sql, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("print bool(0)", "FALSE")]
+    [InlineData("print bool(1)", "TRUE")]
+    public void BoolNumericLiteral_EmitsTrueOrFalse(string kql, string expected)
+    {
+        var sql = new KqlToSqlConverter().Convert(kql);
+        Assert.Contains(expected, sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("bool(", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }
