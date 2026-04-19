@@ -45,7 +45,7 @@ public class DuckDbDialectTests
     public void DuckDb_Split_Uses_StringSplit()
     {
         var sql = _converter.Convert("StormEvents | extend parts = split(State, ',')");
-        Assert.Contains("STRING_SPLIT(State, ',')", sql);
+        Assert.Contains("STRING_SPLIT(CAST(State AS VARCHAR), ',')", sql);
     }
 
     [Fact]
