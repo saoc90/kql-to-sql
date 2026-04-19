@@ -99,10 +99,29 @@ internal sealed class OperatorDispatcher
         var name = nameNode?.Name?.ToString().Trim();
         if (!string.IsNullOrEmpty(name))
         {
-            // Capture the current pipeline result under the given name; later operators can reference it.
+            // KQL allows rebinding the same `| as Name` multiple times. In SQL, two CTEs can't
+            // share a name, and the new body typically references the old one (self-looking reference).
+            // Rename the previous CTE to <Name>_N and rewrite the new body's references so each
+            // version is a distinct, non-circular CTE.
+            if (_converter.TryGetCte(name, out var existing))
+            {
+                int version = 1;
+                string versioned;
+                do { versioned = $"{name}_{version++}"; } while (_converter.TryGetCte(versioned, out _));
+                _converter.RenameCte(name, versioned);
+                leftSql = RewriteTableReferences(leftSql, name, versioned);
+            }
             _converter.AddCte(name, leftSql, materialized: false);
         }
         return leftSql;
+    }
+
+    private static string RewriteTableReferences(string sql, string oldName, string newName)
+    {
+        // Replace whole-word occurrences of oldName in SQL (bounded by non-identifier chars).
+        // Approximate — doesn't avoid string literals. Fine for identifier-like names.
+        var pattern = $@"\b{System.Text.RegularExpressions.Regex.Escape(oldName)}\b";
+        return System.Text.RegularExpressions.Regex.Replace(sql, pattern, newName);
     }
 
     private string ApplyPartition(string leftSql, PartitionOperator partition)
