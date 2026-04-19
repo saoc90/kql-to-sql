@@ -575,6 +575,21 @@ internal class ExpressionSqlBuilder
             items = list.Expressions.Select(e => ConvertExpression(e.Element, leftAlias, rightAlias)).ToArray();
         }
 
+        // DuckDB can't compare VARCHAR against VARCHAR[] in IN. When the single RHS item is an
+        // array-producing expression (subquery returning a LIST, or a LIST_VALUE literal, or a
+        // scalar-let bound to an array), fall back to list_contains which accepts an array.
+        if (items.Length == 1 && IsArrayLikeExpression(items[0]))
+        {
+            var arrayExpr = items[0];
+            var negate = inExpr.Kind == SyntaxKind.NotInExpression || inExpr.Kind == SyntaxKind.NotInCsExpression;
+            var caseInsensitive2 = inExpr.Kind == SyntaxKind.InCsExpression || inExpr.Kind == SyntaxKind.NotInCsExpression;
+            var leftCmp = caseInsensitive2 ? $"UPPER({left})" : left;
+            var match = caseInsensitive2
+                ? $"LEN(LIST_FILTER({arrayExpr}, x -> UPPER(x) = {leftCmp})) > 0"
+                : $"LIST_CONTAINS({arrayExpr}, {leftCmp})";
+            return negate ? $"NOT ({match})" : match;
+        }
+
         var caseInsensitive = inExpr.Kind == SyntaxKind.InCsExpression || inExpr.Kind == SyntaxKind.NotInCsExpression;
         if (caseInsensitive)
         {
@@ -591,6 +606,18 @@ internal class ExpressionSqlBuilder
 
         var op = (inExpr.Kind == SyntaxKind.NotInExpression || inExpr.Kind == SyntaxKind.NotInCsExpression) ? "NOT IN" : "IN";
         return $"{left} {op} ({string.Join(", ", items)})";
+    }
+
+    private static bool IsArrayLikeExpression(string sql)
+    {
+        var t = sql.TrimStart('(').TrimEnd(')').TrimStart();
+        if (t.StartsWith("LIST_VALUE", StringComparison.OrdinalIgnoreCase)) return true;
+        if (t.StartsWith("LIST(", StringComparison.OrdinalIgnoreCase)) return true;
+        // Subquery that selects a LIST(...) aggregate → its one column is an array.
+        if (t.StartsWith("SELECT LIST(", StringComparison.OrdinalIgnoreCase)) return true;
+        // ( SELECT LIST(...) FROM ... LIMIT 1 ) from toscalar-on-make_list
+        if (sql.Contains("SELECT LIST(", StringComparison.OrdinalIgnoreCase) && sql.Contains("LIMIT 1")) return true;
+        return false;
     }
 
     internal string ConvertBetween(BetweenExpression bin, string? leftAlias, string? rightAlias, bool negated)
