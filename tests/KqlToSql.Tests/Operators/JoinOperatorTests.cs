@@ -144,7 +144,8 @@ public class JoinOperatorTests
         var kql = "let A = X | project Key, Value; let B = Y | project Key, Value; A | join B on Key";
         var sql = converter.Convert(kql);
 
-        // Expect R.Value aliased to Value1 (because L also has Value).
+        // Live Kusto: R.Key becomes Key1 (not dropped) and R.Value becomes Value1.
+        Assert.Contains("R.\"Key\" AS Key1", sql);
         Assert.Contains("R.Value AS Value1", sql);
 
         using var conn = new DuckDBConnection("DataSource=:memory:");
@@ -159,14 +160,15 @@ public class JoinOperatorTests
         using var runCmd = conn.CreateCommand();
         runCmd.CommandText = sql;
         using var reader = runCmd.ExecuteReader();
-        var rows = new List<(string Key, long Value, long Value1)>();
+        // Columns: Key, Value, Key1, Value1
+        var rows = new List<(string Key, long Value, string Key1, long Value1)>();
         while (reader.Read())
         {
-            rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2)));
+            rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetString(2), reader.GetInt64(3)));
         }
         Assert.Equal(2, rows.Count);
-        Assert.Contains(rows, r => r.Key == "b" && r.Value == 2 && r.Value1 == 10);
-        Assert.Contains(rows, r => r.Key == "c" && r.Value == 4 && r.Value1 == 20);
+        Assert.Contains(rows, r => r.Key == "b" && r.Value == 2 && r.Key1 == "b" && r.Value1 == 10);
+        Assert.Contains(rows, r => r.Key == "c" && r.Value == 4 && r.Key1 == "c" && r.Value1 == 20);
     }
 
     [Fact]

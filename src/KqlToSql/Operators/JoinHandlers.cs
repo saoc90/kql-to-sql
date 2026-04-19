@@ -94,9 +94,13 @@ internal class JoinHandlers : OperatorHandlerBase
         var selectClause = BuildJoinSelectClause(leftCols, rightCols, keySet);
         if (selectClause == null)
         {
+            // Schema not enumerable on one side — we can't emit `R.X AS X1` per column, so
+            // fall back to `L.*, R.* EXCLUDE (keys)` which at least avoids duplicate-name
+            // ambiguity. Downstream references to `<key>1` will fail, but that's a smaller
+            // failure surface than the ambiguous-column error that `L.*, R.*` produces.
             var rightColumns = Dialect.SelectExclude(leftKeys.ToArray());
             selectClause = rightColumns.Contains("/*")
-                ? "*"  // Dialect doesn't support EXCLUDE (e.g., PGlite) — fall back to SELECT *
+                ? "*"  // Dialect doesn't support EXCLUDE (e.g., PGlite)
                 : $"L.*, R.{rightColumns}";
         }
 
@@ -279,10 +283,12 @@ internal class JoinHandlers : OperatorHandlerBase
     {
         if (leftCols == null || rightCols == null) return null;
         var leftSet = new HashSet<string>(leftCols, StringComparer.OrdinalIgnoreCase);
+        // Live Kusto: every join kind (inner, innerunique, leftouter, rightouter, fullouter)
+        // keeps both sides' copy of the join key; the right-side copy is suffixed `1` just
+        // like any other duplicate column.
         var parts = new List<string> { "L.*" };
         foreach (var rc in rightCols)
         {
-            if (keys.Contains(rc)) continue;  // join key — drop from right side
             var quoted = ExpressionSqlBuilder.QuoteIdentifierIfReserved(rc);
             if (leftSet.Contains(rc))
             {
