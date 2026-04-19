@@ -162,13 +162,11 @@ internal class TabularHandlers : OperatorHandlerBase
         }
 
         // KQL extend replaces columns with the same name.
-        // Check if any extended column name already exists in the left SQL (from a prior extend).
-        // Match both unquoted (` AS Name`) and quoted (` AS "Name"`) forms so reserved-word columns
-        // are detected.
+        // Check if any extended column name already exists as an alias at the OUTER level of leftSql
+        // (paren depth 0). Inner-scope AS aliases (from deeply nested subqueries) may not be visible
+        // to the enclosing FROM, so using EXCLUDE on them would cause 'column not found' errors.
         var columnsToExclude = extras
-            .Where(e => leftSql.Contains($" AS {e.Name}", StringComparison.OrdinalIgnoreCase)
-                     || leftSql.Contains($" AS {e.Name},", StringComparison.OrdinalIgnoreCase)
-                     || leftSql.Contains($" AS \"{e.Name}\"", StringComparison.OrdinalIgnoreCase))
+            .Where(e => HasTopLevelAlias(leftSql, e.Name))
             .Select(e => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(e.Name))
             .ToArray();
 
@@ -209,6 +207,47 @@ internal class TabularHandlers : OperatorHandlerBase
         if (HasTrailingOrderBy(leftSql) || HasTopLevelGroupBy(leftSql))
             return $"SELECT * FROM ({leftSql}) ORDER BY {string.Join(", ", orderings)}";
         return $"{leftSql} ORDER BY {string.Join(", ", orderings)}";
+    }
+
+    /// <summary>Returns true if 'AS name' appears at paren depth 0 in sql (outer SELECT level),
+    /// meaning the column is visible from an enclosing FROM.</summary>
+    private static bool HasTopLevelAlias(string sql, string name)
+    {
+        var patterns = new[] { $" AS {name} ", $" AS {name},", $" AS {name}\n", $" AS {name}\r",
+                                $" AS \"{name}\" ", $" AS \"{name}\",", $" AS \"{name}\"\n", $" AS \"{name}\"\r" };
+        foreach (var pat in patterns)
+        {
+            int depth = 0;
+            bool inStr = false; char q = ' ';
+            int start = 0;
+            while (start <= sql.Length - pat.Length)
+            {
+                var c = sql[start];
+                if (inStr) { if (c == q) inStr = false; start++; continue; }
+                if (c == '\'' || c == '"') { inStr = true; q = c; start++; continue; }
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                else if (depth == 0 && string.Compare(sql, start, pat, 0, pat.Length, StringComparison.OrdinalIgnoreCase) == 0)
+                    return true;
+                start++;
+            }
+        }
+        // Also match trailing alias (AS name at end of leftSql)
+        var endPat = $" AS {name}";
+        if (sql.EndsWith(endPat, StringComparison.OrdinalIgnoreCase))
+        {
+            // Check depth at end
+            int d = 0; bool s = false; char qq = ' ';
+            foreach (var c in sql)
+            {
+                if (s) { if (c == qq) s = false; continue; }
+                if (c == '\'' || c == '"') { s = true; qq = c; continue; }
+                if (c == '(') d++;
+                else if (c == ')') d--;
+            }
+            if (d == 0) return true;
+        }
+        return false;
     }
 
     private static bool LooksLikeIntervalResult(Expression sourceExpr, string convertedSql)
