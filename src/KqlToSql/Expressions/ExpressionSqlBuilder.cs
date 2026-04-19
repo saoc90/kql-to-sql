@@ -397,6 +397,15 @@ internal class ExpressionSqlBuilder
                 leftAlias, rightAlias))
             .ToArray();
 
+        // sum/sumif on an interval column — rewrite to epoch-ms arithmetic so it type-checks in DuckDB.
+        if ((lower == "sum" || lower == "sumif") && args.Length >= 1 && IsBareIdentifier(args[0]) && IsIntervalColumn(args[0]))
+        {
+            var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
+            var filter = lower == "sumif" && args.Length >= 2 ? args[1] : null;
+            var inner = filter is null ? $"SUM({ms})" : $"SUM({ms}) FILTER (WHERE {filter})";
+            return $"(({inner}) * INTERVAL '1 millisecond')";
+        }
+
         var dialectResult = _dialect.TryTranslateFunction(lower, args);
         if (dialectResult != null)
         {
