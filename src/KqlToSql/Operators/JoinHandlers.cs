@@ -350,6 +350,11 @@ internal class JoinHandlers : OperatorHandlerBase
                 }
                 return null;
             }
+            case FunctionDeclaration funcDecl when funcDecl.Body?.Expression != null:
+                // `let B = view() { tabular-pipeline }` stores a FunctionDeclaration as the CTE's
+                // backing expression. Walk into the function body's tabular result so the outer
+                // join can enumerate its output columns.
+                return EnumerateColumns(funcDecl.Body.Expression, visiting);
             default:
                 return null;
         }
