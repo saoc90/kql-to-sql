@@ -32,4 +32,20 @@ datatable(X:int)[1]
         Assert.Contains("'X'", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("SELECT * FROM f", sql, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Nested_Let_Inside_Function_Body_Does_Not_Leak_Into_Outer_CTE_Chain()
+    {
+        // Repro for the "tbl does not exist" bug: the inner let (tbl_ex) must not be hoisted
+        // to query scope before the tabular param (tbl) is bound by the invoke inliner.
+        var converter = new KqlToSqlConverter();
+        var kql = "let f = (tbl:(*)) { let ex = tbl | project X; ex | count }; datatable(X:int)[1,2,3] | invoke f()";
+        var sql = converter.Convert(kql);
+
+        // tbl must appear in the WITH chain before ex (ex depends on tbl)
+        var tblIdx  = sql.IndexOf("tbl ", StringComparison.OrdinalIgnoreCase);
+        var exIdx   = sql.IndexOf(" ex ", StringComparison.OrdinalIgnoreCase);
+        Assert.True(tblIdx >= 0 && exIdx >= 0 && tblIdx < exIdx,
+            $"Expected 'tbl' before 'ex' in WITH chain but got: {sql}");
+    }
 }

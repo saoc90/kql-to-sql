@@ -152,9 +152,23 @@ public class KqlToSqlConverter
         throw new NotSupportedException("Unsupported KQL query");
     }
 
+    /// <summary>Returns true if <paramref name="node"/> has a <see cref="FunctionBody"/> ancestor,
+    /// meaning it is nested inside a function declaration and should not be hoisted to query scope.</summary>
+    private static bool IsInsideFunctionBody(SyntaxNode node)
+    {
+        for (var n = node.Parent; n != null; n = n.Parent)
+            if (n is FunctionBody) return true;
+        return false;
+    }
+
     private string ConvertQueryBlock(QueryBlock queryBlock)
     {
-        var statements = queryBlock.GetDescendants<Statement>().ToList();
+        // Use GetDescendants<Statement> for broad reach, but skip any statement whose parent
+        // chain passes through a FunctionBody — those belong to a function declaration and will
+        // be processed by ConvertFunctionBody when the function is actually invoked.
+        var statements = queryBlock.GetDescendants<Statement>()
+            .Where(s => !IsInsideFunctionBody(s))
+            .ToList();
 
         // Wire the (initially empty) dictionaries to the expression builder FIRST,
         // so substitutions work while processing each subsequent let statement.
