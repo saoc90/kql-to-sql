@@ -25,6 +25,9 @@ public class DuckDbDialect : ISqlDialect
             "toupper" => $"UPPER({args[0]})",
             "strlen" => $"LENGTH(CAST({args[0]} AS VARCHAR))",
             "now" => "NOW()",
+            // KQL pack_array flattens nested arrays: pack_array([a,b], [c,d]) → [a,b,c,d].
+            // Emit LIST_CONCAT when every arg is itself array-like; otherwise LIST_VALUE.
+            "pack_array" when args.Length > 0 && args.All(IsArrayLikeText) => $"LIST_CONCAT({string.Join(", ", args)})",
             "pack_array" => $"LIST_VALUE({string.Join(", ", args)})",
             "isempty" => $"({args[0]} IS NULL OR CAST({args[0]} AS VARCHAR) = '')",
             "isnotempty" or "isnotnull" => $"({args[0]} IS NOT NULL)",
