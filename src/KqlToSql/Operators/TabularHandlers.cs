@@ -78,7 +78,7 @@ internal class TabularHandlers : OperatorHandlerBase
         {
             if (se.Element is SimpleNamedExpression sne)
             {
-                var name = sne.Name.ToString().Trim();
+                var name = sne.Name.SimpleName;
                 var sql = Expr.ConvertExpression(sne.Expression);
                 if (LooksLikeIntervalResult(sne.Expression, sql) || Expr.IsIntervalExpression(sql))
                     Expr.MarkIntervalColumn(name);
@@ -116,15 +116,15 @@ internal class TabularHandlers : OperatorHandlerBase
         var segments = new List<string>();
         while (current is PathExpression pe)
         {
-            segments.Insert(0, pe.Selector.ToString().Trim());
+            segments.Insert(0, (pe.Selector as NameReference)?.Name.SimpleName ?? pe.Selector.ToString().Trim());
             current = pe.Expression;
         }
         if (current is not NameReference nr) return null;
         // Bare NameReference with no path: only synthesize alias if we drilled a conversion wrapper
         // (KQL auto-names toreal(X) → X). A raw 'project X' needs no alias.
         if (segments.Count == 0)
-            return drilledWrapper ? Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.ToString().Trim()) : null;
-        segments.Insert(0, nr.Name.ToString().Trim());
+            return drilledWrapper ? Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.SimpleName) : null;
+        segments.Insert(0, nr.Name.SimpleName);
         return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(string.Join("_", segments));
     }
 
@@ -141,7 +141,7 @@ internal class TabularHandlers : OperatorHandlerBase
         var mappings = projectRename.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
-                return $"{Expr.ConvertExpression(sne.Expression)} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.ToString().Trim())}";
+                return $"{Expr.ConvertExpression(sne.Expression)} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.SimpleName)}";
             throw new NotSupportedException("Unsupported project-rename expression");
         }).ToArray();
 
@@ -173,7 +173,7 @@ internal class TabularHandlers : OperatorHandlerBase
         {
             if (se.Element is SimpleNamedExpression sne)
             {
-                var name = sne.Name.ToString().Trim();
+                var name = sne.Name.SimpleName;
                 var quotedName = Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
                 var convertedSql = Expr.ConvertExpression(sne.Expression);
                 // Mark interval columns so downstream sum/sumif/divide pick the epoch-ms path.

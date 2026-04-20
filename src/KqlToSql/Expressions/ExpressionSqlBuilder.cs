@@ -1027,7 +1027,7 @@ internal class ExpressionSqlBuilder
                     {
                         return false;
                     }
-                    segments.Push(pe.Selector.ToString().Trim());
+                    segments.Push((pe.Selector as NameReference)?.Name.SimpleName ?? pe.Selector.ToString().Trim());
                     current = pe.Expression;
                     continue;
                 case ElementExpression ee:
