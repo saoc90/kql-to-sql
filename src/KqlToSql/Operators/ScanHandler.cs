@@ -43,7 +43,7 @@ internal sealed class ScanHandler : OperatorHandlerBase
             foreach (var declEl in scan.DeclareClause.Declarations)
             {
                 var param = declEl.Element;
-                var name = param.NameAndType.Name.ToString().Trim();
+                var name = param.NameAndType.Name.SimpleName;
                 var defaultSql = "NULL";
                 if (param.DefaultValue?.Value is Expression defExpr)
                 {
@@ -53,7 +53,7 @@ internal sealed class ScanHandler : OperatorHandlerBase
             }
         }
 
-        var stepName = step.Name.Name.ToString().Trim();
+        var stepName = step.Name.Name.SimpleName;
 
         // Walk assignments
         var selectClauses = new List<string>();
@@ -62,10 +62,10 @@ internal sealed class ScanHandler : OperatorHandlerBase
             foreach (var assignEl in step.ComputationClause.Assignments)
             {
                 var ass = assignEl.Element;
-                var colName = ass.Name.ToString().Trim();
+                var colName = ass.Name.SimpleName;
                 var valExpr = ass.Expression;
                 var sqlExpr = TranslateAssignment(colName, valExpr, stepName, declaredDefaults);
-                selectClauses.Add($"{sqlExpr} AS {colName}");
+                selectClauses.Add($"{sqlExpr} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(colName)}");
             }
         }
 
@@ -159,8 +159,9 @@ internal sealed class ScanHandler : OperatorHandlerBase
     {
         if (expr is PathExpression pe &&
             pe.Expression is NameReference nr &&
-            string.Equals(nr.Name.ToString().Trim(), stepName, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(pe.Selector.ToString().Trim(), column, StringComparison.OrdinalIgnoreCase))
+            string.Equals(nr.Name.SimpleName, stepName, StringComparison.OrdinalIgnoreCase) &&
+            pe.Selector is NameReference selector &&
+            string.Equals(selector.Name.SimpleName, column, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -173,8 +174,9 @@ internal sealed class ScanHandler : OperatorHandlerBase
         foreach (var pe in expr.GetDescendants<PathExpression>())
         {
             if (pe.Expression is NameReference nr &&
-                string.Equals(nr.Name.ToString().Trim(), stepName, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(pe.Selector.ToString().Trim(), column, StringComparison.OrdinalIgnoreCase))
+                string.Equals(nr.Name.SimpleName, stepName, StringComparison.OrdinalIgnoreCase) &&
+                pe.Selector is NameReference selector &&
+                string.Equals(selector.Name.SimpleName, column, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;
