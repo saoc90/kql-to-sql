@@ -29,7 +29,7 @@ public class DuckDbDialect : ISqlDialect
             // Emit LIST_CONCAT when every arg is itself array-like. Heterogeneous scalars
             // (e.g. strings mixed with numbers) can't unify under LIST<T>, so route through
             // TO_JSON so the result is LIST<JSON> and downstream JSON indexing still works.
-            "pack_array" when args.Length > 0 && args.All(IsArrayLikeText) => $"LIST_CONCAT({string.Join(", ", args)})",
+            "pack_array" when args.Length > 1 && args.All(IsArrayLikeText) => $"LIST_CONCAT({string.Join(", ", args)})",
             "pack_array" when args.Length > 1 && HasMixedScalarTypes(args) =>
                 $"LIST_VALUE({string.Join(", ", args.Select(a => $"TO_JSON({a})"))})",
             "pack_array" => $"LIST_VALUE({string.Join(", ", args)})",

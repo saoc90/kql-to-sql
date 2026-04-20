@@ -74,7 +74,7 @@ public class TypeCastFunctionTests
 | take 1
 | project tobool('1')";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT TRY_CAST('1' AS BOOLEAN) FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT TRY_CAST('1' AS BOOLEAN) AS Column1 FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -91,7 +91,7 @@ public class TypeCastFunctionTests
 | take 1
 | project todatetime('1950-01-03 00:00:00')";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT TRY_CAST('1950-01-03 00:00:00' AS TIMESTAMP) FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT TRY_CAST('1950-01-03 00:00:00' AS TIMESTAMP) AS Column1 FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

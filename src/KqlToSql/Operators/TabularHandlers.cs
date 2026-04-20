@@ -73,23 +73,27 @@ internal class TabularHandlers : OperatorHandlerBase
 
     internal string ApplyProject(string leftSql, ProjectOperator project)
     {
+        int anonCounter = 0;
         var columns = project.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
             {
                 var name = sne.Name.ToString().Trim();
                 var sql = Expr.ConvertExpression(sne.Expression);
-                // Propagate interval typing so downstream sum/divide pick the epoch-ms path
-                // even across a project boundary (e.g. project X = totimespan(Y) → sum(X)).
                 if (LooksLikeIntervalResult(sne.Expression, sql) || Expr.IsIntervalExpression(sql))
                     Expr.MarkIntervalColumn(name);
                 return $"{sql} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(name)}";
             }
-            // Bare JSON / path access (project DataMetadata.SectionName) → KQL auto-names
-            // the output column as the underscore-joined path.
             var synthesized = SynthesizePathAlias(se.Element);
             var bareSql = Expr.ConvertExpression(se.Element);
-            return synthesized != null ? $"{bareSql} AS {synthesized}" : bareSql;
+            if (synthesized != null)
+                return $"{bareSql} AS {synthesized}";
+            // Kusto auto-names bare project expressions Column1, Column2, … when the AST
+            // isn't a simple name or path. Match that so downstream references bind.
+            if (se.Element is NameReference)
+                return bareSql;
+            anonCounter++;
+            return $"{bareSql} AS Column{anonCounter}";
         }).ToArray();
 
         return ReplaceSelectStar(leftSql, string.Join(", ", columns));
