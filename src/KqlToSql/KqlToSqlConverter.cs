@@ -470,14 +470,45 @@ public class KqlToSqlConverter
             return $"SELECT * FROM {functionName}";
         }
 
-        // User-defined parameterized function call → inline body, wrap as query
-        if (_userFunctions.ContainsKey(functionName))
+        // User-defined parameterized function call → inline body, wrap as query.
+        // When the call has tabular args (NameReferences resolving to CTEs), bind each param
+        // as a CTE alias so the body's pipeline references (e.g. `SELECT * FROM _storedQualityValues`)
+        // resolve to the upstream CTE. Scalar args still bind via the expression builder's
+        // scalar-let path. Both paths coexist because scalar-let lookup wins over bare NameReference
+        // conversion in expression context, while ConvertNode's NameReference emits `SELECT * FROM <name>`
+        // which the CTE entry satisfies.
+        if (_userFunctions.TryGetValue(functionName, out var userFn))
         {
-            var inlined = _operators.ExpressionBuilder.ConvertExpression(fce);
-            if (inlined.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) ||
-                inlined.TrimStart().StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
-                return inlined;
-            return $"SELECT * FROM ({inlined})";
+            var savedCtes = new List<(string name, bool hadPrev, (string sql, bool mat) prev)>();
+            for (int i = 0; i < userFn.paramNames.Length && i < fce.ArgumentList.Expressions.Count; i++)
+            {
+                if (fce.ArgumentList.Expressions[i].Element is NameReference argRef)
+                {
+                    var argName = argRef.Name.ToString().Trim();
+                    if (_ctes.ContainsKey(argName))
+                    {
+                        var pname = userFn.paramNames[i];
+                        var hadPrev = _ctes.TryGetValue(pname, out var prev);
+                        savedCtes.Add((pname, hadPrev, prev));
+                        AddCte(pname, $"SELECT * FROM {argName}", materialized: false);
+                    }
+                }
+            }
+
+            try
+            {
+                var inlined = _operators.ExpressionBuilder.ConvertExpression(fce);
+                if (inlined.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) ||
+                    inlined.TrimStart().StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
+                    return inlined;
+                return $"SELECT * FROM ({inlined})";
+            }
+            finally
+            {
+                // Leave param CTEs in place so the outer WITH chain emits them. They're scoped
+                // to this converter invocation; the top-level Convert() clears _ctes on entry.
+                _ = savedCtes; // (suppressed restore: tabular aliases stay for the WITH emit)
+            }
         }
 
         // Try the expression builder (handles case, iif, scalar functions, etc.)
