@@ -167,7 +167,7 @@ internal class ExpressionSqlBuilder
                 ConvertBetween(be, leftAlias, rightAlias, true),
             InExpression inExpr => ConvertInExpression(inExpr, leftAlias, rightAlias),
             NameReference nr => ResolveNameReference(nr, leftAlias, rightAlias),
-            NameDeclaration nd => nd.Name.ToString().Trim(),
+            NameDeclaration nd => nd.SimpleName,
             PathExpression pe =>
                 $"{ConvertExpression(pe.Expression, leftAlias, rightAlias)}.{pe.Selector}",
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression =>
@@ -193,7 +193,7 @@ internal class ExpressionSqlBuilder
                 ConvertFunctionCall(fce, leftAlias, rightAlias),
             ParenthesizedExpression pe => $"({ConvertExpression(pe.Expression, leftAlias, rightAlias)})",
             DynamicExpression de => ConvertDynamic(de, leftAlias, rightAlias),
-            SimpleNamedExpression sne2 => $"{ConvertExpression(sne2.Expression, leftAlias, rightAlias)} AS {sne2.Name.ToString().Trim()}",
+            SimpleNamedExpression sne2 => $"{ConvertExpression(sne2.Expression, leftAlias, rightAlias)} AS {sne2.Name.SimpleName}",
             CompoundNamedExpression cne2 => ConvertExpression(cne2.Expression, leftAlias, rightAlias),
             PipeExpression pe2 when _nodeConverter != null => $"({_nodeConverter(pe2)})",
             ElementExpression ee => ConvertElementAccess(ee, leftAlias, rightAlias),
@@ -383,7 +383,7 @@ internal class ExpressionSqlBuilder
 
     private string ResolveNameReference(NameReference nr, string? leftAlias, string? rightAlias)
     {
-        var name = nr.Name.ToString().Trim();
+        var name = nr.SimpleName;
         if (name == "$left") return leftAlias ?? "$left";
         if (name == "$right") return rightAlias ?? "$right";
         if (_scalarLets != null && _scalarLets.TryGetValue(name, out var scalarSql))
@@ -418,7 +418,7 @@ internal class ExpressionSqlBuilder
 
     private string ConvertFunctionCall(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
-        var name = fce.Name.ToString().Trim();
+        var name = fce.Name.SimpleName;
         var lower = name.ToLowerInvariant();
         if (CastFunctionMap.TryGetValue(lower, out var sqlType))
         {
@@ -508,7 +508,7 @@ internal class ExpressionSqlBuilder
             var addedLets = new List<string>();
             foreach (var ls in nestedLets)
             {
-                var lname = ls.Name.ToString().Trim();
+                var lname = ls.Name.SimpleName;
                 try
                 {
                     // Try to convert as a scalar binding
@@ -583,7 +583,7 @@ internal class ExpressionSqlBuilder
         if (expr is SimpleNamedExpression sne)
         {
             var inner = ConvertExpression(sne.Expression, leftAlias, rightAlias);
-            return (inner, sne.Name.ToString().Trim());
+            return (inner, sne.Name.SimpleName);
         }
         return (ConvertExpression(expr, leftAlias, rightAlias), null);
     }
@@ -719,7 +719,7 @@ internal class ExpressionSqlBuilder
         // on the RHS of IN, so expand to a subquery form.
         if (list.Expressions.Count == 1 && list.Expressions[0].Element is NameReference tblRef)
         {
-            var refName = tblRef.Name.ToString().Trim();
+            var refName = tblRef.SimpleName;
             bool isScalar = _scalarLets != null && _scalarLets.ContainsKey(refName);
             if (!isScalar && !string.Equals(refName, "$left", StringComparison.Ordinal) && !string.Equals(refName, "$right", StringComparison.Ordinal))
             {
@@ -1024,7 +1024,7 @@ internal class ExpressionSqlBuilder
             switch (current)
             {
                 case PathExpression pe:
-                    if (pe.Expression is NameReference nr && (nr.Name.ToString().Trim() == "$left" || nr.Name.ToString().Trim() == "$right"))
+                    if (pe.Expression is NameReference nr && (nr.SimpleName == "$left" || nr.SimpleName == "$right"))
                     {
                         return false;
                     }
@@ -1246,8 +1246,8 @@ internal class ExpressionSqlBuilder
     {
         return expr switch
         {
-            NameReference nr => nr.Name.ToString().Trim(),
-            PathExpression pe when pe.Expression is NameReference nr && nr.Name.ToString().Trim() == "$left" => pe.Selector.ToString().Trim(),
+            NameReference nr => nr.SimpleName,
+            PathExpression pe when pe.Expression is NameReference nr && nr.SimpleName == "$left" => (pe.Selector as NameReference)?.SimpleName ?? pe.Selector.ToString().Trim(),
             BinaryExpression be when be.Kind == SyntaxKind.EqualExpression => ExtractLeftKey(be.Left),
             BinaryExpression be when be.Kind == SyntaxKind.AndExpression => ExtractLeftKey(be.Left),
             ParenthesizedExpression pe2 => ExtractLeftKey(pe2.Expression),
