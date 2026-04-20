@@ -16,7 +16,7 @@ internal class JoinHandlers : OperatorHandlerBase
 
     internal string ApplyJoin(string leftSql, JoinOperator join, Expression? leftExpression = null)
     {
-        var kindParam = join.Parameters.FirstOrDefault(p => p.Name.ToString().Trim().Equals("kind", StringComparison.OrdinalIgnoreCase));
+        var kindParam = join.Parameters.FirstOrDefault(p => p.Name.SimpleName.Equals("kind", StringComparison.OrdinalIgnoreCase));
         var kind = kindParam?.Expression.ToString().Trim().ToLowerInvariant();
         // SEMI/ANTI joins are not a DuckDB join syntax — rewrite via EXISTS / NOT EXISTS.
         if (kind is "leftsemi" or "rightsemi" or "leftanti" or "anti" or "rightanti")
@@ -150,7 +150,7 @@ internal class JoinHandlers : OperatorHandlerBase
 
     internal string ApplyLookup(string leftSql, LookupOperator lookup, Expression? leftExpression = null)
     {
-        var kindParam = lookup.Parameters.FirstOrDefault(p => p.Name.ToString().Trim().Equals("kind", StringComparison.OrdinalIgnoreCase));
+        var kindParam = lookup.Parameters.FirstOrDefault(p => p.Name.SimpleName.Equals("kind", StringComparison.OrdinalIgnoreCase));
         var kind = kindParam?.Expression.ToString().Trim().ToLowerInvariant();
         var joinType = kind switch
         {
@@ -207,7 +207,7 @@ internal class JoinHandlers : OperatorHandlerBase
 
     internal string ApplyUnion(string leftSql, UnionOperator union, Expression? leftExpression)
     {
-        var withSourceParam = union.Parameters.FirstOrDefault(p => p.Name.ToString().Trim().Equals("withsource", StringComparison.OrdinalIgnoreCase));
+        var withSourceParam = union.Parameters.FirstOrDefault(p => p.Name.SimpleName.Equals("withsource", StringComparison.OrdinalIgnoreCase));
         string? sourceColumn = withSourceParam != null ? withSourceParam.Expression.ToString().Trim() : null;
 
         var parts = new List<string>();
@@ -239,7 +239,7 @@ internal class JoinHandlers : OperatorHandlerBase
 
     internal string ConvertUnion(UnionOperator union)
     {
-        var withSourceParam = union.Parameters.FirstOrDefault(p => p.Name.ToString().Trim().Equals("withsource", StringComparison.OrdinalIgnoreCase));
+        var withSourceParam = union.Parameters.FirstOrDefault(p => p.Name.SimpleName.Equals("withsource", StringComparison.OrdinalIgnoreCase));
         string? sourceColumn = withSourceParam != null ? withSourceParam.Expression.ToString().Trim() : null;
 
         var parts = new List<string>();
@@ -330,7 +330,7 @@ internal class JoinHandlers : OperatorHandlerBase
             }
             case FunctionCallExpression fce:
             {
-                var fname = fce.Name.ToString().Trim();
+                var fname = fce.Name.SimpleName;
                 if (visiting.Contains(fname)) return null;  // recursion guard
                 if (Converter.TryGetUserFunctionBody(fname, out var body) && body.Expression != null)
                 {
@@ -361,7 +361,7 @@ internal class JoinHandlers : OperatorHandlerBase
                 var kept = new List<string>();
                 foreach (var se in keep.Expressions)
                 {
-                    if (se.Element is NameReference knr) kept.Add(knr.Name.ToString().Trim());
+                    if (se.Element is NameReference knr) kept.Add(knr.SimpleName);
                     else return null;
                 }
                 return kept;
@@ -380,7 +380,7 @@ internal class JoinHandlers : OperatorHandlerBase
                 foreach (var se in ren.Expressions)
                 {
                     if (se.Element is SimpleNamedExpression sne && sne.Expression is NameReference old)
-                        map[old.Name.ToString().Trim()] = sne.Name.ToString().Trim();
+                        map[old.SimpleName] = sne.Name.SimpleName;
                 }
                 return input.Select(c => map.TryGetValue(c, out var n) ? n : c).ToList();
             }
@@ -393,7 +393,7 @@ internal class JoinHandlers : OperatorHandlerBase
                 {
                     if (se.Element is SimpleNamedExpression sne)
                     {
-                        var n = sne.Name.ToString().Trim();
+                        var n = sne.Name.SimpleName;
                         if (!existing.Contains(n)) { result.Add(n); existing.Add(n); }
                     }
                 }
@@ -406,8 +406,8 @@ internal class JoinHandlers : OperatorHandlerBase
                 {
                     foreach (var se in sum.ByClause.Expressions)
                     {
-                        if (se.Element is SimpleNamedExpression byNamed) cols.Add(byNamed.Name.ToString().Trim());
-                        else if (se.Element is NameReference byNr) cols.Add(byNr.Name.ToString().Trim());
+                        if (se.Element is SimpleNamedExpression byNamed) cols.Add(byNamed.Name.SimpleName);
+                        else if (se.Element is NameReference byNr) cols.Add(byNr.SimpleName);
                         else return null;
                     }
                 }
@@ -416,7 +416,7 @@ internal class JoinHandlers : OperatorHandlerBase
                 {
                     if (agg.Element is SimpleNamedExpression aggNamed)
                     {
-                        cols.Add(aggNamed.Name.ToString().Trim());
+                        cols.Add(aggNamed.Name.SimpleName);
                     }
                     else if (agg.Element is FunctionCallExpression aggFce &&
                              aggFce.IsAny(Aggregates.ArgMax, Aggregates.ArgMin,
@@ -430,7 +430,7 @@ internal class JoinHandlers : OperatorHandlerBase
                         for (int i = 1; i < aggFce.ArgumentList.Expressions.Count; i++)
                         {
                             var v = aggFce.ArgumentList.Expressions[i].Element;
-                            if (v is SimpleNamedExpression vNamed) cols.Add(vNamed.Name.ToString().Trim());
+                            if (v is SimpleNamedExpression vNamed) cols.Add(vNamed.Name.SimpleName);
                             else if (v is NameReference vNr) cols.Add(vNr.Name.SimpleName);
                             else return null; // e.g. arg_max(k, *) — can't enumerate wildcard
                         }
@@ -450,8 +450,8 @@ internal class JoinHandlers : OperatorHandlerBase
                 var names = new List<string>();
                 foreach (var se in dist.Expressions)
                 {
-                    if (se.Element is NameReference dnr) names.Add(dnr.Name.ToString().Trim());
-                    else if (se.Element is SimpleNamedExpression dsne) names.Add(dsne.Name.ToString().Trim());
+                    if (se.Element is NameReference dnr) names.Add(dnr.SimpleName);
+                    else if (se.Element is SimpleNamedExpression dsne) names.Add(dsne.Name.SimpleName);
                     else return null;
                 }
                 return names;
@@ -474,14 +474,14 @@ internal class JoinHandlers : OperatorHandlerBase
                 {
                     if (se.Element is MvExpandExpression mvx && mvx.Expression is SimpleNamedExpression sne)
                     {
-                        var n = sne.Name.ToString().Trim();
+                        var n = sne.Name.SimpleName;
                         if (!existing.Contains(n)) { result.Add(n); existing.Add(n); }
                     }
                 }
                 return result;
             }
             case EvaluateOperator evalOp when evalOp.FunctionCall is FunctionCallExpression efce
-                && string.Equals(efce.Name.ToString().Trim(), "pivot", StringComparison.OrdinalIgnoreCase):
+                && string.Equals(efce.Name.SimpleName, "pivot", StringComparison.OrdinalIgnoreCase):
             {
                 // evaluate pivot(pivotCol, agg [, groupCols...]) → passthrough (or groupCols) + IN values.
                 // Matches ApplyEvaluatePivot's IN-list inference so downstream joins can emit
@@ -611,9 +611,9 @@ internal class JoinHandlers : OperatorHandlerBase
         foreach (var se in exprs)
         {
             if (se.Element is SimpleNamedExpression sne)
-                names.Add(sne.Name.ToString().Trim());
+                names.Add(sne.Name.SimpleName);
             else if (se.Element is NameReference nr)
-                names.Add(nr.Name.ToString().Trim());
+                names.Add(nr.SimpleName);
             else
                 return null;
         }
