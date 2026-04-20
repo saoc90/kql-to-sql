@@ -17,7 +17,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         if (evaluate.FunctionCall is not FunctionCallExpression fce)
             throw new NotSupportedException("Unsupported evaluate expression");
 
-        var pluginName = fce.Name.ToString().Trim().ToLowerInvariant();
+        var pluginName = fce.Name.SimpleName.ToLowerInvariant();
 
         return pluginName switch
         {
@@ -39,7 +39,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         string aggSql;
         if (args[1].Element is FunctionCallExpression aggFce)
         {
-            var name = aggFce.Name.ToString().Trim().ToLowerInvariant();
+            var name = aggFce.Name.SimpleName.ToLowerInvariant();
             var aggArgs = aggFce.ArgumentList.Expressions
                 .Select(a => Expr.ConvertExpression(a.Element)).ToArray();
             // sum(INTERVAL) — DuckDB's SUM rejects INTERVAL; route through epoch-ms so the
@@ -256,10 +256,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
             string aggSql;
             if (mse.Expression is SimpleNamedExpression named)
             {
-                alias = named.Name.ToString().Trim();
+                alias = named.Name.SimpleName;
                 if (named.Expression is FunctionCallExpression fce)
                 {
-                    var fname = fce.Name.ToString().Trim().ToLowerInvariant();
+                    var fname = fce.Name.SimpleName.ToLowerInvariant();
                     var fargs = fce.ArgumentList.Expressions.Select(a => Expr.ConvertExpression(a.Element)).ToArray();
                     aggSql = Dialect.TryTranslateAggregate(fname, fargs) ?? $"{fname}({string.Join(", ", fargs)})";
                 }
@@ -270,7 +270,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
             }
             else if (mse.Expression is FunctionCallExpression directFce)
             {
-                var fname = directFce.Name.ToString().Trim().ToLowerInvariant();
+                var fname = directFce.Name.SimpleName.ToLowerInvariant();
                 var fargs = directFce.ArgumentList.Expressions.Select(a => Expr.ConvertExpression(a.Element)).ToArray();
                 aggSql = Dialect.TryTranslateAggregate(fname, fargs) ?? $"{fname}({string.Join(", ", fargs)})";
                 alias = fargs.Length > 0 ? $"{fname}_{fargs[0]}" : fname;
@@ -344,13 +344,13 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
             if (mve.Expression is SimpleNamedExpression sne)
             {
-                var name = sne.Name.ToString().Trim();
+                var name = sne.Name.SimpleName;
                 var sourceSql = Expr.ConvertExpression(sne.Expression);
                 columns.Add((name, sourceSql, false));
             }
             else if (mve.Expression is NameReference nr)
             {
-                var bare = nr.Name.ToString().Trim();
+                var bare = nr.SimpleName;
                 columns.Add((bare, bare, true));
             }
             else
@@ -409,7 +409,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         string sourceSql;
         if (mae.Expression is SimpleNamedExpression sne)
         {
-            columnName = sne.Name.ToString().Trim();
+            columnName = sne.Name.SimpleName;
             sourceSql = Expr.ConvertExpression(sne.Expression);
         }
         else
@@ -451,7 +451,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
             string byExpr;
             if (byClause.Expression is FunctionCallExpression bfce)
             {
-                var name = bfce.Name.ToString().Trim().ToLowerInvariant();
+                var name = bfce.Name.SimpleName.ToLowerInvariant();
                 var bArgs = bfce.ArgumentList.Expressions
                     .Select(a => Expr.ConvertExpression(a.Element)).ToArray();
                 byExpr = Dialect.TryTranslateAggregate(name, bArgs)
@@ -487,7 +487,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
             string aggSql;
             if (aggExpr is SimpleNamedExpression sne && sne.Expression is FunctionCallExpression namedFce)
             {
-                var name = namedFce.Name.ToString().Trim().ToLowerInvariant();
+                var name = namedFce.Name.SimpleName.ToLowerInvariant();
                 var args = namedFce.ArgumentList.Expressions
                     .Select(a => Expr.ConvertExpression(a.Element)).ToArray();
                 aggSql = Dialect.TryTranslateAggregate(name, args)
@@ -495,7 +495,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
             }
             else if (aggExpr is FunctionCallExpression fce)
             {
-                var name = fce.Name.ToString().Trim().ToLowerInvariant();
+                var name = fce.Name.SimpleName.ToLowerInvariant();
                 var args = fce.ArgumentList.Expressions
                     .Select(a => Expr.ConvertExpression(a.Element)).ToArray();
                 aggSql = Dialect.TryTranslateAggregate(name, args)
@@ -577,7 +577,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var extras = serialize.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
-                return $"{Expr.ConvertExpression(sne.Expression)} AS {sne.Name.ToString().Trim()}";
+                return $"{Expr.ConvertExpression(sne.Expression)} AS {sne.Name.SimpleName}";
             return Expr.ConvertExpression(se.Element);
         }).ToArray();
 
@@ -596,7 +596,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
     internal string ConvertRange(RangeOperator range)
     {
-        var name = range.Name.Name.ToString().Trim();
+        var name = range.Name.SimpleName;
         var start = Expr.ConvertExpression(range.From);
         var end = Expr.ConvertExpression(range.To);
         var step = Expr.ConvertExpression(range.Step);
@@ -611,7 +611,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         {
             if (expr.Element is SimpleNamedExpression sne)
             {
-                var name = sne.Name.ToString().Trim();
+                var name = sne.Name.SimpleName;
                 var value = Expr.ConvertExpression(sne.Expression);
                 parts.Add($"{value} AS {name}");
             }
@@ -631,7 +631,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         {
             if (col.Element is NameAndTypeDeclaration nat)
             {
-                var cname = nat.Name.ToString().Trim();
+                var cname = nat.Name.SimpleName;
                 columnNames.Add(Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(cname));
                 // Propagate KQL timespan columns so downstream sum/divide hit the epoch-ms path.
                 var typeName = nat.Type?.ToString().Trim();
