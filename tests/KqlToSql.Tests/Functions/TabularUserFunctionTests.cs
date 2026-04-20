@@ -28,8 +28,9 @@ datatable(X:int)[1]
 | invoke f('X')";
         var sql = converter.Convert(kql);
 
-        // col must be substituted with the string literal 'X'
-        Assert.Contains("'X'", sql, StringComparison.Ordinal);
+        // col='X' substitutes at the column_ifexists call; the dialect unwraps the string
+        // literal to emit COALESCE(X, '') so DuckDB treats X as a column reference.
+        Assert.Contains("COALESCE(X", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("SELECT * FROM f", sql, StringComparison.Ordinal);
     }
 
