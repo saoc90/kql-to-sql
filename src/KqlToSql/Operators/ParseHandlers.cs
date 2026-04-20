@@ -59,7 +59,7 @@ internal sealed class ParseHandlers : OperatorHandlerBase
             {
                 if (col.Element is NameAndTypeDeclaration nat)
                 {
-                    var name = nat.Name.ToString().Trim();
+                    var name = nat.Name.SimpleName;
                     var type = nat.Type?.ToString().Trim().TrimStart(':').ToLowerInvariant() ?? "string";
                     columns.Add((name, type));
                 }
@@ -118,22 +118,22 @@ internal sealed class ParseHandlers : OperatorHandlerBase
             }
             else if (pattern is LiteralExpression lit)
             {
-                var text = lit.ToString().Trim().Trim('\'', '"');
-                if (text.StartsWith("@"))
-                    regexParts.Add(text.TrimStart('@').Trim('\'', '"'));
-                else
-                    regexParts.Add(Regex.Escape(text));
+                var value = lit.LiteralValue?.ToString() ?? "";
+                // KQL @"…" verbatim string: the parser keeps the @ in Token.Text but unescapes
+                // the value; treat as a literal regex the user wrote intentionally.
+                var isVerbatim = lit.Token?.Text?.StartsWith("@") == true;
+                regexParts.Add(isVerbatim ? value : Regex.Escape(value));
             }
             else if (pattern is NameAndTypeDeclaration nat)
             {
-                var name = nat.Name.ToString().Trim();
+                var name = nat.Name.SimpleName;
                 var type = nat.Type?.ToString().Trim().TrimStart(':').ToLowerInvariant();
                 captures.Add((name, type));
                 regexParts.Add(GetCaptureRegex(type));
             }
             else if (pattern is NameDeclaration nd)
             {
-                var name = nd.Name.ToString().Trim();
+                var name = nd.Name.SimpleName;
                 captures.Add((name, null));
                 bool isLast = IsLastCapture(i, patterns);
                 regexParts.Add(isLast ? "(.*)" : "(.*?)");
