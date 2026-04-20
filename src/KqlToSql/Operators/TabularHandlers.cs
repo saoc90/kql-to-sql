@@ -131,7 +131,8 @@ internal class TabularHandlers : OperatorHandlerBase
     internal string ApplyProjectAway(string leftSql, ProjectAwayOperator projectAway)
     {
         var columns = projectAway.Expressions
-            .Select(se => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(se.Element.ToString().Trim()))
+            .Select(se => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(
+                se.Element is NameReference nr ? nr.SimpleName : se.Element.ToString().Trim()))
             .ToArray();
         return ReplaceSelectStar(leftSql, Dialect.SelectExclude(columns));
     }
@@ -151,7 +152,8 @@ internal class TabularHandlers : OperatorHandlerBase
     internal string ApplyProjectKeep(string leftSql, ProjectKeepOperator projectKeep)
     {
         var columns = projectKeep.Expressions
-            .Select(se => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(se.Element.ToString().Trim()))
+            .Select(se => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(
+                se.Element is NameReference nr ? nr.SimpleName : se.Element.ToString().Trim()))
             .ToArray();
         return ReplaceSelectStar(leftSql, string.Join(", ", columns));
     }
@@ -159,7 +161,8 @@ internal class TabularHandlers : OperatorHandlerBase
     internal string ApplyProjectReorder(string leftSql, ProjectReorderOperator projectReorder)
     {
         var columns = projectReorder.Expressions
-            .Select(se => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(se.Element.ToString().Trim()))
+            .Select(se => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(
+                se.Element is NameReference nr ? nr.SimpleName : se.Element.ToString().Trim()))
             .ToArray();
         return ReplaceSelectStar(leftSql, $"{string.Join(", ", columns)}, {Dialect.SelectExclude(columns)}");
     }
@@ -192,7 +195,9 @@ internal class TabularHandlers : OperatorHandlerBase
                 int idx = 0;
                 foreach (var nameNode in cne.Names.Names)
                 {
-                    var n = nameNode.Element.ToString().Trim();
+                    var n = nameNode.Element is NameDeclaration nd
+                        ? nd.SimpleName
+                        : nameNode.Element.ToString().Trim();
                     extras.Add(($"{rhs}[{idx + 1}] AS {n}", n));
                     idx++;
                 }
@@ -219,7 +224,7 @@ internal class TabularHandlers : OperatorHandlerBase
                          outerFce.ArgumentList.Expressions[0].Element is SimpleNamedExpression innerNamed)
                 {
                     // KQL: extend round(Pct = x/y*100, 2) — the inner name=... labels the extend's output.
-                    var innerName = innerNamed.Name.ToString().Trim();
+                    var innerName = innerNamed.Name.SimpleName;
                     extras.Add(($"{colSql} AS {innerName}", innerName));
                 }
                 else
