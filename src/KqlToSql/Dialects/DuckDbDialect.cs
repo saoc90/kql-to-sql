@@ -55,7 +55,7 @@ public class DuckDbDialect : ISqlDialect
             "split" => $"STRING_SPLIT(CAST({args[0]} AS VARCHAR), {args[1]})",
             "floor" => $"FLOOR({args[0]})",
             "ceiling" => $"CEILING({args[0]})",
-            "abs" => $"ABS({args[0]})",
+            "abs" => $"GREATEST({args[0]}, -({args[0]}))",
             "sqrt" => $"SQRT({args[0]})",
             "log" => $"LN({args[0]})",
             "log10" => $"LOG10({args[0]})",

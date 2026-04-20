@@ -150,11 +150,11 @@ public class ScalarFunctionImprovementTests
     }
 
     [Fact]
-    public void Abs_MapsToAbs()
+    public void Abs_WorksForNumericAndInterval()
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("T | extend a = abs(Score)");
-        Assert.Equal("SELECT *, ABS(Score) AS a FROM T", sql);
+        Assert.Equal("SELECT *, GREATEST(Score, -(Score)) AS a FROM T", sql);
     }
 
     [Fact]

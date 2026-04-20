@@ -95,13 +95,13 @@ internal class JoinHandlers : OperatorHandlerBase
         var selectClause = BuildJoinSelectClause(leftCols, rightCols, keySet);
         if (selectClause == null)
         {
-            // Schema not enumerable on one side — we can't emit `R.X AS X1` per column, so
-            // fall back to `L.*, R.* EXCLUDE (keys)` which at least avoids duplicate-name
-            // ambiguity. Downstream references to `<key>1` will fail, but that's a smaller
-            // failure surface than the ambiguous-column error that `L.*, R.*` produces.
-            var rightColumns = Dialect.SelectExclude(leftKeys.ToArray());
+            // Schema not enumerable on one side — rename the right-side join keys to `<key>1`
+            // so downstream references to the suffixed form bind. Using EXCLUDE here instead
+            // would drop the keys entirely and break queries that project them.
+            var renames = leftKeys.Select(k => $"{k} AS {UnquoteIdent(k)}1").ToArray();
+            var rightColumns = Dialect.SelectRename(renames);
             selectClause = rightColumns.Contains("/*")
-                ? "*"  // Dialect doesn't support EXCLUDE (e.g., PGlite)
+                ? "*"
                 : $"L.*, R.{rightColumns}";
         }
 

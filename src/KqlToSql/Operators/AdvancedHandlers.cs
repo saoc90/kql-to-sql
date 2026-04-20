@@ -42,8 +42,22 @@ internal class AdvancedHandlers : OperatorHandlerBase
             var name = aggFce.Name.ToString().Trim().ToLowerInvariant();
             var aggArgs = aggFce.ArgumentList.Expressions
                 .Select(a => Expr.ConvertExpression(a.Element)).ToArray();
-            aggSql = Dialect.TryTranslateAggregate(name, aggArgs)
-                ?? $"{name}({string.Join(", ", aggArgs)})";
+            // sum(INTERVAL) — DuckDB's SUM rejects INTERVAL; route through epoch-ms so the
+            // aggregate operates on BIGINT and the result is reconstructed as INTERVAL. The
+            // same path applies in the summarize handler; duplicated here because pivot's
+            // USING clause consumes the aggregate SQL directly without going through it.
+            if (aggFce.Is(Aggregates.Sum) && aggArgs.Length == 1
+                && (Expr.IsIntervalExpression(aggArgs[0])
+                    || HasIntervalNameReference(aggFce.ArgumentList.Expressions[0].Element)))
+            {
+                var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({aggArgs[0]}) AS TIMESTAMP))";
+                aggSql = $"((SUM({ms})) * INTERVAL '1 millisecond')";
+            }
+            else
+            {
+                aggSql = Dialect.TryTranslateAggregate(name, aggArgs)
+                    ?? $"{name}({string.Join(", ", aggArgs)})";
+            }
         }
         else
         {
@@ -146,6 +160,16 @@ internal class AdvancedHandlers : OperatorHandlerBase
         EvaluateOperator => true,
         _ => false,
     };
+
+    private bool HasIntervalNameReference(SyntaxNode? node)
+    {
+        if (node == null) return false;
+        if (node is NameReference nr && Expr.IsIntervalColumn(nr.Name.SimpleName))
+            return true;
+        foreach (var child in node.GetDescendants<NameReference>())
+            if (Expr.IsIntervalColumn(child.Name.SimpleName)) return true;
+        return false;
+    }
 
     private static void AddIdentifierNames(Expression expr, HashSet<string> bag)
     {
