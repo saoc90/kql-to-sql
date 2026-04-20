@@ -60,7 +60,100 @@ internal class AdvancedHandlers : OperatorHandlerBase
             ? $" GROUP BY {string.Join(", ", groupByCols)}"
             : "";
 
-        return $"PIVOT ({leftSql}) ON {pivotCol} USING {aggSql}{groupByClause}";
+        // Pin the output schema by collecting downstream references to pivot-output columns.
+        // Without IN, DuckDB's PIVOT emits columns for distinct runtime pivot-values only;
+        // subsequent operators that bind those columns fail when the data is empty at EXPLAIN.
+        var pinned = CollectPivotOutputColumns(fce, args);
+        var inClause = pinned.Count > 0
+            ? $" IN ({string.Join(", ", pinned.Select(QuoteStringLiteral))})"
+            : "";
+
+        return $"PIVOT ({leftSql}) ON {pivotCol}{inClause} USING {aggSql}{groupByClause}";
+    }
+
+    private static string QuoteStringLiteral(string s) => "'" + s.Replace("'", "''") + "'";
+
+    private static List<string> CollectPivotOutputColumns(
+        FunctionCallExpression pivotFce,
+        Kusto.Language.Syntax.SyntaxList<SeparatedElement<Expression>> pivotArgs)
+    {
+        var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddIdentifierNames(pivotArgs[0].Element, exclude);
+        if (pivotArgs[1].Element is FunctionCallExpression agg)
+            foreach (var a in agg.ArgumentList.Expressions)
+                AddIdentifierNames(a.Element, exclude);
+        for (int i = 2; i < pivotArgs.Count; i++)
+            AddIdentifierNames(pivotArgs[i].Element, exclude);
+
+        var candidates = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return;
+            if (exclude.Contains(name)) return;
+            if (seen.Add(name)) candidates.Add(name);
+        }
+
+        var scan = pivotFce.Parent?.Parent?.Parent as PipeExpression;
+        while (scan != null)
+        {
+            var op = scan.Operator;
+            if (IsSchemaResetOperator(op)) break;
+
+            foreach (var fce in op.GetDescendants<FunctionCallExpression>())
+            {
+                if (fce.Is(Functions.ColumnIfExists) && fce.ArgumentList.Expressions.Count >= 1
+                    && fce.ArgumentList.Expressions[0].Element is LiteralExpression lit
+                    && lit.Kind == SyntaxKind.StringLiteralExpression
+                    && lit.LiteralValue is string s)
+                {
+                    Add(s);
+                }
+            }
+
+            if (op is ExtendOperator ext)
+            {
+                foreach (var sep in ext.Expressions)
+                {
+                    if (sep.Element is SimpleNamedExpression sne
+                        && sne.Name is NameDeclaration nd)
+                    {
+                        var lhs = nd.Name?.SimpleName;
+                        if (!string.IsNullOrEmpty(lhs)
+                            && sne.Expression.GetDescendants<NameReference>()
+                                .Any(r => string.Equals(r.SimpleName, lhs, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            Add(lhs!);
+                        }
+                    }
+                }
+            }
+
+            scan = scan.Parent as PipeExpression;
+        }
+
+        return candidates;
+    }
+
+    private static bool IsSchemaResetOperator(QueryOperator op) => op switch
+    {
+        SummarizeOperator => true,
+        JoinOperator => true,
+        UnionOperator => true,
+        LookupOperator => true,
+        MakeSeriesOperator => true,
+        EvaluateOperator => true,
+        _ => false,
+    };
+
+    private static void AddIdentifierNames(Expression expr, HashSet<string> bag)
+    {
+        if (expr is NameReference nr && !string.IsNullOrEmpty(nr.SimpleName))
+            bag.Add(nr.SimpleName);
+        foreach (var inner in expr.GetDescendants<NameReference>())
+            if (!string.IsNullOrEmpty(inner.SimpleName))
+                bag.Add(inner.SimpleName);
     }
 
     internal string ApplyEvaluateNarrow(string leftSql)
