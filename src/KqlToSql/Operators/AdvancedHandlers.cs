@@ -243,7 +243,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         {
             var (name, source, excludeName) = columns[0];
             var unnestAlias = "u";
-            var unnestSource = source == name ? $"{sourceAlias}.{name}" : source;
+            var unnestSource = CoerceToUnnestable(source == name ? $"{sourceAlias}.{name}" : source);
             var unnestClause = $"CROSS JOIN UNNEST({unnestSource}) AS {unnestAlias}(value)";
             var excludePart = excludeName
                 ? $"{sourceAlias}.{Dialect.SelectExclude(new[] { name })}"
@@ -256,7 +256,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         for (int i = 0; i < columns.Count; i++)
         {
             var (name, source, _) = columns[i];
-            var unnestSource = source == name ? $"{sourceAlias}.{name}" : source;
+            var unnestSource = CoerceToUnnestable(source == name ? $"{sourceAlias}.{name}" : source);
             clauses.Add($"CROSS JOIN UNNEST({unnestSource}) AS u{i}(value)");
         }
         var existingNames = columns.Where(c => c.ExcludeName).Select(c => c.Name).ToArray();
@@ -537,6 +537,20 @@ internal class AdvancedHandlers : OperatorHandlerBase
         }
 
         return $"SELECT * FROM (VALUES {string.Join(", ", rows)}) AS t({string.Join(", ", columnNames)})";
+    }
+
+    private static string CoerceToUnnestable(string source)
+    {
+        // DuckDB's UNNEST requires a LIST/ARRAY input. Our ConvertExpression may return a JSON
+        // expression (parse_json(..) or CAST(.. AS JSON)) which isn't directly unnestable.
+        // Cast to JSON[] so each array element becomes a row value.
+        var trimmed = source.TrimEnd();
+        if (trimmed.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.EndsWith(" AS JSON)", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"CAST({source} AS JSON[])";
+        }
+        return source;
     }
 
     private static string? TryGetInnerIdentifier(SyntaxNode node)
