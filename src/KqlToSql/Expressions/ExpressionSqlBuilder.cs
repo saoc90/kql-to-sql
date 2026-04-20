@@ -1192,8 +1192,10 @@ internal class ExpressionSqlBuilder
         // DuckDB rejects TIMESTAMP/INTERVAL and INTERVAL/INTERVAL directly. KQL allows these
         // to express 'how many intervals fit in this duration / distance from epoch'.
         // Convert both operands to epoch-milliseconds when we detect interval-typed operands.
-        bool rightIsInterval = IsIntervalExpression(right);
-        bool leftIsInterval = IsIntervalExpression(left);
+        // Fall back to AST walk when the text-level check misses — e.g. a bare identifier
+        // reference to a marked interval column wrapped in parens/aliases loses its signature.
+        bool rightIsInterval = IsIntervalExpression(right) || AstReferencesIntervalColumn(bin.Right);
+        bool leftIsInterval = IsIntervalExpression(left) || AstReferencesIntervalColumn(bin.Left);
         bool leftIsTimestampLike = bin.Left is NameReference || bin.Left is LiteralExpression lit &&
                                    lit.Kind == SyntaxKind.DateTimeLiteralExpression;
 
@@ -1216,6 +1218,21 @@ internal class ExpressionSqlBuilder
             return $"TRY_CAST({left} AS DOUBLE) / {right}";
 
         return $"{left} / {right}";
+    }
+
+    private bool AstReferencesIntervalColumn(SyntaxNode? node)
+    {
+        // Walk AST rather than inspecting SQL text so string-literal contents don't
+        // false-positive. Recurse through simple wrappers (ParenthesizedExpression) so
+        // `(DurationTotal)` still resolves. Keeps the textual IsIntervalExpression as
+        // the first check; this covers operand shapes like `DurationTotal` that lost
+        // the INTERVAL signature after CTE-boundary emission.
+        return node switch
+        {
+            NameReference nr => IsIntervalColumn(nr.Name.SimpleName),
+            ParenthesizedExpression pe => AstReferencesIntervalColumn(pe.Expression),
+            _ => false
+        };
     }
 
     private static bool LooksLikeTimestampExpression(string sql)
