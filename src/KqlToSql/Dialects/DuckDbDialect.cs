@@ -365,7 +365,9 @@ public class DuckDbDialect : ISqlDialect
                 HasTopLevelTail(innerSql, " UNION ") ||
                 HasTopLevelTail(innerSql, " EXCEPT ") ||
                 HasTopLevelTail(innerSql, " INTERSECT ") ||
-                HasTopLevelTail(innerSql, " QUALIFY "))
+                HasTopLevelTail(innerSql, " QUALIFY ") ||
+                // DuckDB: QUALIFY cannot combine with GROUP BY ALL in the same SELECT.
+                HasTopLevelTail(innerSql, " GROUP BY "))
                 return $"SELECT * FROM ({innerSql}) QUALIFY {condition}";
             return $"{innerSql} QUALIFY {condition}";
         }
