@@ -254,6 +254,15 @@ internal class ExpressionSqlBuilder
         {
             return $"json_extract_string({baseExpr}, '$.' || {indexExpr})";
         }
+        // Base is a NameReference to a scalar CTE (e.g. `let mapJobToRecipe = view() { toscalar(...) }`).
+        // The CTE can't be array-subscripted; the KQL semantics are JSON dict access. Inline a subquery
+        // against the CTE and json_extract the key. Single-column scalar CTEs emit one scalar row — the
+        // subquery yields that value directly, which json_extract can walk by the string key.
+        if (ee.Expression is NameReference cteRef && _ctes != null
+            && _ctes.ContainsKey(cteRef.Name.SimpleName))
+        {
+            return $"json_extract((SELECT * FROM {cteRef.Name.SimpleName} LIMIT 1), '$.' || {indexExpr})";
+        }
         // String index on an arbitrary base → JSON dict access. Use json_extract (not
         // _string) so numeric comparisons like `dict[key] > 0` still bind — DuckDB can
         // compare its JSON type against numbers; trim(both '"' ...) elsewhere still
