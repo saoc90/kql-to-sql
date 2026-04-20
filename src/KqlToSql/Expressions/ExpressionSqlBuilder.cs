@@ -352,7 +352,8 @@ internal class ExpressionSqlBuilder
         "as", "on", "in", "between", "like", "is", "by", "asc", "desc", "distinct",
         "primary", "foreign", "key", "references", "all", "any", "some", "exists",
         "limit", "offset", "with", "into", "values", "inner", "outer", "left", "right",
-        "full", "cross", "natural", "using", "window", "over", "partition"
+        "full", "cross", "natural", "using", "window", "over", "partition",
+        "table",
     };
 
     internal static string QuoteIdentifierIfReserved(string name)

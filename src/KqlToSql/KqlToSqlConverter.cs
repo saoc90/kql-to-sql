@@ -213,8 +213,8 @@ public class KqlToSqlConverter
         // If we have CTEs, wrap the main query
         if (_ctes.Any())
         {
-            var cteList = string.Join(", ", _ctes.Select(kvp => 
-                $"{kvp.Key} AS {(kvp.Value.materialized ? "MATERIALIZED" : "NOT MATERIALIZED")} ({kvp.Value.sql})"));
+            var cteList = string.Join(", ", _ctes.Select(kvp =>
+                $"{Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(kvp.Key)} AS {(kvp.Value.materialized ? "MATERIALIZED" : "NOT MATERIALIZED")} ({kvp.Value.sql})"));
             return $"WITH {cteList} {mainSql}";
         }
         
@@ -223,7 +223,7 @@ public class KqlToSqlConverter
 
     private void ProcessLetStatement(LetStatement letStatement)
     {
-        var name = letStatement.Name.ToString().Trim();
+        var name = letStatement.Name.SimpleName;
         var expression = letStatement.Expression;
 
         // Try to handle scalar literals (datetime, timespan, string, number)
@@ -437,7 +437,7 @@ public class KqlToSqlConverter
             PipeExpression pipe => ConvertPipe(pipe),
             RangeOperator range => _operators.ConvertRange(range),
             UnionOperator union => _operators.ConvertUnion(union),
-            NameReference nr => $"SELECT * FROM {nr.Name.ToString().Trim()}",
+            NameReference nr => $"SELECT * FROM {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.SimpleName)}",
             ParenthesizedExpression pe => ConvertNode(pe.Expression),
             FunctionCallExpression fce => ConvertFunctionCall(fce),
             MaterializeExpression matExpr => ConvertNode(matExpr.Expression),

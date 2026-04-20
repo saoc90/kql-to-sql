@@ -96,7 +96,7 @@ internal sealed class OperatorDispatcher
     private string RegisterAsCte(string leftSql, AsOperator asOp)
     {
         var nameNode = asOp.GetDescendants<Kusto.Language.Syntax.NameDeclaration>().FirstOrDefault();
-        var name = nameNode?.Name?.ToString().Trim();
+        var name = nameNode?.Name?.SimpleName;
         if (!string.IsNullOrEmpty(name))
         {
             // KQL allows rebinding the same `| as Name` multiple times. In SQL, two CTEs can't
