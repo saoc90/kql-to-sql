@@ -198,6 +198,7 @@ internal class TabularHandlers : OperatorHandlerBase
                 // Bare expression in extend — KQL auto-names:
                 //   DataMetadata.Section  → DataMetadata_Section (path join)
                 //   NameReference         → unchanged (already a column)
+                //   round(name = expr, 2) → KQL uses the inner SimpleNamedExpression's name
                 //   Anything else (CASE/iif/arithmetic) → Column1, Column2, ... (positional)
                 var synthesized = SynthesizePathAlias(se.Element);
                 var colSql = Expr.ConvertExpression(se.Element);
@@ -208,6 +209,14 @@ internal class TabularHandlers : OperatorHandlerBase
                 else if (se.Element is NameReference)
                 {
                     extras.Add((colSql, colSql));
+                }
+                else if (se.Element is FunctionCallExpression outerFce &&
+                         outerFce.ArgumentList.Expressions.Count > 0 &&
+                         outerFce.ArgumentList.Expressions[0].Element is SimpleNamedExpression innerNamed)
+                {
+                    // KQL: extend round(Pct = x/y*100, 2) — the inner name=... labels the extend's output.
+                    var innerName = innerNamed.Name.ToString().Trim();
+                    extras.Add(($"{colSql} AS {innerName}", innerName));
                 }
                 else
                 {
