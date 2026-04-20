@@ -67,7 +67,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         if (expr is SimpleNamedExpression sne)
         {
             var inner = Expr.ConvertExpression(sne.Expression);
-            var name = sne.Name.ToString().Trim();
+            var name = Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.SimpleName);
             return ($"{inner} AS {name}", inner);
         }
 
@@ -94,12 +94,12 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         Expression? current = expr;
         while (current is PathExpression pe)
         {
-            segments.Insert(0, pe.Selector.ToString().Trim());
+            segments.Insert(0, (pe.Selector as NameReference)?.Name.SimpleName ?? pe.Selector.ToString().Trim());
             current = pe.Expression;
         }
         if (segments.Count == 0) return null;
         if (current is NameReference baseRef)
-            segments.Insert(0, baseRef.Name.ToString().Trim());
+            segments.Insert(0, baseRef.Name.SimpleName);
         else
             return null;
         return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(string.Join("_", segments));
@@ -115,7 +115,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         Expression expr;
         if (node is SimpleNamedExpression sne)
         {
-            alias = Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.ToString().Trim());
+            alias = Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.SimpleName);
             expr = sne.Expression;
         }
         else if (node is CompoundNamedExpression cne)
