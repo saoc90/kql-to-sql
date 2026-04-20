@@ -455,7 +455,7 @@ public class KqlToSqlConverter
             // toscalar() in non-let context — wrap as a SELECT
             ToScalarExpression tse => $"SELECT {_operators.ExpressionBuilder.ConvertExpression(tse)} AS Value",
             // Scalar expressions that appear as standalone nodes (e.g. in let statements)
-            Expression expr when expr is BinaryExpression or LiteralExpression or DynamicExpression =>
+            Expression expr when expr is BinaryExpression or LiteralExpression or DynamicExpression or PrefixUnaryExpression =>
                 $"SELECT {_operators.ExpressionBuilder.ConvertExpression(expr)} AS value",
             _ => throw new NotSupportedException($"Unsupported node type {node.Kind}")
         };
