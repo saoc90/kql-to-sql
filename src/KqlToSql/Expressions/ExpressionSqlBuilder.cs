@@ -1114,6 +1114,7 @@ internal class ExpressionSqlBuilder
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             return false;
         return sql.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase)
+               || sql.Contains("AS INTERVAL", StringComparison.OrdinalIgnoreCase)
                || (IsBareIdentifier(sql) && IsIntervalColumn(sql.Trim('"')));
     }
 

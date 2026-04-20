@@ -76,12 +76,20 @@ internal class TabularHandlers : OperatorHandlerBase
         var columns = project.Expressions.Select(se =>
         {
             if (se.Element is SimpleNamedExpression sne)
-                return $"{Expr.ConvertExpression(sne.Expression)} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sne.Name.ToString().Trim())}";
+            {
+                var name = sne.Name.ToString().Trim();
+                var sql = Expr.ConvertExpression(sne.Expression);
+                // Propagate interval typing so downstream sum/divide pick the epoch-ms path
+                // even across a project boundary (e.g. project X = totimespan(Y) → sum(X)).
+                if (LooksLikeIntervalResult(sne.Expression, sql) || Expr.IsIntervalExpression(sql))
+                    Expr.MarkIntervalColumn(name);
+                return $"{sql} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(name)}";
+            }
             // Bare JSON / path access (project DataMetadata.SectionName) → KQL auto-names
             // the output column as the underscore-joined path.
             var synthesized = SynthesizePathAlias(se.Element);
-            var sql = Expr.ConvertExpression(se.Element);
-            return synthesized != null ? $"{sql} AS {synthesized}" : sql;
+            var bareSql = Expr.ConvertExpression(se.Element);
+            return synthesized != null ? $"{bareSql} AS {synthesized}" : bareSql;
         }).ToArray();
 
         return ReplaceSelectStar(leftSql, string.Join(", ", columns));
