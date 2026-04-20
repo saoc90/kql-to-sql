@@ -1365,6 +1365,11 @@ internal class ExpressionSqlBuilder
         var innerTrimmed = inner.TrimEnd().TrimEnd(')').TrimEnd();
         if (innerTrimmed.EndsWith("LIMIT 1", StringComparison.OrdinalIgnoreCase))
             return inner.TrimStart().StartsWith("(") ? inner : $"({inner})";
+        // Other LIMIT N (e.g. from `| take N`) — wrap in a subquery so the outer LIMIT 1
+        // attaches to the wrapper, not a trailing second LIMIT token.
+        if (System.Text.RegularExpressions.Regex.IsMatch(innerTrimmed,
+                @"\bLIMIT\s+\d+\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            return $"(SELECT * FROM ({inner}) LIMIT 1)";
         return $"({inner} LIMIT 1)";
     }
 
