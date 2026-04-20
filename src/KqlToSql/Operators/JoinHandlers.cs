@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kusto.Language;
 using Kusto.Language.Syntax;
 using KqlToSql.Expressions;
 
@@ -421,10 +422,34 @@ internal class JoinHandlers : OperatorHandlerBase
                         else return null;
                     }
                 }
+                var keyCounts = new Dictionary<string, int>(StringComparer.Ordinal);
                 foreach (var agg in sum.Aggregates)
                 {
-                    if (agg.Element is SimpleNamedExpression aggNamed) cols.Add(aggNamed.Name.ToString().Trim());
-                    else return null;
+                    if (agg.Element is SimpleNamedExpression aggNamed)
+                    {
+                        cols.Add(aggNamed.Name.ToString().Trim());
+                    }
+                    else if (agg.Element is FunctionCallExpression aggFce &&
+                             aggFce.IsAny(Aggregates.ArgMax, Aggregates.ArgMin,
+                                          Aggregates.ArgMax_Deprecated, Aggregates.ArgMin_Deprecated))
+                    {
+                        var keyName = aggFce.ArgumentList.Expressions[0].Element is NameReference keyNr
+                            ? keyNr.Name.SimpleName : "expr";
+                        keyCounts.TryGetValue(keyName, out var ki);
+                        keyCounts[keyName] = ki + 1;
+                        cols.Add(ki == 0 ? keyName : $"{keyName}{ki}");
+                        for (int i = 1; i < aggFce.ArgumentList.Expressions.Count; i++)
+                        {
+                            var v = aggFce.ArgumentList.Expressions[i].Element;
+                            if (v is SimpleNamedExpression vNamed) cols.Add(vNamed.Name.ToString().Trim());
+                            else if (v is NameReference vNr) cols.Add(vNr.Name.SimpleName);
+                            else return null; // e.g. arg_max(k, *) — can't enumerate wildcard
+                        }
+                    }
+                    else
+                    {
+                        return null;
+                    }
                 }
                 return cols;
             }
