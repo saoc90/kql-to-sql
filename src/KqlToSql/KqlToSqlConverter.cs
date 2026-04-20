@@ -314,6 +314,13 @@ public class KqlToSqlConverter
     {
         var exprBuilder = _operators.ExpressionBuilder;
 
+        // `let X = (scalar-expr)` — strip parens and retry as a scalar binding. Without this
+        // the paren wraps a BinaryExpression/FunctionCallExpression that the CTE path would
+        // emit as `X AS NOT MATERIALIZED (SELECT ... AS value)`, and downstream references
+        // to X would resolve to the table, not the scalar.
+        if (expression is ParenthesizedExpression penexpr)
+            return TryConvertScalarLet(name, penexpr.Expression);
+
         // datetime literal: let X = datetime(...)
         if (expression is LiteralExpression lit)
         {
