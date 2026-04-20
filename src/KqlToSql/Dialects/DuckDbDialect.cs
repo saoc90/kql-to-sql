@@ -26,8 +26,12 @@ public class DuckDbDialect : ISqlDialect
             "strlen" => $"LENGTH(CAST({args[0]} AS VARCHAR))",
             "now" => "NOW()",
             // KQL pack_array flattens nested arrays: pack_array([a,b], [c,d]) → [a,b,c,d].
-            // Emit LIST_CONCAT when every arg is itself array-like; otherwise LIST_VALUE.
+            // Emit LIST_CONCAT when every arg is itself array-like. Heterogeneous scalars
+            // (e.g. strings mixed with numbers) can't unify under LIST<T>, so route through
+            // TO_JSON so the result is LIST<JSON> and downstream JSON indexing still works.
             "pack_array" when args.Length > 0 && args.All(IsArrayLikeText) => $"LIST_CONCAT({string.Join(", ", args)})",
+            "pack_array" when args.Length > 1 && HasMixedScalarTypes(args) =>
+                $"LIST_VALUE({string.Join(", ", args.Select(a => $"TO_JSON({a})"))})",
             "pack_array" => $"LIST_VALUE({string.Join(", ", args)})",
             // KQL column_ifexists("Name", default) — returns the column's value if it exists,
             // else the default. DuckDB has no equivalent function; emit a COALESCE of the column
@@ -393,6 +397,26 @@ public class DuckDbDialect : ISqlDialect
         if (HasTopLevelSetOp(innerSql))
             return $"SELECT * FROM ({innerSql}) QUALIFY {condition}";
         return $"SELECT * FROM {innerSql} QUALIFY {condition}";
+    }
+
+    private static bool HasMixedScalarTypes(string[] args)
+    {
+        bool sawString = false, sawNonString = false;
+        foreach (var raw in args)
+        {
+            var a = raw.TrimStart('(').TrimStart();
+            bool looksString = a.StartsWith("'") || a.StartsWith("\"")
+                || a.StartsWith("CONCAT(", StringComparison.OrdinalIgnoreCase)
+                || a.StartsWith("UPPER(", StringComparison.OrdinalIgnoreCase)
+                || a.StartsWith("LOWER(", StringComparison.OrdinalIgnoreCase)
+                || a.StartsWith("CAST(", StringComparison.OrdinalIgnoreCase) && a.Contains("AS VARCHAR", StringComparison.OrdinalIgnoreCase)
+                || a.StartsWith("REPLACE(", StringComparison.OrdinalIgnoreCase)
+                || a.StartsWith("SUBSTR(", StringComparison.OrdinalIgnoreCase);
+            if (looksString) sawString = true;
+            else sawNonString = true;
+            if (sawString && sawNonString) return true;
+        }
+        return false;
     }
 
     private static bool IsArrayLikeText(string sql)
