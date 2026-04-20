@@ -501,7 +501,12 @@ internal class AdvancedHandlers : OperatorHandlerBase
         {
             if (col.Element is NameAndTypeDeclaration nat)
             {
-                columnNames.Add(Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nat.Name.ToString().Trim()));
+                var cname = nat.Name.ToString().Trim();
+                columnNames.Add(Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(cname));
+                // Propagate KQL timespan columns so downstream sum/divide hit the epoch-ms path.
+                var typeName = nat.Type?.ToString().Trim();
+                if (string.Equals(typeName, "timespan", StringComparison.OrdinalIgnoreCase))
+                    Expr.MarkIntervalColumn(cname);
             }
         }
 

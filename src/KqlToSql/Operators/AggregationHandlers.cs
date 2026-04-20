@@ -231,17 +231,22 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
 
             alias ??= DeriveAutoAlias(fce, name, args);
 
-            // When summing a column we recorded as interval-typed upstream, rewrite to epoch-ms math
-            // before dispatching to the dialect so the emission bypasses the plain SUM path.
-            if (fce.Is(Aggregates.Sum) && args.Length == 1 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
+            // When summing an interval-typed expression, rewrite to epoch-ms math so DuckDB's
+            // SUM (which rejects INTERVAL) operates on milliseconds and the alias carries back
+            // as INTERVAL. Matches:
+            //   sum(Duration)                       — bare identifier tagged interval
+            //   sum(Duration * WaterfallSign)       — interval column × numeric → interval
+            //   sum(ABS(Duration))                  — ABS(interval) → interval
+            //   sum(case(..., timespan, ...))       — already handled by dialect (contains INTERVAL literal)
+            if (fce.Is(Aggregates.Sum) && args.Length == 1 && Expr.IsIntervalExpression(args[0]))
             {
-                var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
+                var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({args[0]}) AS TIMESTAMP))";
                 Expr.MarkIntervalColumn(alias.Trim('"'));
                 return new[] { $"((SUM({ms})) * INTERVAL '1 millisecond') AS {alias}" };
             }
-            if (fce.Is(Aggregates.SumIf) && args.Length == 2 && IsBareIdentifier(args[0]) && Expr.IsIntervalColumn(args[0]))
+            if (fce.Is(Aggregates.SumIf) && args.Length == 2 && Expr.IsIntervalExpression(args[0]))
             {
-                var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + {args[0]} AS TIMESTAMP))";
+                var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({args[0]}) AS TIMESTAMP))";
                 Expr.MarkIntervalColumn(alias.Trim('"'));
                 return new[] { $"((SUM({ms}) FILTER (WHERE {args[1]})) * INTERVAL '1 millisecond') AS {alias}" };
             }
