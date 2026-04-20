@@ -491,9 +491,129 @@ internal class JoinHandlers : OperatorHandlerBase
                 }
                 return result;
             }
+            case EvaluateOperator evalOp when evalOp.FunctionCall is FunctionCallExpression efce
+                && string.Equals(efce.Name.ToString().Trim(), "pivot", StringComparison.OrdinalIgnoreCase):
+            {
+                // evaluate pivot(pivotCol, agg [, groupCols...]) → passthrough (or groupCols) + IN values.
+                // Matches ApplyEvaluatePivot's IN-list inference so downstream joins can emit
+                // per-column aliases and dedup the <key>1 suffix on collisions.
+                var pivotArgs = efce.ArgumentList.Expressions;
+                if (pivotArgs.Count < 2) return null;
+
+                var pivotColName = pivotArgs[0].Element is NameReference pnr ? pnr.Name.SimpleName : null;
+                var aggArgNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (pivotArgs[1].Element is FunctionCallExpression aggCall)
+                    foreach (var a in aggCall.ArgumentList.Expressions)
+                        foreach (var inner in a.Element.GetDescendants<NameReference>())
+                            if (!string.IsNullOrEmpty(inner.SimpleName))
+                                aggArgNames.Add(inner.SimpleName);
+
+                List<string> baseCols;
+                if (pivotArgs.Count > 2)
+                {
+                    baseCols = new List<string>();
+                    for (int i = 2; i < pivotArgs.Count; i++)
+                        if (pivotArgs[i].Element is NameReference gnr)
+                            baseCols.Add(gnr.Name.SimpleName);
+                }
+                else if (input != null)
+                {
+                    baseCols = input.Where(c =>
+                            !string.Equals(c, pivotColName, StringComparison.OrdinalIgnoreCase)
+                            && !aggArgNames.Contains(c))
+                        .ToList();
+                }
+                else
+                {
+                    return null;
+                }
+
+                var pivotValues = CollectPivotPinnedValues(efce, pivotArgs);
+                var seen = new HashSet<string>(baseCols, StringComparer.OrdinalIgnoreCase);
+                foreach (var v in pivotValues)
+                    if (seen.Add(v)) baseCols.Add(v);
+                return baseCols;
+            }
             default:
                 return null;
         }
+    }
+
+    private static List<string> CollectPivotPinnedValues(
+        FunctionCallExpression pivotFce,
+        SyntaxList<SeparatedElement<Expression>> pivotArgs)
+    {
+        var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var inner in pivotArgs[0].Element.GetDescendants<NameReference>())
+            if (!string.IsNullOrEmpty(inner.SimpleName)) exclude.Add(inner.SimpleName);
+        if (pivotArgs[1].Element is FunctionCallExpression agg)
+            foreach (var a in agg.ArgumentList.Expressions)
+                foreach (var inner in a.Element.GetDescendants<NameReference>())
+                    if (!string.IsNullOrEmpty(inner.SimpleName)) exclude.Add(inner.SimpleName);
+        for (int i = 2; i < pivotArgs.Count; i++)
+            foreach (var inner in pivotArgs[i].Element.GetDescendants<NameReference>())
+                if (!string.IsNullOrEmpty(inner.SimpleName)) exclude.Add(inner.SimpleName);
+
+        var candidates = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string name)
+        {
+            if (string.IsNullOrEmpty(name) || exclude.Contains(name)) return;
+            if (seen.Add(name)) candidates.Add(name);
+        }
+
+        var scan = pivotFce.Parent?.Parent?.Parent as PipeExpression;
+        while (scan != null)
+        {
+            var op = scan.Operator;
+            if (op is SummarizeOperator or JoinOperator or UnionOperator
+                or LookupOperator or MakeSeriesOperator or EvaluateOperator) break;
+
+            foreach (var fce in op.GetDescendants<FunctionCallExpression>())
+            {
+                if (string.Equals(fce.Name.SimpleName, "column_ifexists", StringComparison.OrdinalIgnoreCase)
+                    && fce.ArgumentList.Expressions.Count >= 1
+                    && fce.ArgumentList.Expressions[0].Element is LiteralExpression lit
+                    && lit.Kind == SyntaxKind.StringLiteralExpression
+                    && lit.LiteralValue is string s)
+                {
+                    Add(s);
+                }
+            }
+
+            if (op is ExtendOperator ext)
+            {
+                foreach (var sep in ext.Expressions)
+                {
+                    if (sep.Element is SimpleNamedExpression sne && sne.Name is NameDeclaration nd)
+                    {
+                        var lhs = nd.Name?.SimpleName;
+                        if (!string.IsNullOrEmpty(lhs)
+                            && sne.Expression.GetDescendants<NameReference>()
+                                .Any(r => string.Equals(r.SimpleName, lhs, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            Add(lhs!);
+                        }
+                    }
+                }
+            }
+
+            if (op is ProjectOperator proj)
+            {
+                foreach (var sep in proj.Expressions)
+                {
+                    if (sep.Element is NameReference pnr && !string.IsNullOrEmpty(pnr.SimpleName))
+                        Add(pnr.SimpleName);
+                    else if (sep.Element is SimpleNamedExpression psne
+                        && psne.Expression is NameReference prhs
+                        && !string.IsNullOrEmpty(prhs.SimpleName))
+                        Add(prhs.SimpleName);
+                }
+            }
+
+            scan = scan.Parent as PipeExpression;
+        }
+        return candidates;
     }
 
     private static List<string>? ExtractNames(SyntaxList<SeparatedElement<Expression>> exprs)

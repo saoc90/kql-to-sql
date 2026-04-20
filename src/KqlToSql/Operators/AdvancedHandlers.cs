@@ -144,6 +144,19 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 }
             }
 
+            if (op is ProjectOperator proj)
+            {
+                foreach (var sep in proj.Expressions)
+                {
+                    if (sep.Element is NameReference pnr && !string.IsNullOrEmpty(pnr.SimpleName))
+                        Add(pnr.SimpleName);
+                    else if (sep.Element is SimpleNamedExpression psne
+                        && psne.Expression is NameReference prhs
+                        && !string.IsNullOrEmpty(prhs.SimpleName))
+                        Add(prhs.SimpleName);
+                }
+            }
+
             scan = scan.Parent as PipeExpression;
         }
 
