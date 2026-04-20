@@ -249,6 +249,11 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             var sqlFunc = Dialect.TryTranslateAggregate(name, args);
             if (sqlFunc != null)
             {
+                // If the dialect wrapped an interval-producing aggregate (e.g. sum/sumif over a
+                // timespan case), record the alias so a downstream `sum(<alias>)` picks up the
+                // interval-typed path rather than emitting plain SUM over INTERVAL.
+                if (Expr.IsIntervalExpression(sqlFunc))
+                    Expr.MarkIntervalColumn(alias.Trim('"'));
                 return new[] { $"{sqlFunc} AS {alias}" };
             }
 
