@@ -118,11 +118,7 @@ internal sealed class ParseHandlers : OperatorHandlerBase
             }
             else if (pattern is LiteralExpression lit)
             {
-                var value = lit.LiteralValue?.ToString() ?? "";
-                // KQL @"…" verbatim string: the parser keeps the @ in Token.Text but unescapes
-                // the value; treat as a literal regex the user wrote intentionally.
-                var isVerbatim = lit.Token?.Text?.StartsWith("@") == true;
-                regexParts.Add(isVerbatim ? value : Regex.Escape(value));
+                regexParts.Add(Regex.Escape(lit.LiteralValue?.ToString() ?? ""));
             }
             else if (pattern is NameAndTypeDeclaration nat)
             {
