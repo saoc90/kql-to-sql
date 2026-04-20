@@ -164,7 +164,12 @@ internal class TabularHandlers : OperatorHandlerBase
                 var name = sne.Name.ToString().Trim();
                 var quotedName = Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
                 var convertedSql = Expr.ConvertExpression(sne.Expression);
-                if (LooksLikeIntervalResult(sne.Expression, convertedSql))
+                // Mark interval columns so downstream sum/sumif/divide pick the epoch-ms path.
+                // LooksLikeIntervalResult covers patterns the AST can recognise without
+                // scanning converted SQL; Expr.IsIntervalExpression catches additive chains
+                // of already-marked interval columns (DurationGood + DurationFine + ...).
+                if (LooksLikeIntervalResult(sne.Expression, convertedSql) ||
+                    Expr.IsIntervalExpression(convertedSql))
                     Expr.MarkIntervalColumn(name);
                 extras.Add(($"{convertedSql} AS {quotedName}", name));
             }
@@ -294,7 +299,7 @@ internal class TabularHandlers : OperatorHandlerBase
         return false;
     }
 
-    private static bool LooksLikeIntervalResult(Expression sourceExpr, string convertedSql)
+    private bool LooksLikeIntervalResult(Expression sourceExpr, string convertedSql)
     {
         // Interval-producing emission signatures we recognize at the outer level:
         //   '(N * INTERVAL '1 ms')' — from our timespan literal emission
@@ -317,9 +322,25 @@ internal class TabularHandlers : OperatorHandlerBase
                 bool rightIsTimespan = bin.Right is LiteralExpression rt && rt.Kind == SyntaxKind.TimespanLiteralExpression;
 if (leftIsTimespan || rightIsTimespan) return true;
             }
+            // Add / Subtract of interval-typed operands stays interval-typed:
+            //   DurationGood + DurationFine + DurationCoarse where each side is marked interval.
+            if (bin.Kind == SyntaxKind.AddExpression || bin.Kind == SyntaxKind.SubtractExpression)
+            {
+                if (IsIntervalLeaf(bin.Left) && IsIntervalLeaf(bin.Right))
+                    return true;
+            }
         }
         return false;
     }
+
+    private bool IsIntervalLeaf(Expression expr) => expr switch
+    {
+        NameReference nr => Expr.IsIntervalColumn(nr.Name.SimpleName),
+        BinaryExpression be when be.Kind == SyntaxKind.AddExpression || be.Kind == SyntaxKind.SubtractExpression
+            => IsIntervalLeaf(be.Left) && IsIntervalLeaf(be.Right),
+        LiteralExpression le when le.Kind == SyntaxKind.TimespanLiteralExpression => true,
+        _ => false,
+    };
 
     private static bool HasTrailingOrderBy(string sql)
     {
