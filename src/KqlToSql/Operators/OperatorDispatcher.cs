@@ -201,17 +201,14 @@ internal sealed class OperatorDispatcher
 
             try
             {
+                // Leave the tabular CTE binding in place — the outer query's WITH chain
+                // emits from _ctes after ConvertNode returns, so downstream references
+                // to tblParam (inside the converted body) resolve to leftSql.
                 return _converter.ConvertNode(fn.body);
             }
             finally
             {
-                // Remove the tabular CTE binding (restore previous if it existed).
-                if (hadPrevCte)
-                    _converter.AddCte(tblParam, prevCte.sql, prevCte.materialized);
-                else
-                    _converter.RemoveCte(tblParam);
-
-                // Restore scalar lets.
+                // Restore scalar lets; the tabular CTE stays in _ctes for the final emit.
                 foreach (var kv in savedScalars) scalarLets[kv.Key] = kv.Value;
                 foreach (var k in addedScalars) scalarLets.Remove(k);
             }

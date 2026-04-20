@@ -180,7 +180,12 @@ internal class ExpressionSqlBuilder
             LiteralExpression lit => ConvertNumericOrOtherLiteral(lit),
             CompoundStringLiteralExpression cs => ConvertCompoundString(cs),
             PrefixUnaryExpression pu when pu.Kind == SyntaxKind.UnaryMinusExpression =>
-                $"(-{ConvertExpression(pu.Expression, leftAlias, rightAlias)})",
+                // Insert a space when the operand's SQL starts with '-' so `--` doesn't form
+                // a SQL line-comment (e.g. unary minus of a negative-substituted scalar let).
+                ConvertExpression(pu.Expression, leftAlias, rightAlias) is var _inner
+                    && _inner.StartsWith("-", StringComparison.Ordinal)
+                    ? $"(- {_inner})"
+                    : $"(-{_inner})",
             PrefixUnaryExpression pu when pu.Kind == SyntaxKind.UnaryPlusExpression =>
                 ConvertExpression(pu.Expression, leftAlias, rightAlias),
             ToScalarExpression tse => ConvertToScalar(tse, leftAlias, rightAlias),
