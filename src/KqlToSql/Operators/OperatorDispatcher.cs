@@ -158,19 +158,67 @@ internal sealed class OperatorDispatcher
 
     private string ApplyInvoke(string leftSql, InvokeOperator invoke)
     {
-        // invoke calls a stored function on the current result set.
-        // If the function is a known CTE, the CTE body already contains the query logic.
-        // The invoke just pipes leftSql as the input — return the CTE reference since it
-        // already encapsulates the transformation.
-        if (invoke.Function is FunctionCallExpression fce)
+        if (invoke.Function is not FunctionCallExpression fce)
+            return leftSql;
+
+        var funcName = fce.Name.SimpleName ?? fce.Name.ToString().Trim();
+
+        // Tabular user-function: inline body with leftSql bound to the tabular parameter.
+        if (_converter.TryGetUserFunction(funcName, out var fn) && fn.paramNames.Length > 0)
         {
-            var funcName = fce.Name.ToString().Trim();
-            // The function body (stored as CTE) already has the full pipeline.
-            // Invoke is essentially: use leftSql as input, apply funcName's pipeline.
-            // Since CTEs are self-contained, just SELECT from the CTE.
-            return $"SELECT * FROM {funcName}";
+            var tblParam = fn.paramNames[0];
+
+            // Save any existing CTE under tblParam so we can restore it after inlining.
+            var hadPrevCte = _converter.TryGetCte(tblParam, out var prevCte);
+
+            // Bind the tabular parameter: register leftSql as a non-materialised CTE.
+            _converter.AddCte(tblParam, leftSql, materialized: false);
+
+            // Bind scalar parameters (paramNames[1..] ↔ invoke args[0..]).
+            var scalarLets = _converter.ScalarLets;
+            var savedScalars = new Dictionary<string, string>();
+            var addedScalars = new List<string>();
+            var invokeArgs = fce.ArgumentList.Expressions;
+            for (int i = 1; i < fn.paramNames.Length; i++)
+            {
+                var pname = fn.paramNames[i];
+                int argIdx = i - 1; // arg[0] corresponds to paramNames[1]
+                string? boundSql = null;
+                if (argIdx < invokeArgs.Count)
+                    boundSql = ExpressionBuilder.ConvertExpression(invokeArgs[argIdx].Element);
+                else if (fn.paramDefaults[i] != null)
+                    boundSql = ExpressionBuilder.ConvertExpression(fn.paramDefaults[i]!);
+
+                if (boundSql != null)
+                {
+                    if (scalarLets.TryGetValue(pname, out var prev))
+                        savedScalars[pname] = prev;
+                    else
+                        addedScalars.Add(pname);
+                    scalarLets[pname] = boundSql;
+                }
+            }
+
+            try
+            {
+                return _converter.ConvertNode(fn.body);
+            }
+            finally
+            {
+                // Remove the tabular CTE binding (restore previous if it existed).
+                if (hadPrevCte)
+                    _converter.AddCte(tblParam, prevCte.sql, prevCte.materialized);
+                else
+                    _converter.RemoveCte(tblParam);
+
+                // Restore scalar lets.
+                foreach (var kv in savedScalars) scalarLets[kv.Key] = kv.Value;
+                foreach (var k in addedScalars) scalarLets.Remove(k);
+            }
         }
-        return leftSql;
+
+        // Parameterless user function or CTE: fall back to SELECT * FROM name.
+        return $"SELECT * FROM {funcName}";
     }
 
     // Standalone converters (not piped from a left expression)

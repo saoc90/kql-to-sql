@@ -29,6 +29,9 @@ public class KqlToSqlConverter
         expression = null!;
         return false;
     }
+    /// <summary>Removes a CTE by name (no-op if it doesn't exist).</summary>
+    internal void RemoveCte(string name) => _ctes.Remove(name);
+
     /// <summary>Renames a CTE (preserving insertion order is not guaranteed — acceptable for this use).</summary>
     internal void RenameCte(string oldName, string newName)
     {
@@ -78,6 +81,20 @@ public class KqlToSqlConverter
         body = null!;
         return false;
     }
+
+    /// <summary>Peeks a user-defined function tuple (paramNames, paramDefaults, body) by name.
+    /// Case-sensitive lookup with case-insensitive fallback.</summary>
+    internal bool TryGetUserFunction(string name, out (string[] paramNames, Expression?[] paramDefaults, FunctionBody body) fn)
+    {
+        if (_userFunctions.TryGetValue(name, out fn)) return true;
+        var match = _userFunctions.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+        if (match != null) { fn = _userFunctions[match]; return true; }
+        fn = default;
+        return false;
+    }
+
+    /// <summary>Exposes the shared scalar-let dictionary so invoke inliner can save/restore bindings.</summary>
+    internal Dictionary<string, string> ScalarLets => _scalarLets;
 
     /// <summary>The SQL dialect used for engine-specific translations.</summary>
     public ISqlDialect Dialect { get; }
