@@ -218,6 +218,24 @@ public class JoinOperatorTests
         Assert.Contains("R.Value AS Value1", sql);
     }
 
+    [Fact]
+    public void Converts_Join_ArgMax_Rhs_Enumerates_Columns_For_ProjectAway()
+    {
+        // RHS is a view whose summarize uses bare arg_max (no outer alias).
+        // The column enumerator must emit Timestamp + V so that project-away Timestamp1
+        // on the outer join resolves correctly (no "EXCLUDE list not found" error).
+        var converter = new KqlToSqlConverter();
+        var kql =
+            "let B = view() { X | summarize arg_max(Timestamp, V=Energy) by jobIdent | project-away Timestamp | extend key=1 };"
+            + " X | join kind=leftouter B on key";
+        var sql = converter.Convert(kql);
+        // The join must enumerate columns rather than falling back to EXCLUDE on unknown schema.
+        // Check that Timestamp is not emitted as an EXCLUDE target (it doesn't exist on the R side
+        // after project-away), and that the join clause is present.
+        Assert.Contains("LEFT OUTER JOIN", sql);
+        Assert.DoesNotContain("EXCLUDE (\"Timestamp\"", sql);
+    }
+
     private static void CreateJoinTables(DuckDBConnection conn)
     {
         using var cmd = conn.CreateCommand();

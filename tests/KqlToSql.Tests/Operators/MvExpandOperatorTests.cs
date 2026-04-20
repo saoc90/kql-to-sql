@@ -51,4 +51,19 @@ public class MvExpandOperatorTests
         Assert.Contains("EXCLUDE (X)", sql);
         Assert.Contains("u.value AS X", sql);
     }
+
+    [Fact]
+    public void MvExpand_JsonObjectColumn_EmitsCaseWhenJsonType()
+    {
+        // mv-expand on a JSON-cast expression (e.g. output of make_bag / parse_json)
+        // must emit a CASE WHEN json_type(...) = 'ARRAY' branch so that DuckDB can
+        // handle both JSON arrays (CAST AS JSON[]) and JSON objects (list_transform/json_keys)
+        // without failing with "UNNEST requires a single list as input".
+        var converter = new KqlToSqlConverter();
+        var kql = "datatable(bag:string) [ '{\"a\":1}' ] | mv-expand bag=parse_json(bag)";
+        var sql = converter.Convert(kql);
+        Assert.Contains("CASE WHEN json_type(", sql);
+        Assert.Contains("= 'ARRAY'", sql);
+        Assert.Contains("list_transform(json_keys(", sql);
+    }
 }

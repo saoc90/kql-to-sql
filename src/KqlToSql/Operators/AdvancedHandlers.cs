@@ -543,12 +543,14 @@ internal class AdvancedHandlers : OperatorHandlerBase
     {
         // DuckDB's UNNEST requires a LIST/ARRAY input. Our ConvertExpression may return a JSON
         // expression (parse_json(..) or CAST(.. AS JSON)) which isn't directly unnestable.
-        // Cast to JSON[] so each array element becomes a row value.
+        // For JSON arrays, CAST AS JSON[] works. For JSON objects, CAST fails with
+        // "UNNEST requires a single list as input". Use CASE to branch at runtime.
         var trimmed = source.TrimEnd();
         if (trimmed.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase) ||
             trimmed.EndsWith(" AS JSON)", StringComparison.OrdinalIgnoreCase))
         {
-            return $"CAST({source} AS JSON[])";
+            return $"CASE WHEN json_type({source}) = 'ARRAY' THEN CAST({source} AS JSON[]) " +
+                   $"ELSE list_transform(json_keys({source}), k -> json_extract({source}, '$.' || k)) END";
         }
         return source;
     }
