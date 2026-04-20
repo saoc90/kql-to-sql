@@ -32,10 +32,16 @@ public class DuckDbDialect : ISqlDialect
             // KQL column_ifexists("Name", default) — returns the column's value if it exists,
             // else the default. DuckDB has no equivalent function; emit a COALESCE of the column
             // reference so the SQL parses. At bind time DuckDB still needs the column to exist,
-            // but for queries that know the schema this is a workable approximation.
+            // but for queries that know the schema this is a workable approximation. Empty
+            // column names degrade to the default value.
             "column_ifexists" when args.Length >= 2 =>
-                $"COALESCE({args[0].Trim('\'', '"')}, {args[1]})",
-            "column_ifexists" when args.Length == 1 => args[0].Trim('\'', '"'),
+                string.IsNullOrEmpty(args[0].Trim('\'', '"'))
+                    ? args[1]
+                    : $"COALESCE({args[0].Trim('\'', '"')}, {args[1]})",
+            "column_ifexists" when args.Length == 1 =>
+                string.IsNullOrEmpty(args[0].Trim('\'', '"'))
+                    ? "NULL"
+                    : args[0].Trim('\'', '"'),
             "isempty" => $"({args[0]} IS NULL OR CAST({args[0]} AS VARCHAR) = '')",
             "isnotempty" or "isnotnull" => $"({args[0]} IS NOT NULL)",
             "isnull" => $"({args[0]} IS NULL)",
