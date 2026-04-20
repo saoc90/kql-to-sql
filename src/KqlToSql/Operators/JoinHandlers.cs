@@ -45,11 +45,7 @@ internal class JoinHandlers : OperatorHandlerBase
             var expr = se.Element;
             if (expr is NameReference nr)
             {
-                var name = nr.Name.ToString().Trim();
-                // Strip brackets from ["ColName"] → "ColName" (quoted identifier for DuckDB)
-                if (name.StartsWith("[") && name.EndsWith("]"))
-                    name = name.Substring(1, name.Length - 2);
-                name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
+                var name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.SimpleName);
                 leftKeys.Add(name);
                 conditions.Add($"L.{name} = R.{name}");
             }
@@ -98,7 +94,8 @@ internal class JoinHandlers : OperatorHandlerBase
             // Schema not enumerable on one side — rename the right-side join keys to `<key>1`
             // so downstream references to the suffixed form bind. Using EXCLUDE here instead
             // would drop the keys entirely and break queries that project them.
-            var renames = leftKeys.Select(k => $"{k} AS {UnquoteIdent(k)}1").ToArray();
+            var renames = leftKeys.Select(k =>
+                $"{k} AS {ExpressionSqlBuilder.QuoteIdentifierIfReserved(UnquoteIdent(k) + "1")}").ToArray();
             var rightColumns = Dialect.SelectRename(renames);
             selectClause = rightColumns.Contains("/*")
                 ? "*"
@@ -127,9 +124,7 @@ internal class JoinHandlers : OperatorHandlerBase
             var expr = se.Element;
             if (expr is NameReference nr)
             {
-                var name = nr.Name.ToString().Trim();
-                if (name.StartsWith("[") && name.EndsWith("]")) name = name.Substring(1, name.Length - 2);
-                name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
+                var name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.SimpleName);
                 conditions.Add(swap ? $"R.{name} = L.{name}" : $"L.{name} = R.{name}");
             }
             else if (expr is BinaryExpression be && be.Kind == SyntaxKind.EqualExpression)
@@ -176,11 +171,7 @@ internal class JoinHandlers : OperatorHandlerBase
             var expr = se.Element;
             if (expr is NameReference nr)
             {
-                var name = nr.Name.ToString().Trim();
-                // Strip brackets from ["ColName"] → "ColName" (quoted identifier for DuckDB)
-                if (name.StartsWith("[") && name.EndsWith("]"))
-                    name = name.Substring(1, name.Length - 2);
-                name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(name);
+                var name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.SimpleName);
                 leftKeys.Add(name);
                 conditions.Add($"L.{name} = R.{name}");
             }
@@ -325,9 +316,7 @@ internal class JoinHandlers : OperatorHandlerBase
             }
             case NameReference nr:
             {
-                var name = nr.Name.ToString().Trim();
-                if (name.StartsWith("[") && name.EndsWith("]"))
-                    name = name.Substring(1, name.Length - 2).Trim('"', '\'');
+                var name = nr.SimpleName;
                 if (visiting.Contains(name)) return null;
                 if (Converter.TryGetCteExpression(name, out var cteExpr))
                 {
