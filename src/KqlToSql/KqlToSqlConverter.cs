@@ -438,6 +438,10 @@ public class KqlToSqlConverter
             RangeOperator range => _operators.ConvertRange(range),
             UnionOperator union => _operators.ConvertUnion(union),
             NameReference nr => $"SELECT * FROM {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.SimpleName)}",
+            // cluster("X").database("Y").TableName  or  database("Y").TableName at statement scope:
+            // strip the cross-db qualifier — caller is responsible for binding the table locally.
+            PathExpression pex when pex.Selector is NameReference sel
+                => $"SELECT * FROM {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(sel.SimpleName)}",
             ParenthesizedExpression pe => ConvertNode(pe.Expression),
             FunctionCallExpression fce => ConvertFunctionCall(fce),
             MaterializeExpression matExpr => ConvertNode(matExpr.Expression),
