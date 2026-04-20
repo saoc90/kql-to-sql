@@ -755,12 +755,14 @@ internal class ExpressionSqlBuilder
             items = list.Expressions.Select(e => ConvertExpression(e.Element, leftAlias, rightAlias)).ToArray();
         }
 
-        // DuckDB can't compare VARCHAR against VARCHAR[] in IN. When the single RHS item is an
-        // array-producing expression (subquery returning a LIST, or a LIST_VALUE literal, or a
-        // scalar-let bound to an array), fall back to list_contains which accepts an array.
-        if (items.Length == 1 && IsArrayLikeExpression(items[0]))
+        // DuckDB can't compare VARCHAR against VARCHAR[] in IN. When all RHS items are array-
+        // producing expressions (subqueries returning LISTs, LIST_VALUE literals, or scalar-lets
+        // bound to arrays), concat them into a single flat list and use list_contains.
+        if (items.Length >= 1 && items.All(IsArrayLikeExpression))
         {
-            var arrayExpr = items[0];
+            var arrayExpr = items.Length == 1
+                ? items[0]
+                : $"LIST_CONCAT({string.Join(", ", items)})";
             var negate = inExpr.Kind == SyntaxKind.NotInExpression || inExpr.Kind == SyntaxKind.NotInCsExpression;
             var caseInsensitive2 = inExpr.Kind == SyntaxKind.InCsExpression || inExpr.Kind == SyntaxKind.NotInCsExpression;
             var leftCmp = caseInsensitive2 ? $"UPPER({left})" : left;
@@ -792,6 +794,11 @@ internal class ExpressionSqlBuilder
     {
         var t = sql.TrimStart('(').TrimEnd(')').TrimStart();
         if (t.StartsWith("LIST_VALUE", StringComparison.OrdinalIgnoreCase)) return true;
+        if (t.StartsWith("LIST_CONCAT", StringComparison.OrdinalIgnoreCase)) return true;
+        if (t.StartsWith("LIST_DISTINCT", StringComparison.OrdinalIgnoreCase)) return true;
+        if (t.StartsWith("LIST_FILTER", StringComparison.OrdinalIgnoreCase)) return true;
+        if (t.StartsWith("LIST_TRANSFORM", StringComparison.OrdinalIgnoreCase)) return true;
+        if (t.StartsWith("FLATTEN(", StringComparison.OrdinalIgnoreCase)) return true;
         if (t.StartsWith("LIST(", StringComparison.OrdinalIgnoreCase)) return true;
         // Subquery that selects a LIST(...) aggregate → its one column is an array.
         if (t.StartsWith("SELECT LIST(", StringComparison.OrdinalIgnoreCase)) return true;
