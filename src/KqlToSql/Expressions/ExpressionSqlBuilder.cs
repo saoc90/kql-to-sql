@@ -1125,9 +1125,64 @@ internal class ExpressionSqlBuilder
                 @"AS\s+(DOUBLE|BIGINT|INTEGER|FLOAT|REAL|NUMERIC)\s*\)+\s*$",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             return false;
+        // Outer constructs that always produce numbers even if inner expressions touch INTERVAL:
+        //   EXTRACT(...)  → BIGINT/DOUBLE
+        //   EPOCH_MS(...) → BIGINT
+        //   A whole expression that is only a pure aggregate call over numerics (no trailing
+        //   binary op that could re-introduce interval) — e.g. SUM(DOUBLE * EPOCH_MS(..)/..).
+        var trimmed = sql.TrimStart('(').TrimStart();
+        if (trimmed.StartsWith("EXTRACT(", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("EPOCH_MS(", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (IsPureAggregateCall(trimmed))
+            return false;
         return sql.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase)
                || sql.Contains("AS INTERVAL", StringComparison.OrdinalIgnoreCase)
                || (IsBareIdentifier(sql) && IsIntervalColumn(sql.Trim('"')));
+    }
+
+    private static bool IsPureAggregateCall(string trimmed)
+    {
+        // Does the expression open with SUM(/AVG(/... and have its FIRST paren-group extend to end?
+        var aggHead = System.Text.RegularExpressions.Regex.Match(trimmed,
+            @"^(SUM|MIN|MAX|AVG|COUNT|MEDIAN|STDDEV|QUANTILE|PRODUCT)\s*\(",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!aggHead.Success) return false;
+        // Walk parens from the opening `(` to find its match. If that closes at the last char
+        // (allowing a FILTER(...) suffix), the expression is pure-aggregate — no `* INTERVAL` tail.
+        int depth = 0;
+        int openIdx = aggHead.Length - 1;
+        for (int i = openIdx; i < trimmed.Length; i++)
+        {
+            if (trimmed[i] == '(') depth++;
+            else if (trimmed[i] == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    var rest = trimmed[(i + 1)..].TrimStart();
+                    // Accept a trailing `FILTER (WHERE ...)` clause; anything else means the
+                    // aggregate's result participates in further arithmetic.
+                    if (rest.Length == 0) return true;
+                    if (rest.StartsWith("FILTER", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fmatch = System.Text.RegularExpressions.Regex.Match(rest,
+                            @"^FILTER\s*\(", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (!fmatch.Success) return false;
+                        depth = 1;
+                        int j = fmatch.Length;
+                        for (; j < rest.Length && depth > 0; j++)
+                        {
+                            if (rest[j] == '(') depth++;
+                            else if (rest[j] == ')') depth--;
+                        }
+                        return depth == 0 && rest[j..].Trim().Length == 0;
+                    }
+                    return false;
+                }
+            }
+        }
+        return false;
     }
 
     private string ConvertDivide(BinaryExpression bin, string? leftAlias, string? rightAlias)
