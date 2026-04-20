@@ -238,13 +238,15 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             //   sum(Duration * WaterfallSign)       — interval column × numeric → interval
             //   sum(ABS(Duration))                  — ABS(interval) → interval
             //   sum(case(..., timespan, ...))       — already handled by dialect (contains INTERVAL literal)
-            if (fce.Is(Aggregates.Sum) && args.Length == 1 && Expr.IsIntervalExpression(args[0]))
+            if (fce.Is(Aggregates.Sum) && args.Length == 1 &&
+                (Expr.IsIntervalExpression(args[0]) || ArgReferencesIntervalColumn(fce.ArgumentList.Expressions[0].Element)))
             {
                 var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({args[0]}) AS TIMESTAMP))";
                 Expr.MarkIntervalColumn(alias.Trim('"'));
                 return new[] { $"((SUM({ms})) * INTERVAL '1 millisecond') AS {alias}" };
             }
-            if (fce.Is(Aggregates.SumIf) && args.Length == 2 && Expr.IsIntervalExpression(args[0]))
+            if (fce.Is(Aggregates.SumIf) && args.Length == 2 &&
+                (Expr.IsIntervalExpression(args[0]) || ArgReferencesIntervalColumn(fce.ArgumentList.Expressions[0].Element)))
             {
                 var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({args[0]}) AS TIMESTAMP))";
                 Expr.MarkIntervalColumn(alias.Trim('"'));
@@ -288,6 +290,22 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         counts.TryGetValue(baseAlias, out var n);
         counts[baseAlias] = n + 1;
         return n == 0 ? baseAlias : $"{baseAlias}{n}";
+    }
+
+    private bool ArgReferencesIntervalColumn(SyntaxNode? node)
+    {
+        // Walk AST (not converted SQL) so string-literal contents don't false-positive.
+        // Treat an arg as interval-referencing when any NameReference leaf inside is a known
+        // interval column; the surrounding arithmetic (Duration * WaterfallSign, ABS(Duration))
+        // preserves interval typing at KQL level.
+        if (node == null) return false;
+        if (node is NameReference nr && Expr.IsIntervalColumn(nr.Name.SimpleName))
+            return true;
+        foreach (var child in node.GetDescendants<NameReference>())
+        {
+            if (Expr.IsIntervalColumn(child.Name.SimpleName)) return true;
+        }
+        return false;
     }
 
     private string DeriveAutoAlias(FunctionCallExpression fce, string name, string[] args)
