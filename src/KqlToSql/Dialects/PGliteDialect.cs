@@ -223,9 +223,11 @@ public class PGliteDialect : ISqlDialect
         return name switch
         {
             "count" => "COUNT(*)",
-            "sum" => $"SUM({args[0]})",
-            "avg" => $"AVG({args[0]})",
-            "avgif" => $"AVG(CASE WHEN {args[1]} THEN {args[0]} END)",
+            // Kusto sum/sumif over an empty group -> 0; Postgres SUM -> NULL. COALESCE to 0.
+            "sum" => $"COALESCE(SUM({args[0]}), 0)",
+            // Kusto avg/avgif over an empty (or all-null) group -> NaN; Postgres AVG -> NULL. COALESCE to NaN.
+            "avg" => $"COALESCE(AVG({args[0]}), 'NaN'::double precision)",
+            "avgif" => $"COALESCE(AVG(CASE WHEN {args[1]} THEN {args[0]} END), 'NaN'::double precision)",
             "binary_all_and" => $"BIT_AND({args[0]}::int)",
             "binary_all_or" => $"BIT_OR({args[0]}::int)",
             "binary_all_xor" => $"BIT_XOR({args[0]}::int)",
@@ -241,22 +243,27 @@ public class PGliteDialect : ISqlDialect
             "dcountif" => $"COUNT(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END)",
             "make_bag" => $"jsonb_agg({args[0]})",
             "make_bag_if" => $"jsonb_agg(CASE WHEN {args[1]} THEN {args[0]} END)",
-            "make_list" or "makelist" => $"array_agg({args[0]})",
-            "make_list_if" or "makelistif" => $"array_agg(CASE WHEN {args[1]} THEN {args[0]} END)",
-            "make_list_with_nulls" => $"array_agg({args[0]})",
+            // Kusto make_list/make_set (and *_if) over an empty group -> [] (empty array); Postgres
+            // array_agg -> NULL. COALESCE to an untyped '{}' literal (Postgres coerces it to the
+            // array_agg element type). array_agg(DISTINCT ...) already returns sorted distinct values.
+            "make_list" or "makelist" => $"COALESCE(array_agg({args[0]}), '{{}}')",
+            "make_list_if" or "makelistif" => $"COALESCE(array_agg(CASE WHEN {args[1]} THEN {args[0]} END), '{{}}')",
+            "make_list_with_nulls" => $"COALESCE(array_agg({args[0]}), '{{}}')",
             "strcat_array" => $"string_agg({args[0]}, {args[1]})",
-            "make_set" => $"array_agg(DISTINCT {args[0]})",
-            "make_set_if" => $"array_agg(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END)",
+            "make_set" => $"COALESCE(array_agg(DISTINCT {args[0]}), '{{}}')",
+            "make_set_if" => $"COALESCE(array_agg(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END), '{{}}')",
             "min" => $"MIN({args[0]})",
             "minif" => $"MIN(CASE WHEN {args[1]} THEN {args[0]} END)",
             "max" => $"MAX({args[0]})",
             "maxif" => $"MAX(CASE WHEN {args[1]} THEN {args[0]} END)",
-            "percentile" => $"PERCENTILE_CONT({args[1]} / 100.0) WITHIN GROUP (ORDER BY {args[0]})",
-            "percentilew" => $"PERCENTILE_CONT({args[2]} / 100.0) WITHIN GROUP (ORDER BY {args[0]})",
+            // Kusto percentile is nearest-rank (returns an actual data point), so use PERCENTILE_DISC
+            // (discrete) rather than PERCENTILE_CONT (which interpolates between points).
+            "percentile" => $"PERCENTILE_DISC({args[1]} / 100.0) WITHIN GROUP (ORDER BY {args[0]})",
+            "percentilew" => $"PERCENTILE_DISC({args[2]} / 100.0) WITHIN GROUP (ORDER BY {args[0]})",
             "stdev" => $"STDDEV_SAMP({args[0]})",
             "stdevif" => $"STDDEV_SAMP(CASE WHEN {args[1]} THEN {args[0]} END)",
             "stdevp" => $"STDDEV_POP({args[0]})",
-            "sumif" => $"SUM(CASE WHEN {args[1]} THEN {args[0]} END)",
+            "sumif" => $"COALESCE(SUM(CASE WHEN {args[1]} THEN {args[0]} END), 0)",
             "any" or "take_any" => $"(array_agg({args[0]}))[1]",
             "anyif" or "take_anyif" => $"(array_agg(CASE WHEN {args[1]} THEN {args[0]} END))[1]",
             "variance" => $"VAR_SAMP({args[0]})",
@@ -340,5 +347,20 @@ public class PGliteDialect : ISqlDialect
     }
 
     // PostgreSQL doesn't have TRY_CAST. Fall back to CAST (stricter, may throw).
-    public string SafeCast(string expr, string sqlType) => $"CAST({expr} AS {sqlType})";
+    /// <summary>Postgres `/` already truncates toward zero for integer operands (matches KQL), so the
+    /// generic integer-division rewrite must be skipped for this dialect.</summary>
+    public bool NativeIntegerDivision => true;
+
+    /// <summary>KQL toint/tolong truncate toward zero; Postgres CAST(real AS integer) rounds. Route
+    /// integer targets through TRUNC(double precision) so the result matches Kusto. Also normalizes the
+    /// generic 'DOUBLE' type name (DuckDB) to Postgres 'double precision'.</summary>
+    public string SafeCast(string expr, string sqlType)
+    {
+        var t = string.Equals(sqlType, "DOUBLE", System.StringComparison.OrdinalIgnoreCase)
+            ? "double precision" : sqlType;
+        if (string.Equals(sqlType, "INTEGER", System.StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(sqlType, "BIGINT", System.StringComparison.OrdinalIgnoreCase))
+            return $"CAST(TRUNC(CAST({expr} AS double precision)) AS {t})";
+        return $"CAST({expr} AS {t})";
+    }
 }

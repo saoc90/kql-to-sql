@@ -1270,7 +1270,9 @@ internal class ExpressionSqlBuilder
         // a real or an unknown-typed column; those keep real division (DuckDB's '/').
         // NULLIF(right,0): KQL integer division by zero yields null (real division yields Infinity);
         // NULLIF makes the truncating path return NULL too, and avoids casting Infinity to BIGINT.
-        if (IsIntegerKqlExpr(bin.Left) && IsIntegerKqlExpr(bin.Right))
+        // Skip on engines whose `/` already truncates integer operands (PostgreSQL) — there the plain
+        // `left / right` below is already correct, and DuckDB's `CAST(... AS DOUBLE)` syntax is invalid.
+        if (!_dialect.NativeIntegerDivision && IsIntegerKqlExpr(bin.Left) && IsIntegerKqlExpr(bin.Right))
             return $"CAST(TRUNC(CAST({left} AS DOUBLE) / NULLIF({right}, 0)) AS BIGINT)";
 
         return $"{left} / {right}";

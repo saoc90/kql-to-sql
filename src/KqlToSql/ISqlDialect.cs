@@ -51,6 +51,10 @@ public interface ISqlDialect
     /// <summary>Generates a null-safe cast expression. DuckDB uses TRY_CAST, PGlite falls back to CAST.</summary>
     string SafeCast(string expr, string sqlType) => $"TRY_CAST({expr} AS {sqlType})";
 
+    /// <summary>True when the engine's `/` operator already performs KQL-style integer (truncating)
+    /// division for integer operands (PostgreSQL does; DuckDB does real division and needs a rewrite).</summary>
+    bool NativeIntegerDivision => false;
+
     /// <summary>Generates a random sample clause. Returns null to use ORDER BY RANDOM() LIMIT n fallback.</summary>
     string? SampleClause(string fromSql, string count) => null;
 }

@@ -654,10 +654,11 @@ public class PGliteDialectTests
     }
 
     [Fact]
-    public void PGlite_Percentile_Uses_PercentileCont()
+    public void PGlite_Percentile_Uses_PercentileDisc()
     {
+        // Kusto percentile is nearest-rank → PERCENTILE_DISC (not interpolating PERCENTILE_CONT).
         var sql = _converter.Convert("StormEvents | summarize percentile(DAMAGE_PROPERTY, 50)");
-        Assert.Contains("PERCENTILE_CONT(50 / 100.0) WITHIN GROUP (ORDER BY DAMAGE_PROPERTY)", sql);
+        Assert.Contains("PERCENTILE_DISC(50 / 100.0) WITHIN GROUP (ORDER BY DAMAGE_PROPERTY)", sql);
     }
 
     [Fact]
@@ -796,14 +797,16 @@ public class PGliteDialectTests
     public void PGlite_ToInt_Of_DotNotation_JsonProperty_CastsToJsonb()
     {
         var sql = _converter.Convert("StormEvents | take 10 | extend test = toint(StormSummary.TotalDamages)");
-        Assert.Equal("SELECT *, CAST((StormSummary::jsonb->>'TotalDamages') AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
+        // toint truncates toward zero (Kusto) — route through TRUNC(double precision) before the integer cast.
+        Assert.Equal("SELECT *, CAST(TRUNC(CAST((StormSummary::jsonb->>'TotalDamages') AS double precision)) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
     }
 
     [Fact]
     public void PGlite_ToInt_Of_BracketNotation_JsonProperty_CastsToJsonb()
     {
         var sql = _converter.Convert("StormEvents | take 10 | extend test = toint(StormSummary['TotalDamages'])");
-        Assert.Equal("SELECT *, CAST((StormSummary::jsonb->>'TotalDamages') AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
+        // toint truncates toward zero (Kusto) — route through TRUNC(double precision) before the integer cast.
+        Assert.Equal("SELECT *, CAST(TRUNC(CAST((StormSummary::jsonb->>'TotalDamages') AS double precision)) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
     }
 
     [Fact]
