@@ -127,6 +127,31 @@ internal abstract class OperatorHandlerBase
     protected static bool HasLimit(string sql)
         => sql.Contains(" LIMIT ", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Returns the key list of a top-level (paren-depth 0) trailing ORDER BY in
+    /// <paramref name="sql"/> — e.g. "Timestamp ASC, Value ASC" — or null when there is none.
+    /// Lets the next operator carry the established serialization order into its window functions
+    /// (prev/next/row_number/row_cumsum), matching Kusto's "order by … | serialize/extend prev()".</summary>
+    protected static string? ExtractTrailingOrderBy(string sql)
+    {
+        int depth = 0; bool inStr = false; char quote = ' '; int keysAt = -1;
+        for (int i = 0; i < sql.Length; i++)
+        {
+            char c = sql[i];
+            if (inStr) { if (c == quote) inStr = false; continue; }
+            if (c == '\'' || c == '"') { inStr = true; quote = c; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (depth == 0 && i + 10 <= sql.Length &&
+                     string.Compare(sql, i, " ORDER BY ", 0, 10, StringComparison.OrdinalIgnoreCase) == 0)
+                keysAt = i + 10;
+        }
+        if (keysAt < 0) return null;
+        var keys = sql.Substring(keysAt).Trim();
+        int lim = keys.IndexOf(" LIMIT ", StringComparison.OrdinalIgnoreCase);
+        if (lim >= 0) keys = keys.Substring(0, lim).Trim();
+        return keys.Length > 0 ? keys : null;
+    }
+
     protected static bool CanAppendWhere(string sql)
     {
         var idx = sql.LastIndexOf(" WHERE ", StringComparison.OrdinalIgnoreCase);

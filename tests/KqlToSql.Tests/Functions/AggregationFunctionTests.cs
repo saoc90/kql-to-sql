@@ -12,13 +12,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize avg(InjuriesDirect)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT AVG(InjuriesDirect) AS avg_InjuriesDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(AVG(InjuriesDirect), 'nan'::DOUBLE) AS avg_InjuriesDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT AVG(InjuriesDirect) FROM StormEvents";
+        cmd.CommandText = "SELECT COALESCE(AVG(InjuriesDirect), 'nan'::DOUBLE) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected, result);
     }
@@ -29,13 +29,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize sum(DeathsDirect)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT SUM(DeathsDirect) AS sum_DeathsDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(SUM(DeathsDirect), 0) AS sum_DeathsDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT SUM(DeathsDirect) FROM StormEvents";
+        cmd.CommandText = "SELECT COALESCE(SUM(DeathsDirect), 0) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected, result);
     }
@@ -46,13 +46,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize avgif(InjuriesDirect, DeathsDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT AVG(InjuriesDirect) FILTER (WHERE DeathsDirect > 0) AS avgif_InjuriesDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(AVG(InjuriesDirect) FILTER (WHERE DeathsDirect > 0), 'nan'::DOUBLE) AS avgif_InjuriesDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT AVG(InjuriesDirect) FILTER (WHERE DeathsDirect > 0) FROM StormEvents";
+        cmd.CommandText = "SELECT COALESCE(AVG(InjuriesDirect) FILTER (WHERE DeathsDirect > 0), 'nan'::DOUBLE) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected, result);
     }
@@ -250,13 +250,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize dcount(State)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT APPROX_COUNT_DISTINCT(State) AS dcount_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COUNT(DISTINCT State) AS dcount_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT APPROX_COUNT_DISTINCT(State) FROM StormEvents";
+        cmd.CommandText = "SELECT COUNT(DISTINCT State) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected, result);
     }
@@ -267,13 +267,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize dcountif(State, InjuriesDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT APPROX_COUNT_DISTINCT(State) FILTER (WHERE InjuriesDirect > 0) AS dcountif_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COUNT(DISTINCT State) FILTER (WHERE InjuriesDirect > 0) AS dcountif_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT APPROX_COUNT_DISTINCT(State) FILTER (WHERE InjuriesDirect > 0) FROM StormEvents";
+        cmd.CommandText = "SELECT COUNT(DISTINCT State) FILTER (WHERE InjuriesDirect > 0) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected, result);
     }
@@ -346,13 +346,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_list(State)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT LIST(State) AS list_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(LIST(State), []) AS list_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT LIST(State) FROM StormEvents";
+        cmd.CommandText = "SELECT COALESCE(LIST(State), []) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected?.ToString(), result?.ToString());
     }
@@ -363,13 +363,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_list_if(State, InjuriesDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT LIST(State) FILTER (WHERE InjuriesDirect > 0) AS list_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(LIST(State) FILTER (WHERE InjuriesDirect > 0), []) AS list_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT LIST(State) FILTER (WHERE InjuriesDirect > 0) FROM StormEvents";
+        cmd.CommandText = "SELECT COALESCE(LIST(State) FILTER (WHERE InjuriesDirect > 0), []) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected?.ToString(), result?.ToString());
     }
@@ -380,13 +380,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_list_with_nulls(State)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT LIST(State) AS list_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(LIST(State), []) AS list_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT LIST(State) FROM StormEvents";
+        cmd.CommandText = "SELECT COALESCE(LIST(State), []) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected?.ToString(), result?.ToString());
     }
@@ -397,13 +397,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_set(State)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT LIST(DISTINCT State) AS set_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(LIST(DISTINCT State), []) AS set_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT LIST(DISTINCT State) FROM StormEvents";
+        cmd.CommandText = "SELECT COALESCE(LIST(DISTINCT State), []) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected?.ToString(), result?.ToString());
     }
@@ -414,13 +414,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_set_if(State, InjuriesDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT LIST(DISTINCT State) FILTER (WHERE InjuriesDirect > 0) AS set_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(LIST(DISTINCT State) FILTER (WHERE InjuriesDirect > 0), []) AS set_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT LIST(DISTINCT State) FILTER (WHERE InjuriesDirect > 0) FROM StormEvents";
+        cmd.CommandText = "SELECT COALESCE(LIST(DISTINCT State) FILTER (WHERE InjuriesDirect > 0), []) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected?.ToString(), result?.ToString());
     }
@@ -465,13 +465,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize percentile(InjuriesDirect, 50)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT quantile_cont(InjuriesDirect, 50 / 100.0) AS percentile_InjuriesDirect_50 FROM StormEvents", sql);
+        Assert.Equal("SELECT quantile_disc(InjuriesDirect, 50 / 100.0) AS percentile_InjuriesDirect_50 FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT quantile_cont(InjuriesDirect, 50 / 100.0) FROM StormEvents";
+        cmd.CommandText = "SELECT quantile_disc(InjuriesDirect, 50 / 100.0) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected, result);
     }
@@ -482,7 +482,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize percentiles(InjuriesDirect, 5, 95)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT quantile_cont(InjuriesDirect, 5 / 100.0) AS percentiles_5_InjuriesDirect, quantile_cont(InjuriesDirect, 95 / 100.0) AS percentiles_95_InjuriesDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT quantile_disc(InjuriesDirect, 5 / 100.0) AS percentiles_5_InjuriesDirect, quantile_disc(InjuriesDirect, 95 / 100.0) AS percentiles_95_InjuriesDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -491,7 +491,7 @@ public class AggregationFunctionTests
         reader.Read();
         var result1 = reader.GetValue(0);
         var result2 = reader.GetValue(1);
-        cmd.CommandText = "SELECT quantile_cont(InjuriesDirect, 5 / 100.0) AS p5, quantile_cont(InjuriesDirect, 95 / 100.0) AS p95 FROM StormEvents";
+        cmd.CommandText = "SELECT quantile_disc(InjuriesDirect, 5 / 100.0) AS p5, quantile_disc(InjuriesDirect, 95 / 100.0) AS p95 FROM StormEvents";
         using var reader2 = cmd.ExecuteReader();
         reader2.Read();
         var expected1 = reader2.GetValue(0);
@@ -506,13 +506,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize percentilew(InjuriesDirect, DeathsDirect, 50)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT quantile_cont(InjuriesDirect, 50 / 100.0) AS percentilew_InjuriesDirect_50 FROM StormEvents", sql);
+        Assert.Equal("SELECT quantile_disc(InjuriesDirect, 50 / 100.0) AS percentilew_InjuriesDirect_50 FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT quantile_cont(InjuriesDirect, 50 / 100.0) FROM StormEvents";
+        cmd.CommandText = "SELECT quantile_disc(InjuriesDirect, 50 / 100.0) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected, result);
     }
@@ -523,7 +523,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize percentilesw(InjuriesDirect, DeathsDirect, 5, 95)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT quantile_cont(InjuriesDirect, 5 / 100.0) AS percentilesw_5_InjuriesDirect, quantile_cont(InjuriesDirect, 95 / 100.0) AS percentilesw_95_InjuriesDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT quantile_disc(InjuriesDirect, 5 / 100.0) AS percentilesw_5_InjuriesDirect, quantile_disc(InjuriesDirect, 95 / 100.0) AS percentilesw_95_InjuriesDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -532,7 +532,7 @@ public class AggregationFunctionTests
         reader.Read();
         var result1 = reader.GetValue(0);
         var result2 = reader.GetValue(1);
-        cmd.CommandText = "SELECT quantile_cont(InjuriesDirect, 5 / 100.0) AS p5, quantile_cont(InjuriesDirect, 95 / 100.0) AS p95 FROM StormEvents";
+        cmd.CommandText = "SELECT quantile_disc(InjuriesDirect, 5 / 100.0) AS p5, quantile_disc(InjuriesDirect, 95 / 100.0) AS p95 FROM StormEvents";
         using var reader2 = cmd.ExecuteReader();
         reader2.Read();
         var expected1 = reader2.GetValue(0);
@@ -598,13 +598,13 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize sumif(InjuriesDirect, DeathsDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT SUM(InjuriesDirect) FILTER (WHERE DeathsDirect > 0) AS sumif_InjuriesDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(SUM(InjuriesDirect) FILTER (WHERE DeathsDirect > 0), 0) AS sumif_InjuriesDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT SUM(InjuriesDirect) FILTER (WHERE DeathsDirect > 0) FROM StormEvents";
+        cmd.CommandText = "SELECT COALESCE(SUM(InjuriesDirect) FILTER (WHERE DeathsDirect > 0), 0) FROM StormEvents";
         var expected = cmd.ExecuteScalar();
         Assert.Equal(expected, result);
     }

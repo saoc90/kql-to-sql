@@ -72,8 +72,31 @@ public class DuckDbDialectTests
     [Fact]
     public void DuckDb_FormatDatetime_Uses_Strftime()
     {
+        // KQL .NET-style specifiers must be mapped to DuckDB strftime specifiers.
         var sql = _converter.Convert("StormEvents | extend d = format_datetime(StartTime, 'yyyy-MM-dd')");
-        Assert.Contains("STRFTIME(StartTime, 'yyyy-MM-dd')", sql);
+        Assert.Contains("STRFTIME(StartTime, '%Y-%m-%d')", sql);
+    }
+
+    [Fact]
+    public void DuckDb_FormatDatetime_Maps_Time_Specifiers()
+    {
+        var sql = _converter.Convert("StormEvents | extend d = format_datetime(StartTime, 'yyyy-MM-dd HH:mm:ss')");
+        Assert.Contains("STRFTIME(StartTime, '%Y-%m-%d %H:%M:%S')", sql);
+    }
+
+    [Fact]
+    public void DuckDb_FormatDatetime_Maps_SingleDigit_And_AmPm()
+    {
+        var sql = _converter.Convert("StormEvents | extend d = format_datetime(StartTime, 'M/d/yyyy h:m:s tt')");
+        Assert.Contains("STRFTIME(StartTime, '%-m/%-d/%Y %-I:%-M:%-S %p')", sql);
+    }
+
+    [Fact]
+    public void DuckDb_DayOfWeek_Renders_Kusto_Timespan()
+    {
+        // KQL dayofweek() returns a timespan: "00:00:00" for Sunday, "N.00:00:00" otherwise.
+        var sql = _converter.Convert("StormEvents | extend d = dayofweek(StartTime)");
+        Assert.Contains("CASE WHEN EXTRACT(DOW FROM StartTime) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM StartTime) AS VARCHAR) || '.00:00:00' END", sql);
     }
 
     [Fact]
@@ -100,10 +123,10 @@ public class DuckDbDialectTests
     // --- Aggregate function tests ---
 
     [Fact]
-    public void DuckDb_Dcount_Uses_ApproxCountDistinct()
+    public void DuckDb_Dcount_Uses_CountDistinct()
     {
         var sql = _converter.Convert("StormEvents | summarize dcount(State)");
-        Assert.Contains("APPROX_COUNT_DISTINCT(State)", sql);
+        Assert.Contains("COUNT(DISTINCT State)", sql);
     }
 
     [Fact]
@@ -128,10 +151,10 @@ public class DuckDbDialectTests
     }
 
     [Fact]
-    public void DuckDb_Percentile_Uses_QuantileCont()
+    public void DuckDb_Percentile_Uses_QuantileDisc()
     {
         var sql = _converter.Convert("StormEvents | summarize percentile(DamageProperty, 50)");
-        Assert.Contains("quantile_cont(DamageProperty, 50 / 100.0)", sql);
+        Assert.Contains("quantile_disc(DamageProperty, 50 / 100.0)", sql);
     }
 
     // --- SQL syntax feature tests ---

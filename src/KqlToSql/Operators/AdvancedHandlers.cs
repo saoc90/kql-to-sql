@@ -214,11 +214,14 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var onExpr = Expr.ConvertExpression(makeSeries.OnClause.Expression);
 
         string fromExpr, toExpr, stepExpr;
+        // Kusto `from F to T step S` is END-EXCLUSIVE; `in range(F, T, S)` reuses range() which is END-INCLUSIVE.
+        bool inclusiveEnd;
         if (makeSeries.RangeClause is MakeSeriesFromToStepClause fromToStep)
         {
             fromExpr = Expr.ConvertExpression(fromToStep.MakeSeriesFromClause.Expression);
             toExpr = Expr.ConvertExpression(fromToStep.MakeSeriesToClause.Expression);
             stepExpr = fromToStep.MakeSeriesStepClause.Expression.ToString().Trim();
+            inclusiveEnd = false;
         }
         else if (makeSeries.RangeClause is MakeSeriesInRangeClause inRange)
         {
@@ -228,11 +231,13 @@ internal class AdvancedHandlers : OperatorHandlerBase
             fromExpr = Expr.ConvertExpression(rangeArgs[0].Element);
             toExpr = Expr.ConvertExpression(rangeArgs[1].Element);
             stepExpr = rangeArgs[2].Element.ToString().Trim();
+            inclusiveEnd = true;
         }
         else
         {
             throw new NotSupportedException($"Unsupported make-series range clause: {makeSeries.RangeClause.GetType().Name}");
         }
+        _ = inclusiveEnd;
 
         string stepInterval;
         if (ExpressionSqlBuilder.TryParseTimespan(stepExpr, out var stepMs))
@@ -297,8 +302,12 @@ internal class AdvancedHandlers : OperatorHandlerBase
             byColumns.AddRange(byClause.Expressions.Select(e => Expr.ConvertExpression(e.Element)));
         }
 
-        // Build: generate time series, cross join with by-columns, left join with aggregated data
-        var timeSeries = $"SELECT generate_series AS _ts FROM generate_series(CAST({fromExpr} AS BIGINT), CAST({toExpr} AS BIGINT), CAST({stepInterval} AS BIGINT))";
+        // Build: generate time series, cross join with by-columns, left join with aggregated data.
+        // Use interval math directly on the datetime bounds (no TIMESTAMP->BIGINT cast, which DuckDB rejects).
+        // `range(from, to, step)` is END-EXCLUSIVE (matches Kusto `from..to..step`);
+        // `generate_series(from, to, step)` is END-INCLUSIVE (matches Kusto `in range(...)`).
+        var axisFunc = inclusiveEnd ? "generate_series" : "range";
+        var timeSeries = $"SELECT UNNEST({axisFunc}({fromExpr}, {toExpr}, {stepInterval})) AS _ts";
 
         var aggSelectList = string.Join(", ", aggParts.Select(a =>
             a.Default != null
@@ -373,7 +382,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
         {
             var (name, source, excludeName) = columns[0];
             var unnestAlias = "u";
-            var unnestSource = CoerceToUnnestable(source == name ? $"{sourceAlias}.{name}" : source);
+            var bareRef = source == name;
+            var unnestSource = CoerceToUnnestable(
+                bareRef ? $"{sourceAlias}.{name}" : source,
+                forceJsonCoerce: bareRef && ColumnDefinedAsJson(leftSql, name));
             var unnestClause = $"CROSS JOIN UNNEST({unnestSource}) AS {unnestAlias}(value)";
             var excludePart = excludeName
                 ? $"{sourceAlias}.{Dialect.SelectExclude(new[] { name })}"
@@ -386,7 +398,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
         for (int i = 0; i < columns.Count; i++)
         {
             var (name, source, _) = columns[i];
-            var unnestSource = CoerceToUnnestable(source == name ? $"{sourceAlias}.{name}" : source);
+            var bareRef = source == name;
+            var unnestSource = CoerceToUnnestable(
+                bareRef ? $"{sourceAlias}.{name}" : source,
+                forceJsonCoerce: bareRef && ColumnDefinedAsJson(leftSql, name));
             clauses.Add($"CROSS JOIN UNNEST({unnestSource}) AS u{i}(value)");
         }
         var existingNames = columns.Where(c => c.ExcludeName).Select(c => c.Name).ToArray();
@@ -475,6 +490,15 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var prevGroupCols = new List<string>();
         string? prevFilteredSql = null;
 
+        // Kusto names a top-nested aggregate column after its explicit name when
+        // one is given (e.g. `Cnt=count()` -> `Cnt`), otherwise `aggregated_<subject>`.
+        string AggAliasFor(TopNestedClause c)
+        {
+            if (c.ByExpression is SimpleNamedExpression named)
+                return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(named.Name.SimpleName);
+            return $"aggregated_{Expr.ConvertExpression(c.OfExpression)}";
+        }
+
         for (int i = 0; i < topNested.Clauses.Count; i++)
         {
             if (topNested.Clauses[i].Element is not TopNestedClause clause)
@@ -506,7 +530,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 aggSql = Expr.ConvertExpression(aggExpr);
             }
 
-            var aggAlias = $"aggregated_{column}";
+            var aggAlias = AggAliasFor(clause);
             selectColumns.Add(column);
             selectColumns.Add(aggAlias);
 
@@ -534,7 +558,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 {
                     if (topNested.Clauses[p].Element is TopNestedClause prevClause)
                     {
-                        var prevAggAlias = $"aggregated_{Expr.ConvertExpression(prevClause.OfExpression)}";
+                        var prevAggAlias = AggAliasFor(prevClause);
                         prevAggCols.Add($"_prev.{prevAggAlias}");
                     }
                 }
@@ -574,12 +598,20 @@ internal class AdvancedHandlers : OperatorHandlerBase
         if (serialize.Expressions.Count == 0)
             return leftSql;
 
-        var extras = serialize.Expressions.Select(se =>
+        // serialize fixes the row order; window functions in its expressions (row_number/prev/…)
+        // must run in the order established by a preceding sort. Carry that order into the windows.
+        Expr.SetWindowOrder(ExtractTrailingOrderBy(leftSql));
+        string[] extras;
+        try
         {
-            if (se.Element is SimpleNamedExpression sne)
-                return $"{Expr.ConvertExpression(sne.Expression)} AS {sne.Name.SimpleName}";
-            return Expr.ConvertExpression(se.Element);
-        }).ToArray();
+            extras = serialize.Expressions.Select(se =>
+            {
+                if (se.Element is SimpleNamedExpression sne)
+                    return $"{Expr.ConvertExpression(sne.Expression)} AS {sne.Name.SimpleName}";
+                return Expr.ConvertExpression(se.Element);
+            }).ToArray();
+        }
+        finally { Expr.SetWindowOrder(null); }
 
         var joined = string.Join(", ", extras);
 
@@ -674,20 +706,64 @@ internal class AdvancedHandlers : OperatorHandlerBase
         return $"SELECT * FROM (VALUES {string.Join(", ", rows)}) AS t({string.Join(", ", columnNames)})";
     }
 
-    private static string CoerceToUnnestable(string source)
+    private static string CoerceToUnnestable(string source, bool forceJsonCoerce = false)
     {
         // DuckDB's UNNEST requires a LIST/ARRAY input. Our ConvertExpression may return a JSON
         // expression (parse_json(..) or CAST(.. AS JSON)) which isn't directly unnestable.
         // For JSON arrays, CAST AS JSON[] works. For JSON objects, CAST fails with
         // "UNNEST requires a single list as input". Use CASE to branch at runtime.
+        //
+        // The inline case is detected via the ::JSON / AS JSON suffix. When mv-expand targets a
+        // bare column whose value was produced upstream by todynamic()/parse_json() (a JSON-typed
+        // column reference like `t.arr`), the suffix is absent — the caller passes forceJsonCoerce
+        // so the same CASE is applied. Native LIST columns must NOT be coerced (json_type would
+        // mis-handle string elements), so the flag is only set for columns proven JSON upstream.
         var trimmed = source.TrimEnd();
-        if (trimmed.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase) ||
+        if (forceJsonCoerce ||
+            trimmed.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase) ||
             trimmed.EndsWith(" AS JSON)", StringComparison.OrdinalIgnoreCase))
         {
             return $"CASE WHEN json_type({source}) = 'ARRAY' THEN CAST({source} AS JSON[]) " +
-                   $"ELSE list_transform(json_keys({source}), k -> json_extract({source}, '$.' || k)) END";
+                   $"ELSE list_transform(json_keys({source}), lambda k: json_extract({source}, '$.' || k)) END";
         }
         return source;
+    }
+
+    // Detects whether `columnName` is defined as a JSON-typed expression in the upstream SQL
+    // (e.g. `CAST(Value AS JSON) AS arr` emitted by todynamic()/parse_json()). mv-expand of such a
+    // bare column reference yields a JSON value that DuckDB's UNNEST rejects until coerced to a list.
+    private static bool ColumnDefinedAsJson(string leftSql, string columnName)
+    {
+        // Match the JSON producer immediately followed by the column alias, optionally quoted:
+        //   ... AS JSON) AS arr      |   ... AS JSON) AS "order"
+        //   ... ::JSON AS arr        |   ... ::JSON AS "order"
+        foreach (var marker in new[] { " AS JSON)", "::JSON" })
+        {
+            int idx = 0;
+            while ((idx = leftSql.IndexOf(marker, idx, StringComparison.OrdinalIgnoreCase)) >= 0)
+            {
+                var after = leftSql.AsSpan(idx + marker.Length);
+                int p = 0;
+                while (p < after.Length && after[p] == ' ') p++;
+                if (after.Slice(p).StartsWith("AS ", StringComparison.OrdinalIgnoreCase))
+                {
+                    p += 3;
+                    while (p < after.Length && after[p] == ' ') p++;
+                    var alias = after.Slice(p);
+                    if (alias.Length > 0 && alias[0] == '"')
+                        alias = alias.Slice(1);
+                    if (alias.StartsWith(columnName, StringComparison.Ordinal))
+                    {
+                        // Ensure full-token match: next char must be a delimiter (quote, space, comma, paren) or end.
+                        char next = alias.Length > columnName.Length ? alias[columnName.Length] : ' ';
+                        if (next is '"' or ' ' or ',' or ')' or '\0')
+                            return true;
+                    }
+                }
+                idx += marker.Length;
+            }
+        }
+        return false;
     }
 
     private static string? TryGetInnerIdentifier(SyntaxNode node)

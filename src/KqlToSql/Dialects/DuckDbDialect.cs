@@ -82,7 +82,7 @@ public class DuckDbDialect : ISqlDialect
             // (LIST_VALUE(...), scalar subquery returning a LIST, etc), casting to JSON strips LIST
             // semantics and downstream LIST_FILTER/LIST_CONTAINS break. Pass through array-like sources.
             "parse_json" or "todynamic" => IsArrayLikeText(args[0]) ? args[0] : $"CAST({args[0]} AS JSON)",
-            "format_datetime" => $"STRFTIME({args[0]}, {args[1]})",
+            "format_datetime" => $"STRFTIME({args[0]}, {TranslateDateTimeFormat(args[1])})",
             "startofday" => $"DATE_TRUNC('day', {args[0]})",
             "startofweek" => $"DATE_TRUNC('week', {args[0]})",
             "startofmonth" => $"DATE_TRUNC('month', {args[0]})",
@@ -98,7 +98,12 @@ public class DuckDbDialect : ISqlDialect
             "next" => $"LEAD({args[0]}) OVER ()",
 
             // Date/time functions
-            "dayofweek" => $"EXTRACT(DOW FROM {args[0]})",
+            // KQL dayofweek() returns a *timespan* equal to the number of whole days since the
+            // preceding Sunday (Sunday=0d, Monday=1d, ... Saturday=6d), rendered as Kusto's
+            // timespan string: "00:00:00" for 0 days, "N.00:00:00" for N>0. DuckDB's
+            // EXTRACT(DOW) already uses the same 0=Sunday..6=Saturday numbering, so format it
+            // as that timespan literal to match the ground truth.
+            "dayofweek" => $"CASE WHEN EXTRACT(DOW FROM {args[0]}) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM {args[0]}) AS VARCHAR) || '.00:00:00' END",
             "dayofmonth" => $"EXTRACT(DAY FROM {args[0]})",
             "dayofyear" => $"EXTRACT(DOY FROM {args[0]})",
             "getmonth" => $"EXTRACT(MONTH FROM {args[0]})",
@@ -263,14 +268,16 @@ public class DuckDbDialect : ISqlDialect
             "any" or "take_any" => $"ANY_VALUE({args[0]})",
             "anyif" or "take_anyif" => $"ANY_VALUE({args[0]}) FILTER (WHERE {args[1]})",
             "make_list" or "makelist" => $"LIST({args[0]})",
-            "make_set" or "makeset" => $"LIST(DISTINCT {args[0]})",
+            // make_set is an unordered aggregate: canonicalize order so DuckDB output is
+            // deterministic and matches Kusto's set content (LIST_SORT == Kusto array_sort_asc ordinal order).
+            "make_set" or "makeset" => $"LIST_SORT(LIST(DISTINCT {args[0]}))",
             "sumif" => SumPossiblyInterval(args[0], args[1]),
             "countif" => $"COUNT(*) FILTER (WHERE {args[0]})",
             "avgif" when args.Length >= 2 => $"AVG({args[0]}) FILTER (WHERE {args[1]})",
             "minif" => $"MIN({args[0]}) FILTER (WHERE {args[1]})",
             "maxif" => $"MAX({args[0]}) FILTER (WHERE {args[1]})",
-            "percentile" when args.Length == 2 => $"quantile_cont({args[0]}, {args[1]} / 100.0)",
-            "percentilew" when args.Length == 3 => $"quantile_cont({args[0]}, {args[2]} / 100.0)",
+            "percentile" when args.Length == 2 => $"quantile_disc({args[0]}, {args[1]} / 100.0)",
+            "percentilew" when args.Length == 3 => $"quantile_disc({args[0]}, {args[2]} / 100.0)",
             "dcount" => $"APPROX_COUNT_DISTINCT({args[0]})",
             "dcountif" => $"APPROX_COUNT_DISTINCT({args[0]}) FILTER (WHERE {args[1]})",
             "count_distinct" => $"COUNT(DISTINCT {args[0]})",
@@ -291,8 +298,9 @@ public class DuckDbDialect : ISqlDialect
             "count" => "COUNT(*)",
             "sum" => SumPossiblyInterval(args[0], null),
             "sumif" => SumPossiblyInterval(args[0], args.Length >= 2 ? args[1] : null),
-            "avg" => $"AVG({args[0]})",
-            "avgif" => $"AVG({args[0]}) FILTER (WHERE {args[1]})",
+            // Kusto avg/avgif over an empty (or all-null) group -> NaN; DuckDB AVG -> NULL. COALESCE to NaN.
+            "avg" => $"COALESCE(AVG({args[0]}), 'nan'::DOUBLE)",
+            "avgif" => $"COALESCE(AVG({args[0]}) FILTER (WHERE {args[1]}), 'nan'::DOUBLE)",
             "binary_all_and" => $"BIT_AND({args[0]})",
             "binary_all_or" => $"BIT_OR({args[0]})",
             "binary_all_xor" => $"BIT_XOR({args[0]})",
@@ -304,24 +312,29 @@ public class DuckDbDialect : ISqlDialect
             "covarianceif" => $"COVAR_SAMP({args[0]}, {args[1]}) FILTER (WHERE {args[2]})",
             "covariancep" => $"COVAR_POP({args[0]}, {args[1]})",
             "covariancepif" => $"COVAR_POP({args[0]}, {args[1]}) FILTER (WHERE {args[2]})",
-            "dcount" => $"APPROX_COUNT_DISTINCT({args[0]})",
-            "dcountif" => $"APPROX_COUNT_DISTINCT({args[0]}) FILTER (WHERE {args[1]})",
+            // Kusto dcount is exact at low/medium cardinality (HLL accuracy level 1) and within
+            // sub-1% at high cardinality; DuckDB APPROX_COUNT_DISTINCT over-estimates even at low
+            // cardinality (e.g. 256 distinct -> 278). Use exact COUNT(DISTINCT) to match Kusto.
+            // The optional accuracy argument (args[1]) is intentionally ignored.
+            "dcount" => $"COUNT(DISTINCT {args[0]})",
+            "dcountif" => $"COUNT(DISTINCT {args[0]}) FILTER (WHERE {args[1]})",
             "hll" => $"hll({args[0]})",
             "hll_if" => $"hll({args[0]}) FILTER (WHERE {args[1]})",
             "hll_merge" => $"hll_merge({args[0]})",
             "make_bag" => $"histogram({args[0]})",
             "make_bag_if" => $"histogram({args[0]}) FILTER (WHERE {args[1]})",
-            "make_list" or "makelist" => $"LIST({args[0]})",
-            "make_list_if" or "makelistif" => $"LIST({args[0]}) FILTER (WHERE {args[1]})",
-            "make_list_with_nulls" => $"LIST({args[0]})",
-            "make_set" or "makeset" => $"LIST(DISTINCT {args[0]})",
-            "make_set_if" or "makesetif" => $"LIST(DISTINCT {args[0]}) FILTER (WHERE {args[1]})",
+            // Kusto make_list/make_set (and *_if) over an empty group -> [] (empty array); DuckDB LIST -> NULL. COALESCE to [].
+            "make_list" or "makelist" => $"COALESCE(LIST({args[0]}), [])",
+            "make_list_if" or "makelistif" => $"COALESCE(LIST({args[0]}) FILTER (WHERE {args[1]}), [])",
+            "make_list_with_nulls" => $"COALESCE(LIST({args[0]}), [])",
+            "make_set" or "makeset" => $"COALESCE(LIST(DISTINCT {args[0]}), [])",
+            "make_set_if" or "makesetif" => $"COALESCE(LIST(DISTINCT {args[0]}) FILTER (WHERE {args[1]}), [])",
             "min" => $"MIN({args[0]})",
             "minif" => $"MIN({args[0]}) FILTER (WHERE {args[1]})",
             "max" => $"MAX({args[0]})",
             "maxif" => $"MAX({args[0]}) FILTER (WHERE {args[1]})",
-            "percentile" => $"quantile_cont({args[0]}, {args[1]} / 100.0)",
-            "percentilew" => $"quantile_cont({args[0]}, {args[2]} / 100.0)",
+            "percentile" => $"quantile_disc({args[0]}, {args[1]} / 100.0)",
+            "percentilew" => $"quantile_disc({args[0]}, {args[2]} / 100.0)",
             "stdev" => $"STDDEV_SAMP({args[0]})",
             "stdevif" => $"STDDEV_SAMP({args[0]}) FILTER (WHERE {args[1]})",
             "stdevp" => $"STDDEV_POP({args[0]})",
@@ -357,6 +370,18 @@ public class DuckDbDialect : ISqlDialect
     public string JsonAccess(string baseSql, string jsonPath)
     {
         return $"trim(both '\"' from json_extract({baseSql}, '$.{jsonPath}'))";
+    }
+
+    /// <summary>KQL toint/tolong truncate toward zero (toint(2.6)=2, toint(-2.6)=-2); DuckDB's
+    /// CAST(real AS INTEGER) rounds to nearest. Route integer targets through TRUNC(double) so the
+    /// result matches Kusto. String inputs still parse (TRY_CAST(... AS DOUBLE)) and non-numeric → NULL,
+    /// matching KQL's null-on-failure. Non-integer targets use the default TRY_CAST.</summary>
+    public string SafeCast(string expr, string sqlType)
+    {
+        if (string.Equals(sqlType, "INTEGER", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(sqlType, "BIGINT", StringComparison.OrdinalIgnoreCase))
+            return $"TRY_CAST(TRUNC(TRY_CAST({expr} AS DOUBLE)) AS {sqlType})";
+        return $"TRY_CAST({expr} AS {sqlType})";
     }
 
     public string SelectExclude(string[] columns)
@@ -441,12 +466,72 @@ public class DuckDbDialect : ISqlDialect
                           valueExpr.Contains(" AS INTERVAL", StringComparison.OrdinalIgnoreCase);
         if (!isInterval)
         {
-            return filter is null ? $"SUM({valueExpr})" : $"SUM({valueExpr}) FILTER (WHERE {filter})";
+            // Kusto sum/sumif over an empty group -> 0; DuckDB SUM -> NULL. COALESCE to 0.
+            return filter is null
+                ? $"COALESCE(SUM({valueExpr}), 0)"
+                : $"COALESCE(SUM({valueExpr}) FILTER (WHERE {filter}), 0)";
         }
         // (timestamp 'epoch' + interval) → timestamp, then epoch_ms → BIGINT ms.
         var ms = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({valueExpr}) AS TIMESTAMP))";
         var inner = filter is null ? $"SUM({ms})" : $"SUM({ms}) FILTER (WHERE {filter})";
         return $"(({inner}) * INTERVAL '1 millisecond')";
+    }
+
+    /// <summary>
+    /// Translate a KQL format_datetime() format string into a DuckDB STRFTIME format string.
+    /// The argument arrives already rendered as a single-quoted SQL string literal (e.g.
+    /// '''yyyy-MM-dd HH:mm:ss'''); we operate on its content and re-quote.
+    ///
+    /// KQL specifiers (.NET-style) → DuckDB strftime, mapped longest-first so "MM" never
+    /// degrades into two "M"s. Any non-specifier text is copied verbatim. Specifiers that
+    /// DuckDB cannot reproduce exactly (sub-second widths other than 3/6 digits — KQL ticks
+    /// are 100ns/7 digits, DuckDB is microsecond/6) fall back to the nearest supported width.
+    /// </summary>
+    private static string TranslateDateTimeFormat(string sqlLiteral)
+    {
+        // Only translate genuine string literals; pass anything else (column, expr) through.
+        if (sqlLiteral.Length < 2 || sqlLiteral[0] != '\'' || sqlLiteral[^1] != '\'')
+            return sqlLiteral;
+        var fmt = sqlLiteral.Substring(1, sqlLiteral.Length - 2);
+
+        var sb = new System.Text.StringBuilder(fmt.Length + 8);
+        int i = 0;
+        while (i < fmt.Length)
+        {
+            char c = fmt[i];
+            // length of the current run of identical specifier characters
+            int run = 1;
+            while (i + run < fmt.Length && fmt[i + run] == c) run++;
+
+            string? mapped = c switch
+            {
+                'y' => run >= 4 ? "%Y" : run == 2 ? "%y" : "%-y",
+                'M' => run >= 2 ? "%m" : "%-m",
+                'd' => run >= 2 ? "%d" : "%-d",
+                'H' => run >= 2 ? "%H" : "%-H",
+                'h' => run >= 2 ? "%I" : "%-I",
+                'm' => run >= 2 ? "%M" : "%-M",
+                's' => run >= 2 ? "%S" : "%-S",
+                'f' or 'F' => run >= 4 ? "%f" : "%g", // %g=3-digit ms, %f=6-digit us
+                't' => "%p",
+                _ => null,
+            };
+
+            if (mapped != null)
+            {
+                sb.Append(mapped);
+                i += run;
+            }
+            else
+            {
+                // verbatim literal char (escape % so STRFTIME doesn't treat it as a specifier)
+                if (c == '%') sb.Append('%');
+                sb.Append(c);
+                i++;
+            }
+        }
+
+        return $"'{sb.ToString().Replace("'", "''")}'";
     }
 
     private static bool HasTopLevelSetOp(string sql)

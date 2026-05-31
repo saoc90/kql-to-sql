@@ -330,7 +330,7 @@ public class ScalarFunctionImprovementTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("T | extend f = format_datetime(Ts, 'yyyy-MM-dd')");
-        Assert.Equal("SELECT *, STRFTIME(Ts, 'yyyy-MM-dd') AS f FROM T", sql);
+        Assert.Equal("SELECT *, STRFTIME(Ts, '%Y-%m-%d') AS f FROM T", sql);
     }
 
     [Fact]

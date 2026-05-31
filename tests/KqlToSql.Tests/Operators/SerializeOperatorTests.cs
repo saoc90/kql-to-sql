@@ -30,6 +30,6 @@ public class SerializeOperatorTests
         var kql = "T | sort by Name asc | take 100 | serialize rn = row_number()";
         var sql = converter.Convert(kql);
         // When leftSql has LIMIT, serialize wraps in subquery so ROW_NUMBER runs on limited result
-        Assert.Equal("SELECT *, ROW_NUMBER() OVER () AS rn FROM (SELECT * FROM T ORDER BY Name ASC LIMIT 100)", sql);
+        Assert.Equal("SELECT *, ROW_NUMBER() OVER (ORDER BY Name ASC) AS rn FROM (SELECT * FROM T ORDER BY Name ASC LIMIT 100)", sql);
     }
 }

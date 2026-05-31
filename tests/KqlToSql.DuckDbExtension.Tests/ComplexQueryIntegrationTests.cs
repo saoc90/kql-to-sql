@@ -271,20 +271,22 @@ stateInjuries | join kind=inner stateCount on State | sort by TotalInjuries desc
         cmd.CommandText = sql;
         using var reader = cmd.ExecuteReader();
 
-        var results = new List<(string Key, long Val1, long Val2)>();
+        // Kusto innerunique join: A | join B on Key yields Key, Val1, Key1, Val2
+        var results = new List<(string Key, long Val1, string Key1, long Val2)>();
         while (reader.Read())
         {
             results.Add((
-                reader.GetString(0),
-                reader.GetInt64(1),
-                reader.GetInt64(2)
+                reader.GetString(0),   // Key
+                reader.GetInt64(1),    // Val1
+                reader.GetString(2),   // Key1 (right key, suffixed "1")
+                reader.GetInt64(3)     // Val2
             ));
         }
 
         // innerunique: only one row from left per key
         Assert.Equal(2, results.Count);
-        Assert.Single(results.Where(r => r.Key == "x"));
-        Assert.Single(results.Where(r => r.Key == "y"));
+        Assert.Single(results, r => r.Key == "x");
+        Assert.Single(results, r => r.Key == "y");
     }
 
     // ── Lookup operator ───────────────────────────────────────────────────

@@ -169,6 +169,18 @@ internal class TabularHandlers : OperatorHandlerBase
 
     internal string ApplyExtend(string leftSql, ExtendOperator extend)
     {
+        // Carry a preceding sort's order into serialization-order window functions (prev/next/…)
+        // referenced by this extend, so DuckDB evaluates them in Kusto's serialized row order.
+        Expr.SetWindowOrder(ExtractTrailingOrderBy(leftSql));
+        try
+        {
+            return ApplyExtendCore(leftSql, extend);
+        }
+        finally { Expr.SetWindowOrder(null); }
+    }
+
+    private string ApplyExtendCore(string leftSql, ExtendOperator extend)
+    {
         var extras = new List<(string Expr, string Name)>();
         // KQL auto-numbers anonymous (unnamed, non-path, non-identifier) extend results Column1, Column2, ...
         int anonCounter = 0;

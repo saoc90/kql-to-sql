@@ -27,6 +27,22 @@ public class ScalarFunctionIntegrationTests
         cmd.CommandText = sql;
         using var reader = cmd.ExecuteReader();
         Assert.True(reader.Read());
+        // KQL dayofweek() returns a timespan; Monday = 1 day = "1.00:00:00".
+        Assert.Equal("1.00:00:00", reader.GetValue(0).ToString());
+    }
+
+    [Fact]
+    public void DayOfWeek_Sunday_ReturnsZeroTimespan()
+    {
+        var kql = "print dow = dayofweek(datetime(2024-01-14))"; // Sunday
+        var sql = _converter.Convert(kql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("00:00:00", reader.GetValue(0).ToString());
     }
 
     [Fact]

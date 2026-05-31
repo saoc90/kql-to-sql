@@ -1989,17 +1989,41 @@ StormEvents
     }
 
     [Fact]
-    public void Unsupported_JoinKindRightSemi_Throws()
+    public void JoinKindRightSemi_ReturnsMatchedRightRows()
     {
+        // rightsemi: right rows whose Key has a match in left (right columns only)
+        using var conn = InMemory();
+        using var setup = conn.CreateCommand();
+        setup.CommandText = @"
+            CREATE TABLE T (Key BIGINT);
+            INSERT INTO T VALUES (1), (3);
+            CREATE TABLE Y (Key BIGINT, Val VARCHAR);
+            INSERT INTO Y VALUES (1, 'a'), (2, 'b'), (3, 'c');";
+        setup.ExecuteNonQuery();
+
         var kql = "T | join kind=rightsemi Y on Key";
-        Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
+        var sql = _converter.Convert(kql);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+
+        var keys = new List<long>();
+        while (reader.Read()) keys.Add(reader.GetInt64(reader.GetOrdinal("Key")));
+        // Keys 1 and 3 from Y have matches in T
+        Assert.Equal(2, keys.Count);
+        Assert.Contains(1L, keys);
+        Assert.Contains(3L, keys);
     }
 
     [Fact]
-    public void Unsupported_InvokeOperator_Throws()
+    public void InvokeOperator_ConvertsToTableReference()
     {
+        // invoke is now supported; Convert should not throw
         var kql = "T | invoke someFunction()";
-        Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
+        var sql = _converter.Convert(kql);
+        Assert.False(string.IsNullOrWhiteSpace(sql));
+        Assert.Contains("SELECT", sql);
     }
 
     [Fact]

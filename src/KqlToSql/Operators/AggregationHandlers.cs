@@ -71,13 +71,20 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             return ($"{inner} AS {name}", inner);
         }
 
-        if (expr is FunctionCallExpression fce &&
-            (fce.Is(Functions.Bin) || fce.Is(Functions.BinAt)) &&
-            fce.ArgumentList.Expressions.Count > 0 && fce.ArgumentList.Expressions[0].Element is NameReference nr)
+        // Kusto keeps the inner column name when the 'by' expression is one of a fixed set of
+        // name-preserving scalar functions wrapping a single bare column (verified on a live
+        // cluster): bin/bin_at/startofday/floor/ceiling/round/abs and the to* casts. The rule
+        // drills through nested name-preserving wrappers (e.g. bin(startofday(Timestamp),1d) ->
+        // Timestamp, floor(toreal(Value),1.0) -> Value). startofweek/month/year, endof*,
+        // tolower/toupper, substring, and non-bare args are NOT preserving -> Kusto emits Column1.
+        if (expr is FunctionCallExpression fce)
         {
-            var inner = Expr.ConvertExpression(fce);
-            var name = nr.Name.SimpleName;
-            return ($"{inner} AS {name}", inner);
+            var preservedName = TryResolveByColumnName(fce);
+            if (preservedName != null)
+            {
+                var inner = Expr.ConvertExpression(fce);
+                return ($"{inner} AS {preservedName}", inner);
+            }
         }
 
         // Bare path (DataMetadata.Section) — auto-name as KQL does.
@@ -149,7 +156,9 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 var keyNode = fce.ArgumentList.Expressions[0].Element;
                 var extremumExpr = Expr.ConvertExpression(keyNode);
                 var explicitKeyAlias = compoundAliases is { Length: > 0 } ? compoundAliases[0] : alias;
-                var baseKeyAlias = explicitKeyAlias ?? (keyNode is NameReference knr ? knr.Name.SimpleName : name);
+                // Auto-name the key like live Kusto: drill single-arg conversion wrappers
+                // (toreal(Value)/tostring(Value)/...) down to the inner identifier; otherwise default.
+                var baseKeyAlias = explicitKeyAlias ?? (TryGetInnerIdentifier(keyNode) ?? name);
                 // Live Kusto: repeated auto-named columns in one summarize suffix 2nd/3rd as <name>1, <name>2, ...
                 // Explicit outer alias bypasses the counter on the key.
                 var keyAlias = SuffixIfCollides(baseKeyAlias, explicitKeyAlias != null, keyAliasCounts);
@@ -197,7 +206,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 {
                     var p = args[i];
                     var resultAlias = i == 1 && alias != null ? alias : $"percentiles_{p}_{baseName}";
-                    results.Add($"quantile_cont({args[0]}, {p} / 100.0) AS {resultAlias}");
+                    results.Add($"quantile_disc({args[0]}, {p} / 100.0) AS {resultAlias}");
                 }
                 return results;
             }
@@ -210,7 +219,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 {
                     var p = args[i];
                     var resultAlias = i == 2 && alias != null ? alias : $"percentilesw_{p}_{baseName}";
-                    results.Add($"quantile_cont({args[0]}, {p} / 100.0) AS {resultAlias}");
+                    results.Add($"quantile_disc({args[0]}, {p} / 100.0) AS {resultAlias}");
                 }
                 return results;
             }
@@ -219,14 +228,14 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             {
                 var percentileList = string.Join(", ", args.Skip(1).Select(p => $"{p} / 100.0"));
                 alias ??= "percentiles_array";
-                return new[] { $"quantile_cont({args[0]}, [{percentileList}]) AS {alias}" };
+                return new[] { $"quantile_disc({args[0]}, [{percentileList}]) AS {alias}" };
             }
 
             if (fce.Is(Aggregates.PercentilesWArray))
             {
                 var percentileList = string.Join(", ", args.Skip(2).Select(p => $"{p} / 100.0"));
                 alias ??= "percentilesw_array";
-                return new[] { $"quantile_cont({args[0]}, [{percentileList}]) AS {alias}" };
+                return new[] { $"quantile_disc({args[0]}, [{percentileList}]) AS {alias}" };
             }
 
             alias ??= DeriveAutoAlias(fce, name, args);
@@ -261,6 +270,10 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 // interval-typed path rather than emitting plain SUM over INTERVAL.
                 if (Expr.IsIntervalExpression(sqlFunc))
                     Expr.MarkIntervalColumn(alias.Trim('"'));
+                // count/countif/dcount/dcountif always yield a KQL long; record the alias so a
+                // downstream `<alias> / N` uses KQL integer (truncating) division.
+                if (name is "count" or "countif" or "dcount" or "dcountif")
+                    Expr.MarkIntegerColumn(alias.Trim('"'));
                 return new[] { $"{sqlFunc} AS {alias}" };
             }
 
@@ -333,6 +346,31 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         }
         if (args.Length > 0) return $"{name}_{SafeAliasPart(args[0])}";
         return name;
+    }
+
+    // Functions whose 'by'/group result keeps the inner column's name in Kusto (verified live).
+    // Drilling through these to a bare NameReference reproduces Kusto's auto-naming. Note:
+    // startofweek/month/year and endof* are deliberately absent — Kusto names those Column1.
+    private static bool IsByNamePreserving(FunctionCallExpression fce) =>
+        fce.IsAny(Functions.Bin, Functions.BinAt, Functions.StartOfDay,
+                  Functions.Floor, Functions.Ceiling, Functions.Round, Functions.Abs,
+                  Functions.ToString, Functions.ToInt, Functions.ToLong,
+                  Functions.ToReal, Functions.ToDouble, Functions.ToDateTime,
+                  Functions.ToBool, Functions.ToTimespan, Functions.ToDecimal);
+
+    private static string? TryResolveByColumnName(FunctionCallExpression fce)
+    {
+        // Walk the first argument through nested name-preserving functions to the inner column.
+        SyntaxNode? current = fce;
+        while (current is FunctionCallExpression call &&
+               IsByNamePreserving(call) &&
+               call.ArgumentList.Expressions.Count > 0)
+        {
+            current = call.ArgumentList.Expressions[0].Element;
+        }
+        if (current is NameReference nr)
+            return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.Name.SimpleName);
+        return null;
     }
 
     private static string? TryGetInnerIdentifier(SyntaxNode node)

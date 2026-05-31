@@ -28,13 +28,39 @@ internal class ExpressionSqlBuilder
     /// <summary>Sets the CTE definitions for body-inspection heuristics (e.g. detecting array-producing CTEs).</summary>
     internal void SetCtes(Dictionary<string, (string sql, bool materialized)> ctes) => _ctes = ctes;
 
+    /// <summary>The ORDER BY key list of the most recent serialize/sort, scoped around a single
+    /// operator's expression conversion. When set, serialization-order window functions
+    /// (prev/next/row_number/row_cumsum/row_rank) emit OVER (ORDER BY …) instead of OVER () so DuckDB
+    /// honours the established row order (an empty OVER() is otherwise free to use scan order, which
+    /// can diverge from Kusto's serialized order on tied/non-unique sort keys).</summary>
+    private string? _windowOrderBy;
+    internal void SetWindowOrder(string? orderBy) => _windowOrderBy = orderBy;
+
+    /// <summary>Injects the active serialization order into a window-function SQL fragment produced by
+    /// the dialect (LAG/LEAD/ROW_NUMBER/SUM … OVER () | OVER (ROWS …)). No-op when no order is active
+    /// or the fragment carries no bare window frame.</summary>
+    private string InjectWindowOrder(string sql)
+    {
+        if (_windowOrderBy is null) return sql;
+        if (sql.Contains(" OVER ()", StringComparison.Ordinal))
+            sql = sql.Replace(" OVER ()", $" OVER (ORDER BY {_windowOrderBy})");
+        if (sql.Contains(" OVER (ROWS ", StringComparison.Ordinal))
+            sql = sql.Replace(" OVER (ROWS ", $" OVER (ORDER BY {_windowOrderBy} ROWS ");
+        return sql;
+    }
+
     private readonly HashSet<string> _intervalColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as interval-typed (from extend/project) so later sum() calls know to use epoch math.</summary>
     internal void MarkIntervalColumn(string name) => _intervalColumns.Add(name);
     /// <summary>Returns true if the named column was previously marked as interval-typed.</summary>
     internal bool IsIntervalColumn(string name) => _intervalColumns.Contains(name);
     /// <summary>Clears interval column tracking — call once per top-level Convert() to avoid cross-query stale state.</summary>
-    internal void ClearIntervalColumns() => _intervalColumns.Clear();
+    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); }
+
+    private readonly HashSet<string> _integerColumns = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Records a column as KQL-integer-typed (e.g. a summarize count()/dcount() result) so a
+    /// downstream `col / N` uses KQL integer (truncating) division instead of DuckDB real division.</summary>
+    internal void MarkIntegerColumn(string name) => _integerColumns.Add(name);
 
     private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.Expression?[] paramDefaults, Kusto.Language.Syntax.FunctionBody body)>? _userFunctions;
     /// <summary>Sets user-defined parameterized functions for inline expansion.</summary>
@@ -474,7 +500,7 @@ internal class ExpressionSqlBuilder
         var dialectResult = _dialect.TryTranslateFunction(lower, args);
         if (dialectResult != null)
         {
-            return dialectResult;
+            return InjectWindowOrder(dialectResult);
         }
 
         // User-defined parameterized function: inline the body with arg substitution
@@ -1032,16 +1058,24 @@ internal class ExpressionSqlBuilder
                     current = pe.Expression;
                     continue;
                 case ElementExpression ee:
-                    if (ee.Selector is LiteralExpression litSel)
+                    // Only string-literal selectors are JSON dict-key access (obj["key"], obj['key']).
+                    // A numeric index selector is array indexing — bail so it falls through to
+                    // ConvertElementAccess, which emits correct 1-based native-LIST indexing
+                    // (split()/dynamic([...]) produce native VARCHAR[]/LIST_VALUE, not JSON).
+                    if (ee.Selector is LiteralExpression litSel
+                        && litSel.Kind == SyntaxKind.StringLiteralExpression)
                     {
                         var key = litSel.ToString().Trim().Trim('\'', '"');
                         segments.Push(key);
                         current = ee.Expression;
                         continue;
                     }
-                    if (ee.Selector is BracketedExpression be && be.Expression is LiteralExpression lit)
+                    if (ee.Selector is BracketedExpression be
+                        && (be.Expression is CompoundStringLiteralExpression
+                            || be.Expression is LiteralExpression lit
+                               && lit.Kind == SyntaxKind.StringLiteralExpression))
                     {
-                        var key = lit.ToString().Trim().Trim('\'', '"');
+                        var key = be.Expression.ToString().Trim().Trim('\'', '"');
                         segments.Push(key);
                         current = ee.Expression;
                         continue;
@@ -1192,21 +1226,33 @@ internal class ExpressionSqlBuilder
         var right = ConvertExpression(bin.Right, leftAlias, rightAlias);
         // DuckDB rejects TIMESTAMP/INTERVAL and INTERVAL/INTERVAL directly. KQL allows these
         // to express 'how many intervals fit in this duration / distance from epoch'.
-        // Convert both operands to epoch-milliseconds when we detect interval-typed operands.
-        // Fall back to AST walk when the text-level check misses — e.g. a bare identifier
-        // reference to a marked interval column wrapped in parens/aliases loses its signature.
-        bool rightIsInterval = IsIntervalExpression(right) || AstReferencesIntervalColumn(bin.Right);
-        bool leftIsInterval = IsIntervalExpression(left) || AstReferencesIntervalColumn(bin.Left);
+        // Convert both operands to epoch-seconds when we detect interval-typed operands.
+        // Classify operand kinds from the AST first (datetime vs timespan vs number); fall back
+        // to the textual/marked-column heuristics only when the AST type is Unknown. The AST
+        // pass is essential because `datetime - timespan` emits SQL containing INTERVAL, which
+        // the text heuristic would otherwise mis-read as a timespan numerator.
+        var leftKind = InferScalarKind(bin.Left);
+        var rightKind = InferScalarKind(bin.Right);
+
+        bool rightIsInterval = rightKind == ScalarKind.TimeSpan
+                               || (rightKind == ScalarKind.Unknown && (IsIntervalExpression(right) || AstReferencesIntervalColumn(bin.Right)));
+        bool leftIsInterval = leftKind == ScalarKind.TimeSpan
+                              || (leftKind == ScalarKind.Unknown && (IsIntervalExpression(left) || AstReferencesIntervalColumn(bin.Left)));
         bool leftIsTimestampLike = bin.Left is NameReference || bin.Left is LiteralExpression lit &&
                                    lit.Kind == SyntaxKind.DateTimeLiteralExpression;
 
+        // datetime / timespan → "how many timespans since the epoch". Kusto measures ticks since
+        // 0001-01-01 (datetime(0001)/1s == 0), so the numerator must be seconds-since-year-1, not
+        // the DuckDB EXTRACT(EPOCH ...) value which is seconds-since-1970. Subtracting the epoch of
+        // 0001-01-01 (a negative constant DuckDB folds) shifts to the Kusto origin.
+        if (rightIsInterval && !leftIsInterval &&
+            (leftKind == ScalarKind.DateTime || (leftKind == ScalarKind.Unknown && (leftIsTimestampLike || LooksLikeTimestampExpression(left)))))
+        {
+            return $"((EXTRACT(EPOCH FROM ({left})) - EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00')) / EXTRACT(EPOCH FROM ({right})))";
+        }
         if (rightIsInterval && leftIsInterval)
         {
             return $"(EXTRACT(EPOCH FROM ({left})) / EXTRACT(EPOCH FROM ({right})))";
-        }
-        if (rightIsInterval && (leftIsTimestampLike || LooksLikeTimestampExpression(left)))
-        {
-            return $"(EPOCH_MS(CAST({left} AS TIMESTAMP)) / EXTRACT(MILLISECOND FROM ({right})))";
         }
         // VARCHAR / numeric — cast left to DOUBLE so DuckDB can divide.
         bool leftLooksVarchar = left.StartsWith("trim(", StringComparison.OrdinalIgnoreCase) ||
@@ -1218,7 +1264,143 @@ internal class ExpressionSqlBuilder
         if (leftLooksVarchar && rightIsNumericLiteral)
             return $"TRY_CAST({left} AS DOUBLE) / {right}";
 
+        // KQL integer division: long/long (or int/int) truncates toward zero (7/2 -> 3, -7/2 -> -3),
+        // whereas DuckDB '/' is real division. Only apply when BOTH operands are statically integer
+        // (literals or integer-returning functions like count/toint/binary_and) so we never mis-coerce
+        // a real or an unknown-typed column; those keep real division (DuckDB's '/').
+        // NULLIF(right,0): KQL integer division by zero yields null (real division yields Infinity);
+        // NULLIF makes the truncating path return NULL too, and avoids casting Infinity to BIGINT.
+        if (IsIntegerKqlExpr(bin.Left) && IsIntegerKqlExpr(bin.Right))
+            return $"CAST(TRUNC(CAST({left} AS DOUBLE) / NULLIF({right}, 0)) AS BIGINT)";
+
         return $"{left} / {right}";
+    }
+
+    /// <summary>True when an expression is statically a KQL integer (long/int): integer literals,
+    /// integer-returning functions (count/countif/dcount/dcountif/toint/tolong/binary_*), or arithmetic
+    /// over such operands. Used to pick KQL's integer (truncating) division. Conservative: an unbound
+    /// column or any real operand yields false, so real division is preserved.</summary>
+    private bool IsIntegerKqlExpr(Expression? e)
+    {
+        switch (e)
+        {
+            case ParenthesizedExpression pe: return IsIntegerKqlExpr(pe.Expression);
+            case PrefixUnaryExpression pu: return IsIntegerKqlExpr(pu.Expression);
+            case NameReference nr: return _integerColumns.Contains(nr.SimpleName);
+            case LiteralExpression lit:
+                return lit.Kind is SyntaxKind.LongLiteralExpression or SyntaxKind.IntLiteralExpression;
+            case FunctionCallExpression fce:
+            {
+                var fn = fce.Name.SimpleName.ToLowerInvariant();
+                return fn is "toint" or "tolong" or "int" or "long" or "count" or "countif"
+                    or "dcount" or "dcountif" or "binary_and" or "binary_or" or "binary_xor" or "binary_not";
+            }
+            case BinaryExpression be:
+                return be.Kind is SyntaxKind.AddExpression or SyntaxKind.SubtractExpression
+                       or SyntaxKind.MultiplyExpression or SyntaxKind.DivideExpression or SyntaxKind.ModuloExpression
+                       && IsIntegerKqlExpr(be.Left) && IsIntegerKqlExpr(be.Right);
+            default: return false;
+        }
+    }
+
+    /// <summary>Coarse KQL scalar type, inferred structurally from the AST so we can pick the
+    /// correct DuckDB arithmetic (e.g. datetime/timespan vs timespan/timespan).</summary>
+    private enum ScalarKind { Unknown, DateTime, TimeSpan, Number }
+
+    /// <summary>Infers whether a scalar KQL expression yields a datetime, timespan, or number,
+    /// following KQL's arithmetic type algebra (datetime±timespan=datetime, datetime-datetime=timespan,
+    /// number*timespan=timespan, datetime/timespan=number, …). Returns Unknown when it can't tell
+    /// (e.g. an unbound column reference), letting callers fall back to textual heuristics.</summary>
+    private ScalarKind InferScalarKind(Expression? e)
+    {
+        switch (e)
+        {
+            case null: return ScalarKind.Unknown;
+            case ParenthesizedExpression pe: return InferScalarKind(pe.Expression);
+            case LiteralExpression lit:
+                return lit.Kind switch
+                {
+                    SyntaxKind.DateTimeLiteralExpression => ScalarKind.DateTime,
+                    SyntaxKind.TimespanLiteralExpression => ScalarKind.TimeSpan,
+                    SyntaxKind.LongLiteralExpression or SyntaxKind.IntLiteralExpression
+                        or SyntaxKind.RealLiteralExpression => ScalarKind.Number,
+                    _ => ScalarKind.Unknown
+                };
+            case NameReference nr:
+                if (IsIntervalColumn(nr.SimpleName)) return ScalarKind.TimeSpan;
+                // A scalar `let` resolves to our own generated SQL — classify it from that text
+                // (deterministic, self-produced; not user-token munging).
+                if (_scalarLets != null && _scalarLets.TryGetValue(nr.SimpleName, out var s))
+                    return ClassifyGeneratedScalarSql(s);
+                return ScalarKind.Unknown;
+            case BinaryExpression be:
+            {
+                var l = InferScalarKind(be.Left);
+                var r = InferScalarKind(be.Right);
+                switch (be.Kind)
+                {
+                    case SyntaxKind.AddExpression:
+                        if (l == ScalarKind.DateTime || r == ScalarKind.DateTime) return ScalarKind.DateTime;
+                        if (l == ScalarKind.TimeSpan && r == ScalarKind.TimeSpan) return ScalarKind.TimeSpan;
+                        if (l == ScalarKind.Number && r == ScalarKind.Number) return ScalarKind.Number;
+                        // An unbound column combined with a timespan is datetime arithmetic: timespan columns
+                        // are tracked as TimeSpan, and `number + timespan` is invalid KQL, so the Unknown
+                        // operand must be a datetime → datetime. This lets `(Timestamp ± 150s) / 300s` on a
+                        // bare datetime column (no schema) reach the year-0001 rebase path in ConvertDivide.
+                        if ((l == ScalarKind.Unknown && r == ScalarKind.TimeSpan) ||
+                            (l == ScalarKind.TimeSpan && r == ScalarKind.Unknown)) return ScalarKind.DateTime;
+                        break;
+                    case SyntaxKind.SubtractExpression:
+                        if (l == ScalarKind.DateTime && r == ScalarKind.DateTime) return ScalarKind.TimeSpan;
+                        if (l == ScalarKind.DateTime && r == ScalarKind.TimeSpan) return ScalarKind.DateTime;
+                        if (l == ScalarKind.TimeSpan && r == ScalarKind.TimeSpan) return ScalarKind.TimeSpan;
+                        if (l == ScalarKind.Number && r == ScalarKind.Number) return ScalarKind.Number;
+                        // `col - timespan` with an unbound (non-interval) column is datetime arithmetic → datetime.
+                        if (l == ScalarKind.Unknown && r == ScalarKind.TimeSpan) return ScalarKind.DateTime;
+                        // `col - datetime` → timespan (only datetime-datetime subtraction is valid here), so
+                        // `(Timestamp - datetime(...)) / 1m` routes to the timespan/timespan ratio, not the rebase.
+                        if (l == ScalarKind.Unknown && r == ScalarKind.DateTime) return ScalarKind.TimeSpan;
+                        break;
+                    case SyntaxKind.MultiplyExpression:
+                        if (l == ScalarKind.TimeSpan || r == ScalarKind.TimeSpan) return ScalarKind.TimeSpan;
+                        if (l == ScalarKind.Number && r == ScalarKind.Number) return ScalarKind.Number;
+                        break;
+                    case SyntaxKind.DivideExpression:
+                        if (l == ScalarKind.DateTime && r == ScalarKind.TimeSpan) return ScalarKind.Number;
+                        if (l == ScalarKind.TimeSpan && r == ScalarKind.TimeSpan) return ScalarKind.Number;
+                        if (l == ScalarKind.TimeSpan && r == ScalarKind.Number) return ScalarKind.TimeSpan;
+                        if (l == ScalarKind.Number && r == ScalarKind.Number) return ScalarKind.Number;
+                        break;
+                }
+                return ScalarKind.Unknown;
+            }
+            case FunctionCallExpression fce:
+            {
+                var fn = fce.Name.SimpleName.ToLowerInvariant();
+                if (fn is "now" or "ago" or "todatetime" or "datetime_add" or "make_datetime"
+                    or "startofday" or "startofweek" or "startofmonth" or "startofyear"
+                    or "endofday" or "endofweek" or "endofmonth" or "endofyear" or "bin_at")
+                    return ScalarKind.DateTime;
+                if (fn is "totimespan" or "timespan" or "make_timespan" or "format_timespan")
+                    return ScalarKind.TimeSpan;
+                if (fn is "datetime_diff" or "toint" or "tolong" or "todouble" or "toreal"
+                    or "tofloat" or "todecimal" or "abs" or "floor" or "ceiling" or "round")
+                    return ScalarKind.Number;
+                return ScalarKind.Unknown;
+            }
+            default:
+                return ScalarKind.Unknown;
+        }
+    }
+
+    /// <summary>Classifies a previously-generated scalar-let SQL string (our own output) as a
+    /// datetime or timespan so <see cref="InferScalarKind"/> can resolve `let` references.</summary>
+    private static ScalarKind ClassifyGeneratedScalarSql(string sql)
+    {
+        var t = sql.Trim().TrimStart('(').TrimStart();
+        if (t.StartsWith("TIMESTAMP", StringComparison.OrdinalIgnoreCase)) return ScalarKind.DateTime;
+        if (sql.Contains("INTERVAL '1 millisecond'", StringComparison.OrdinalIgnoreCase)) return ScalarKind.TimeSpan;
+        return ScalarKind.Unknown;
     }
 
     private bool AstReferencesIntervalColumn(SyntaxNode? node)

@@ -343,10 +343,13 @@ level3 | sort by cnt desc | take 3";
     // ══════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void Unsupported_InvokeOperator_Throws()
+    public void InvokeOperator_ConvertsToTableReference()
     {
+        // invoke is now supported: T | invoke myFunc() translates to a SELECT from myFunc
         var kql = "T | invoke myFunc()";
-        Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
+        var sql = _converter.Convert(kql);
+        Assert.False(string.IsNullOrWhiteSpace(sql));
+        Assert.Contains("SELECT", sql);
     }
 
     [Fact]
@@ -357,8 +360,66 @@ level3 | sort by cnt desc | take 3";
     }
 
     [Fact]
-    public void Unsupported_JoinKindAnti_Throws()
+    public void JoinKindAnti_ReturnsUnmatchedLeftRows()
     {
+        // anti/leftanti: left rows whose Key has NO match in Y
+        DuckDbSetup.EnsureDuckDb();
+        using var conn = new DuckDBConnection("DataSource=:memory:");
+        conn.Open();
+
+        using var setup = conn.CreateCommand();
+        setup.CommandText = @"
+            CREATE TABLE T (Key BIGINT, Val VARCHAR);
+            INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c');
+            CREATE TABLE Y (Key BIGINT);
+            INSERT INTO Y VALUES (1), (3);";
+        setup.ExecuteNonQuery();
+
+        var kql = "T | join kind=anti Y on Key";
+        var sql = _converter.Convert(kql);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+
+        var keys = new List<long>();
+        while (reader.Read()) keys.Add(reader.GetInt64(reader.GetOrdinal("Key")));
+        // Only Key=2 is not in Y
+        Assert.Equal(new long[] { 2 }, keys.ToArray());
+    }
+
+    [Fact]
+    public void JoinKindLeftAnti_ReturnsUnmatchedLeftRows()
+    {
+        // leftanti: left rows whose Key has NO match in Y
+        DuckDbSetup.EnsureDuckDb();
+        using var conn = new DuckDBConnection("DataSource=:memory:");
+        conn.Open();
+
+        using var setup = conn.CreateCommand();
+        setup.CommandText = @"
+            CREATE TABLE T (Key BIGINT, Val VARCHAR);
+            INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c');
+            CREATE TABLE Y (Key BIGINT);
+            INSERT INTO Y VALUES (1), (3);";
+        setup.ExecuteNonQuery();
+
+        var kql = "T | join kind=leftanti Y on Key";
+        var sql = _converter.Convert(kql);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+
+        var keys = new List<long>();
+        while (reader.Read()) keys.Add(reader.GetInt64(reader.GetOrdinal("Key")));
+        Assert.Equal(new long[] { 2 }, keys.ToArray());
+    }
+
+    [Fact]
+    public void JoinKindRightAnti_ReturnsUnmatchedRightRows()
+    {
+        // rightanti: right rows whose Key has NO match in left
         DuckDbSetup.EnsureDuckDb();
         using var conn = new DuckDBConnection("DataSource=:memory:");
         conn.Open();
@@ -366,34 +427,53 @@ level3 | sort by cnt desc | take 3";
         using var setup = conn.CreateCommand();
         setup.CommandText = @"
             CREATE TABLE T (Key BIGINT);
-            INSERT INTO T VALUES (1);
-            CREATE TABLE Y (Key BIGINT);
-            INSERT INTO Y VALUES (1);";
+            INSERT INTO T VALUES (1), (3);
+            CREATE TABLE Y (Key BIGINT, Val VARCHAR);
+            INSERT INTO Y VALUES (1, 'a'), (2, 'b'), (3, 'c');";
         setup.ExecuteNonQuery();
 
-        var kql = "T | join kind=anti Y on Key";
-        Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
-    }
-
-    [Fact]
-    public void Unsupported_JoinKindLeftAnti_Throws()
-    {
-        var kql = "T | join kind=leftanti Y on Key";
-        Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
-    }
-
-    [Fact]
-    public void Unsupported_JoinKindRightAnti_Throws()
-    {
         var kql = "T | join kind=rightanti Y on Key";
-        Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
+        var sql = _converter.Convert(kql);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+
+        var keys = new List<long>();
+        while (reader.Read()) keys.Add(reader.GetInt64(reader.GetOrdinal("Key")));
+        // Only Key=2 in Y has no match in T
+        Assert.Equal(new long[] { 2 }, keys.ToArray());
     }
 
     [Fact]
-    public void Unsupported_JoinKindLeftSemi_Throws()
+    public void JoinKindLeftSemi_ReturnsMatchedLeftRows()
     {
+        // leftsemi: left rows whose Key HAS a match in Y (left columns only)
+        DuckDbSetup.EnsureDuckDb();
+        using var conn = new DuckDBConnection("DataSource=:memory:");
+        conn.Open();
+
+        using var setup = conn.CreateCommand();
+        setup.CommandText = @"
+            CREATE TABLE T (Key BIGINT, Val VARCHAR);
+            INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c');
+            CREATE TABLE Y (Key BIGINT);
+            INSERT INTO Y VALUES (1), (3);";
+        setup.ExecuteNonQuery();
+
         var kql = "T | join kind=leftsemi Y on Key";
-        Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
+        var sql = _converter.Convert(kql);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+
+        var keys = new List<long>();
+        while (reader.Read()) keys.Add(reader.GetInt64(reader.GetOrdinal("Key")));
+        // Keys 1 and 3 match
+        Assert.Equal(2, keys.Count);
+        Assert.Contains(1L, keys);
+        Assert.Contains(3L, keys);
     }
 
     [Fact]

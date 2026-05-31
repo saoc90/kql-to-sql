@@ -15,15 +15,18 @@ public class TypeCastFunctionTests
 | extend year_str=tostring(EpisodeId)
 | project toint(year_str)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT TRY_CAST(year_str AS INTEGER) AS year_str FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
+        // toint truncates toward zero (Kusto), unlike DuckDB's rounding CAST — route through TRUNC(double).
+        Assert.Equal("SELECT TRY_CAST(TRUNC(TRY_CAST(year_str AS DOUBLE)) AS INTEGER) AS year_str FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT EpisodeId FROM StormEvents LIMIT 1";
-        var expected = Convert.ToInt64(cmd.ExecuteScalar()!);
-        cmd.CommandText = sql;
-        var result = Convert.ToInt64(cmd.ExecuteScalar()!);
-        Assert.Equal(expected, result);
+        // Single row, single query (unordered LIMIT 1 is non-deterministic across executions):
+        // toint(tostring(EpisodeId)) must round-trip the integer for whatever row is read.
+        cmd.CommandText = "SELECT EpisodeId, TRY_CAST(TRUNC(TRY_CAST(CAST(EpisodeId AS TEXT) AS DOUBLE)) AS INTEGER) FROM StormEvents LIMIT 1";
+        using var rdr = cmd.ExecuteReader();
+        Assert.True(rdr.Read());
+        // EpisodeId is a fractional DOUBLE here; KQL toint truncates toward zero (e.g. 1.585 -> 1).
+        Assert.Equal((long)Math.Truncate(rdr.GetDouble(0)), rdr.GetInt64(1));
     }
 
     [Fact]
@@ -35,15 +38,18 @@ public class TypeCastFunctionTests
 | extend year_str=tostring(EpisodeId)
 | project tolong(year_str)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT TRY_CAST(year_str AS BIGINT) AS year_str FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
+        // tolong truncates toward zero (Kusto), unlike DuckDB's rounding CAST — route through TRUNC(double).
+        Assert.Equal("SELECT TRY_CAST(TRUNC(TRY_CAST(year_str AS DOUBLE)) AS BIGINT) AS year_str FROM (SELECT *, TRY_CAST(EpisodeId AS TEXT) AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT EpisodeId FROM StormEvents LIMIT 1";
-        var expected = Convert.ToInt64(cmd.ExecuteScalar()!);
-        cmd.CommandText = sql;
-        var result = Convert.ToInt64(cmd.ExecuteScalar()!);
-        Assert.Equal(expected, result);
+        // Single row, single query (unordered LIMIT 1 is non-deterministic across executions):
+        // tolong(tostring(EpisodeId)) must round-trip the integer for whatever row is read.
+        cmd.CommandText = "SELECT EpisodeId, TRY_CAST(TRUNC(TRY_CAST(CAST(EpisodeId AS TEXT) AS DOUBLE)) AS BIGINT) FROM StormEvents LIMIT 1";
+        using var rdr = cmd.ExecuteReader();
+        Assert.True(rdr.Read());
+        // EpisodeId is a fractional DOUBLE here; KQL tolong truncates toward zero (e.g. 1.585 -> 1).
+        Assert.Equal((long)Math.Truncate(rdr.GetDouble(0)), rdr.GetInt64(1));
     }
 
     [Fact]
@@ -59,7 +65,7 @@ public class TypeCastFunctionTests
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT EpisodeId FROM StormEvents LIMIT 1";
+        cmd.CommandText = "SELECT EpisodeId FROM (SELECT * FROM StormEvents LIMIT 1)";
         var expected = Convert.ToDouble(cmd.ExecuteScalar()!);
         cmd.CommandText = sql;
         var result = Convert.ToDouble(cmd.ExecuteScalar()!);
