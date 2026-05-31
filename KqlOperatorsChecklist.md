@@ -357,3 +357,11 @@ These are execution hints for the ADX distributed engine. They don't change quer
 | `hint.num_partitions` | shuffle — controls partition count on distributed engine |
 | `hint.spread` | join — controls spread factor on distributed engine |
 | `hint.remote` | join — controls remote execution on cross-cluster joins |
+
+## Known semantic differences (translation is correct, results may differ on ties)
+
+These translations are semantically faithful to KQL, but their *result* can differ from a live cluster on a minority of rows because KQL itself does not define a deterministic answer. The difference is in the data/spec, not the translation.
+
+| Construct | Behavior | Why results can differ |
+|---|---|---|
+| `arg_max(k, *)` / `arg_min(k, *)` with duplicate `k` | Returns *a* row holding the extreme `k`. | When multiple rows share the same `k`, KQL documents the tie-break as **arbitrary**; Kusto resolves it by internal storage/extent order. That order is not portable to SQL, so the translation (a `ROW_NUMBER() OVER (… ORDER BY k DESC)` pick) may select a different — but equally valid — tied row. Verified against production: in formulas downsampling high-frequency telemetry via `arg_max(Timestamp, *) by Name, bin(Timestamp, 1s)`, ~0.7–3.7% of output rows fell on `(Name, second)` buckets containing two readings at the *identical* `Timestamp` (same `IngestionTimestamp` and `Uid` too — indistinguishable except by payload). Kusto's pick across such ties followed no rule (≈40% max / 60% min), confirming storage-order arbitrariness. Row counts and `(Timestamp, Name)` keys match exactly; only the chosen payload differs. To make output deterministic at the cost of *not* matching Kusto, add a stable tiebreaker (e.g. `arg_max(k, *)` → break ties on a second column). |

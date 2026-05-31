@@ -1,3 +1,4 @@
+using System;
 using KqlToSql;
 using Xunit;
 
@@ -5,6 +6,30 @@ namespace KqlToSql.Tests.Operators;
 
 public class ArgMaxOperatorTests
 {
+    [Fact]
+    public void ArgMax_With_Duplicate_Keys_Returns_A_Tied_Row_Not_A_Phantom()
+    {
+        // Two rows share the IDENTICAL max key (Ts). KQL arg_max(Ts, *) returns one of them; the tie-break is
+        // arbitrary per the KQL spec (Kusto uses internal storage order, which is not portable to SQL — see
+        // "Known semantic differences" in KqlOperatorsChecklist.md). The translation must return a row whose
+        // key is the max AND whose value is one of the genuine tied candidates — never an interpolated/phantom value.
+        var converter = new KqlToSqlConverter();
+        var kql = "datatable(Name:string, Ts:datetime, Value:long)" +
+                  "['s', datetime(2026-01-01 00:00:01), 10, 's', datetime(2026-01-01 00:00:02), 20, 's', datetime(2026-01-01 00:00:02), 30]" +
+                  " | summarize arg_max(Ts, *) by Name | project Name, Ts, Value";
+        var sql = converter.Convert(kql);
+        Assert.Contains("ROW_NUMBER() OVER (PARTITION BY Name ORDER BY Ts DESC)", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(new DateTime(2026, 1, 1, 0, 0, 2), reader.GetDateTime(1)); // key is the max timestamp
+        var val = Convert.ToInt64(reader.GetValue(2));
+        Assert.True(val == 20 || val == 30, $"expected a tied candidate (20 or 30), got {val}"); // a real reading, not a phantom
+    }
+
     [Fact]
     public void Converts_ArgMax_By_State()
     {
