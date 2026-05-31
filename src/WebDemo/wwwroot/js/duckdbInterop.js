@@ -51,38 +51,44 @@ async function decompressGzip(compressedData) {
     }
 }
 
+// Classify an Arrow field into the small chart-relevant type set the renderer understands.
+function classifyArrowType(field) {
+    const t = (field && field.type && field.type.toString ? field.type.toString() : String(field && field.type)).toLowerCase();
+    if (t.startsWith('timestamp') || t.startsWith('date') || t.startsWith('time')) return 'datetime';
+    if (t.startsWith('bool')) return 'bool';
+    if (t.startsWith('int') || t.startsWith('uint') || t.startsWith('float') ||
+        t.startsWith('double') || t.startsWith('decimal')) return 'number';
+    return 'string';
+}
+
 export async function queryJson(sql) {
     if (!db) await init();
     const c = await db.connect();
     const res = await c.query(sql);    // ArrowTable
     c.close();
 
-    // Handle duplicate column names (e.g. from self-joins) by renaming them
+    // Handle duplicate column names (e.g. from self-joins) by renaming them (col, col1, col2, …)
     // before calling toArray(), which fails on duplicate keys in JS proxies.
-    const schema = res.schema;
-    const names = schema.fields.map(f => f.name);
-    const seen = {};
-    let hasDuplicates = false;
-    for (const name of names) {
-        seen[name] = (seen[name] || 0) + 1;
-        if (seen[name] > 1) hasDuplicates = true;
-    }
+    const fields = res.schema.fields;
+    const rawNames = fields.map(f => f.name);
+    const counts = {};
+    const names = rawNames.map(n => {
+        counts[n] = (counts[n] || 0) + 1;
+        return counts[n] > 1 ? `${n}${counts[n] - 1}` : n;
+    });
+    const hasDuplicates = names.some((n, i) => n !== rawNames[i]);
+
+    // Typed column metadata (carries the chart renderer's x/y axis selection).
+    const columns = names.map((name, i) => ({ name, type: classifyArrowType(fields[i]) }));
 
     let data;
     if (hasDuplicates) {
-        // Build rows manually with deduplicated column names
-        const uniqueNames = [];
-        const counts = {};
-        for (const name of names) {
-            counts[name] = (counts[name] || 0) + 1;
-            uniqueNames.push(counts[name] > 1 ? `${name}${counts[name] - 1}` : name);
-        }
         const numRows = res.numRows;
         data = [];
         for (let r = 0; r < numRows; r++) {
             const row = {};
-            for (let col = 0; col < uniqueNames.length; col++) {
-                row[uniqueNames[col]] = res.getChildAt(col)?.get(r);
+            for (let col = 0; col < names.length; col++) {
+                row[names[col]] = res.getChildAt(col)?.get(r);
             }
             data.push(row);
         }
@@ -92,7 +98,7 @@ export async function queryJson(sql) {
 
     // Convert any BigInt values to numbers before serialization
     const convertedData = convertBigIntToNumber(data);
-    return JSON.stringify(convertedData);   // plain JSON for easy marshalling
+    return JSON.stringify({ columns, rows: convertedData });   // typed envelope for table + chart
 }
 
 export async function uploadFileToDatabase(fileName, fileContent, fileType) {

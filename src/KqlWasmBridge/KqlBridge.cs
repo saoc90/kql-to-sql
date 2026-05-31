@@ -4,17 +4,20 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using KqlToSql;
 using KqlToSql.Dialects;
+using KqlToSql.Render;
 using Kusto.Language;
 
 namespace KqlWasmBridge;
 
-// Source-generated JSON serialization (required for WASM — reflection is disabled)
+// Source-generated JSON serialization (required for WASM — reflection is disabled).
+// RenderInfo MUST be registered or serializing the nested render metadata throws in the browser.
 [JsonSerializable(typeof(TranslateResult))]
 [JsonSerializable(typeof(ValidateResult))]
 [JsonSerializable(typeof(DiagnosticError[]))]
+[JsonSerializable(typeof(RenderInfo))]
 internal partial class BridgeJsonContext : JsonSerializerContext;
 
-public record TranslateResult(bool success, string? sql, string? error);
+public record TranslateResult(bool success, string? sql, string? error, RenderInfo? render);
 
 public record DiagnosticError(string message, int start, int length);
 
@@ -35,12 +38,12 @@ public static partial class KqlBridge
             };
 
             var converter = new KqlToSqlConverter(sqlDialect);
-            var sql = converter.Convert(kql);
-            return JsonSerializer.Serialize(new TranslateResult(true, sql, null), BridgeJsonContext.Default.TranslateResult);
+            var (sql, render) = converter.ConvertWithRender(kql);
+            return JsonSerializer.Serialize(new TranslateResult(true, sql, null, render), BridgeJsonContext.Default.TranslateResult);
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new TranslateResult(false, null, ex.Message), BridgeJsonContext.Default.TranslateResult);
+            return JsonSerializer.Serialize(new TranslateResult(false, null, ex.Message, null), BridgeJsonContext.Default.TranslateResult);
         }
     }
 

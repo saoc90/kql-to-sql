@@ -149,6 +149,17 @@ async function ensureStormEventsLoaded() {
     }
 }
 
+// Classify a Postgres type OID into the chart-relevant type set. (StormEvents loads as text in
+// PGlite, so most columns classify as 'string'; the renderer coerces y-values with Number().)
+function classifyPgOid(oid) {
+    switch (oid) {
+        case 20: case 21: case 23: case 700: case 701: case 1700: return 'number'; // int8/int2/int4/float4/float8/numeric
+        case 16: return 'bool';
+        case 1082: case 1114: case 1184: return 'datetime'; // date/timestamp/timestamptz
+        default: return 'string';
+    }
+}
+
 export async function queryJson(sql) {
     if (!pg) await init();
     try {
@@ -165,6 +176,8 @@ export async function queryJson(sql) {
             names.push(counts[name] > 1 ? `${name}${counts[name] - 1}` : name);
         }
 
+        const columns = names.map((name, i) => ({ name, type: classifyPgOid(fields[i] && fields[i].dataTypeID) }));
+
         // Build row objects with deduplicated names
         const rows = (res.rows || []).map(row => {
             const obj = {};
@@ -174,7 +187,7 @@ export async function queryJson(sql) {
             return obj;
         });
 
-        return JSON.stringify(rows);
+        return JSON.stringify({ columns, rows });   // typed envelope for table + chart
     } catch (e) {
         console.error('❌ PGlite query failed:', e);
         throw e;

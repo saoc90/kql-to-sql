@@ -1,6 +1,6 @@
 // File Manager UI logic — replaces FileManager.razor
 import { showAlert, hideAlert } from './notifications.js';
-import { renderResults, clearResults } from './resultTable.js';
+import { renderResults, clearResults, rowsOf } from './resultTable.js';
 
 let selectedBackend = 'duckdb';
 
@@ -194,7 +194,7 @@ async function previewFile(fileId) {
         renderResults(data, 'preview-thead', 'preview-tbody');
 
         const info = document.getElementById('preview-row-info');
-        if (data.length >= 100 && info) {
+        if (rowsOf(data).length >= 100 && info) {
             info.textContent = `Showing first 100 rows of ${file.rowCount} total rows`;
             info.classList.remove('d-none');
         } else if (info) {

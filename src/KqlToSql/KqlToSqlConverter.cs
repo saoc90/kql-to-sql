@@ -156,6 +156,31 @@ public class KqlToSqlConverter
         throw new NotSupportedException("Unsupported KQL query");
     }
 
+    /// <summary>
+    /// Converts the KQL to SQL and, when the query ends in a <c>| render</c> operator, also extracts the
+    /// chart-rendering metadata (chart kind + <c>with(...)</c> properties). The render pass is independent
+    /// and stateless — it parses the query a second time and walks the AST without mutating any shared
+    /// converter state — so this is race-free on a shared/singleton converter instance. Render extraction
+    /// is best-effort and never affects the SQL: a render query produces byte-identical SQL to <see cref="Convert"/>.
+    /// </summary>
+    public (string sql, Render.RenderInfo? render) ConvertWithRender(string kql)
+    {
+        var sql = Convert(kql);
+        Render.RenderInfo? render = null;
+        try
+        {
+            var code = KustoCode.Parse(StripComments(kql));
+            var renderOp = code.Syntax.GetDescendants<RenderOperator>().LastOrDefault();
+            if (renderOp != null)
+                render = Render.RenderInfoExtractor.Extract(renderOp);
+        }
+        catch
+        {
+            // Render metadata is purely additive; a failure here must never break a valid SQL conversion.
+        }
+        return (sql, render);
+    }
+
     /// <summary>Returns true if <paramref name="node"/> has a <see cref="FunctionBody"/> ancestor,
     /// meaning it is nested inside a function declaration and should not be hoisted to query scope.</summary>
     private static bool IsInsideFunctionBody(SyntaxNode node)

@@ -46,7 +46,7 @@ public partial class Program
             try
             {
                 using var conn = database.GetConnection();
-                var sql = converter.Convert(request.Csl);
+                var (sql, render) = converter.ConvertWithRender(request.Csl);
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = sql;
                 using var reader = cmd.ExecuteReader();
@@ -106,6 +106,39 @@ public partial class Program
                 }
                 else
                 {
+                    // The "Visualization" annotation Kusto emits in @ExtendedProperties — populated from the
+                    // render metadata when the query ends in `| render`, otherwise all-null (Ymin/Ymax "NaN").
+                    // Kusto types the axis bounds as a union: a JSON number when specified, else the string "NaN"
+                    // for y-bounds / null for x-bounds (verified against a live cluster).
+                    static object? AxisBound(string? s, object? dflt)
+                        => s == null
+                            ? dflt
+                            : (double.TryParse(s, System.Globalization.NumberStyles.Any,
+                                  System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : (object)s);
+
+                    var visualizationValue = JsonSerializer.Serialize(new
+                    {
+                        Visualization = render?.Visualization,
+                        Title = render?.Title,
+                        XColumn = render?.XColumn,
+                        Series = render?.Series,
+                        YColumns = render?.YColumns,
+                        AnomalyColumns = render?.AnomalyColumns,
+                        XTitle = render?.XTitle,
+                        YTitle = render?.YTitle,
+                        XAxis = render?.XAxis,
+                        YAxis = render?.YAxis,
+                        Legend = render?.Legend,
+                        YSplit = render?.YSplit,
+                        Accumulate = render?.Accumulate ?? false,
+                        IsQuerySorted = render?.IsQuerySorted ?? false,
+                        Kind = render?.Kind,
+                        Ymin = AxisBound(render?.Ymin, "NaN"),
+                        Ymax = AxisBound(render?.Ymax, "NaN"),
+                        Xmin = AxisBound(render?.Xmin, null),
+                        Xmax = AxisBound(render?.Xmax, null)
+                    });
+
                     // Build QueryProperties frame (TableId 0)
                     var queryProps = new
                     {
@@ -125,7 +158,7 @@ public partial class Program
                             {
                                 1,
                                 "Visualization",
-                                "{\"Visualization\":null,\"Title\":null,\"XColumn\":null,\"Series\":null,\"YColumns\":null,\"AnomalyColumns\":null,\"XTitle\":null,\"YTitle\":null,\"XAxis\":null,\"YAxis\":null,\"Legend\":null,\"YSplit\":null,\"Accumulate\":false,\"IsQuerySorted\":false,\"Kind\":null,\"Ymin\":\"NaN\",\"Ymax\":\"NaN\",\"Xmin\":null,\"Xmax\":null}"
+                                visualizationValue
                             }
                         }
                     };

@@ -1,6 +1,7 @@
 // Query Editor UI logic — replaces Home.razor
 import { showAlert, hideAlert, hideAllAlerts } from './notifications.js';
-import { renderResults, clearResults } from './resultTable.js';
+import { renderResults, clearResults, rowsOf, columnsOf } from './resultTable.js';
+import { renderChart } from './chartRenderer.js';
 
 const EDITOR_ID = 'monaco-editor-container';
 const STORAGE_KEY = 'queryEditorState';
@@ -55,6 +56,12 @@ export async function initQueryEditor() {
     document.getElementById('btn-copy-sql')?.addEventListener('click', copySql);
     document.getElementById('btn-use-sql')?.addEventListener('click', useConvertedSql);
 
+    // Result view toggle (Chart vs Table) + keep the chart sized to its container
+    document.querySelectorAll('input[name="resultView"]').forEach(radio => {
+        radio.addEventListener('change', (e) => setResultView(e.target.value));
+    });
+    window.addEventListener('resize', () => { if (window.__resultChart) { try { window.__resultChart.resize(); } catch { /* noop */ } } });
+
     // Initialize Monaco editor — must complete before file manager restores OPFS files
     await initEditor();
 }
@@ -73,13 +80,11 @@ async function initEditor() {
                 () => { run(true); }
             );
 
-            // Restore persisted query text
+            // Restore persisted query text, or seed the default example query on first load
             const saved = loadState();
-            if (saved.query) {
-                editor.setValue(saved.query);
-                const lang = selectedMode === 'kql' ? 'kusto' : 'sql';
-                window.nativeMonacoEditor.setLanguage(EDITOR_ID, lang);
-            }
+            editor.setValue(saved.query || getDefaultQuery());
+            const lang = selectedMode === 'kql' ? 'kusto' : 'sql';
+            window.nativeMonacoEditor.setLanguage(EDITOR_ID, lang);
 
             // Save on every edit
             editor.onDidChangeModelContent(() => debouncedSave());
@@ -122,7 +127,7 @@ async function onModeChanged(newMode) {
 
 function getDefaultQuery() {
     return selectedMode === 'kql'
-        ? 'StormEvents | take 10'
+        ? 'StormEvents\n| summarize EventCount = count() by State\n| top 10 by EventCount\n| render columnchart'
         : 'SELECT * FROM StormEvents LIMIT 10;';
 }
 
@@ -238,6 +243,7 @@ async function run(cursorOnly) {
         }
 
         let sqlToExecute = query;
+        let renderInfo = null;
 
         // Convert KQL to SQL if in KQL mode
         if (selectedMode === 'kql') {
@@ -251,6 +257,7 @@ async function run(cursorOnly) {
                 return;
             }
             sqlToExecute = result.sql;
+            renderInfo = result.render || null;   // chart metadata from a `| render` operator
         }
 
         // Execute against selected backend
@@ -261,13 +268,15 @@ async function run(cursorOnly) {
             queryResult = await window.PGliteInterop.queryJson(sqlToExecute);
         }
 
-        // Parse and render
+        // Parse and render — always populate the table, then draw the chart if the query has `| render`.
         try {
             const data = JSON.parse(queryResult);
-            if (Array.isArray(data) && data.length > 0) {
+            const rows = rowsOf(data);
+            if (rows.length > 0) {
                 renderResults(data, 'results-thead', 'results-tbody');
-                document.getElementById('results-count').textContent = data.length;
+                document.getElementById('results-count').textContent = rows.length;
                 showPanel('results-panel');
+                await showResultViews(renderInfo, data);
             } else {
                 document.getElementById('raw-result-code').textContent = queryResult;
                 showPanel('raw-result-panel');
@@ -301,11 +310,13 @@ async function showTables() {
         }
 
         const data = JSON.parse(tablesResult);
-        if (Array.isArray(data) && data.length > 0) {
+        const rows = rowsOf(data);
+        if (rows.length > 0) {
             renderResults(data, 'results-thead', 'results-tbody');
-            document.getElementById('results-count').textContent = data.length;
+            document.getElementById('results-count').textContent = rows.length;
             showPanel('results-panel');
-            showAlert('conversion-alert', `Found ${data.length} table(s) in the database.`, 'success');
+            await showResultViews(null, data);   // plain table, no chart
+            showAlert('conversion-alert', `Found ${rows.length} table(s) in the database.`, 'success');
         } else {
             showAlert('conversion-alert', 'No tables found in the database.', 'info');
         }
@@ -320,4 +331,59 @@ function showPanel(id) {
 
 function hidePanel(id) {
     document.getElementById(id)?.classList.add('d-none');
+}
+
+// ----- Result view (Chart vs Table), ADX-style -------------------------------------------
+
+function setResultView(view) {
+    const chartWrap = document.getElementById('results-chart-wrap');
+    const tableWrap = document.getElementById('results-table-wrap');
+    if (view === 'chart') {
+        chartWrap?.classList.remove('d-none');
+        tableWrap?.classList.add('d-none');
+        const r = document.getElementById('result-view-chart'); if (r) r.checked = true;
+        // ECharts mis-sizes when initialized in a hidden container — resize once visible.
+        if (window.__resultChart) { try { window.__resultChart.resize(); } catch { /* noop */ } }
+    } else {
+        tableWrap?.classList.remove('d-none');
+        chartWrap?.classList.add('d-none');
+        const r = document.getElementById('result-view-table'); if (r) r.checked = true;
+    }
+}
+
+// Draw the chart for `renderInfo` (if present) and pick the default view: Chart when the query has a
+// real `| render` chart, otherwise Table. table/pivotchart/timepivot fall back to the table with a note.
+async function showResultViews(renderInfo, data) {
+    const toggle = document.getElementById('result-view-toggle');
+    const note = document.getElementById('chart-note');
+    if (note) { note.classList.add('d-none'); note.textContent = ''; }
+
+    if (!renderInfo) {
+        toggle?.classList.add('d-none');
+        setResultView('table');
+        return;
+    }
+
+    const chartEl = document.getElementById('results-chart');
+    let res;
+    try {
+        res = await renderChart(renderInfo, columnsOf(data), rowsOf(data), chartEl);
+    } catch (err) {
+        console.error('[QueryEditor] chart render failed:', err);
+        if (note) { note.textContent = `Chart rendering failed: ${err?.message || err}`; note.classList.remove('d-none'); }
+        toggle?.classList.add('d-none');
+        setResultView('table');
+        return;
+    }
+
+    if (res && res.table) {
+        if (res.note && note) { note.textContent = res.note; note.classList.remove('d-none'); }
+        toggle?.classList.add('d-none');
+        setResultView('table');
+        return;
+    }
+
+    // Real chart (or card) — show the toggle and default to the Chart view.
+    toggle?.classList.remove('d-none');
+    setResultView('chart');
 }
