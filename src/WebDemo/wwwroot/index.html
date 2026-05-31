@@ -343,12 +343,26 @@
             setTimeout(() => { observer.disconnect(); reject(new Error('Timeout waiting for ' + containerId)); }, timeout);
         });
     };
+
+    // Cache-proof safety net. GitHub Pages caches our JS modules for ~10 minutes, so a freshly
+    // deployed fix to app.js may not reach a returning visitor right away. This script lives in the
+    // document itself (revalidated on every load), so it guarantees the UI is revealed even if a
+    // stale, blocking app.js is still cached and stuck waiting on the WASM engine.
+    setTimeout(function () {
+        var app = document.getElementById('app');
+        if (app && app.classList.contains('d-none')) {
+            app.classList.remove('d-none');
+            var ov = document.getElementById('loading-overlay');
+            if (ov) ov.remove();
+            console.warn('[index] Inline safety reveal fired — app shell shown (engine may still be loading).');
+        }
+    }, 8000);
 </script>
 <script src="fileManager.js"></script>
 <script type="module" src="js/duckdbInterop.js"></script>
 <script type="module" src="js/pgliteInterop.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
-<script type="module" src="js/kqlBridge.js"></script>
-<script type="module" src="js/app.js"></script>
+<script type="module" src="js/kqlBridge.js?v=20260531b"></script>
+<script type="module" src="js/app.js?v=20260531b"></script>
 </body>
 </html>
