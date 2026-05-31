@@ -798,7 +798,8 @@ public class PGliteDialectTests
     {
         var sql = _converter.Convert("StormEvents | take 10 | extend test = toint(StormSummary.TotalDamages)");
         // toint truncates toward zero (Kusto) — route through TRUNC(double precision) before the integer cast.
-        Assert.Equal("SELECT *, CAST(TRUNC(CAST((StormSummary::jsonb->>'TotalDamages') AS double precision)) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
+        // A dynamic JSON boolean coerces true→1 / false→0, so boolean text is mapped before the numeric cast.
+        Assert.Equal("SELECT *, CAST(TRUNC(CASE WHEN lower(((StormSummary::jsonb->>'TotalDamages'))::text) IN ('true','false') THEN (lower(((StormSummary::jsonb->>'TotalDamages'))::text) = 'true')::int::double precision ELSE CAST((StormSummary::jsonb->>'TotalDamages') AS double precision) END) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
     }
 
     [Fact]
@@ -806,7 +807,8 @@ public class PGliteDialectTests
     {
         var sql = _converter.Convert("StormEvents | take 10 | extend test = toint(StormSummary['TotalDamages'])");
         // toint truncates toward zero (Kusto) — route through TRUNC(double precision) before the integer cast.
-        Assert.Equal("SELECT *, CAST(TRUNC(CAST((StormSummary::jsonb->>'TotalDamages') AS double precision)) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
+        // A dynamic JSON boolean coerces true→1 / false→0, so boolean text is mapped before the numeric cast.
+        Assert.Equal("SELECT *, CAST(TRUNC(CASE WHEN lower(((StormSummary::jsonb->>'TotalDamages'))::text) IN ('true','false') THEN (lower(((StormSummary::jsonb->>'TotalDamages'))::text) = 'true')::int::double precision ELSE CAST((StormSummary::jsonb->>'TotalDamages') AS double precision) END) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
     }
 
     [Fact]

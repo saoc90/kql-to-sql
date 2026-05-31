@@ -355,14 +355,25 @@ public class PGliteDialect : ISqlDialect
 
     /// <summary>KQL toint/tolong truncate toward zero; Postgres CAST(real AS integer) rounds. Route
     /// integer targets through TRUNC(double precision) so the result matches Kusto. Also normalizes the
-    /// generic 'DOUBLE' type name (DuckDB) to Postgres 'double precision'.</summary>
+    /// generic 'DOUBLE' type name (DuckDB) to Postgres 'double precision'.
+    /// KQL toint/tolong/toreal/todouble coerce a dynamic JSON boolean (true→1, false→0; verified live).
+    /// Dynamic values serialize to text, and Postgres CAST('true' AS double precision) errors, so route
+    /// genuine boolean text ('true'/'false') to 1/0 first and only numeric-cast the remainder.</summary>
     public string SafeCast(string expr, string sqlType)
     {
         var t = string.Equals(sqlType, "DOUBLE", System.StringComparison.OrdinalIgnoreCase)
             ? "double precision" : sqlType;
-        if (string.Equals(sqlType, "INTEGER", System.StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(sqlType, "BIGINT", System.StringComparison.OrdinalIgnoreCase))
-            return $"CAST(TRUNC(CAST({expr} AS double precision)) AS {t})";
+        bool integral = string.Equals(sqlType, "INTEGER", System.StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(sqlType, "BIGINT", System.StringComparison.OrdinalIgnoreCase);
+        if (integral || string.Equals(sqlType, "DOUBLE", System.StringComparison.OrdinalIgnoreCase))
+        {
+            var boolAware = $"CASE WHEN lower(({expr})::text) IN ('true','false') "
+                + $"THEN (lower(({expr})::text) = 'true')::int::double precision "
+                + $"ELSE CAST({expr} AS double precision) END";
+            return integral
+                ? $"CAST(TRUNC({boolAware}) AS {t})"
+                : boolAware;
+        }
         return $"CAST({expr} AS {t})";
     }
 }

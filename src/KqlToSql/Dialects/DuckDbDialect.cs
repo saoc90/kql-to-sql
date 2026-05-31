@@ -378,9 +378,16 @@ public class DuckDbDialect : ISqlDialect
     /// matching KQL's null-on-failure. Non-integer targets use the default TRY_CAST.</summary>
     public string SafeCast(string expr, string sqlType)
     {
+        // KQL toint/tolong/toreal/todouble coerce a *dynamic* JSON boolean: true→1, false→0
+        // (verified live: toint(dynamic(true))==1). Dynamic columns serialize to text here, so a
+        // bare numeric cast of 'true'/'false' yields NULL — fall back to a boolean coercion when the
+        // numeric parse fails. TRY_CAST('5' AS BOOLEAN) is NULL, so numeric strings keep numeric
+        // semantics and only genuine boolean text routes through the fallback.
         if (string.Equals(sqlType, "INTEGER", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(sqlType, "BIGINT", StringComparison.OrdinalIgnoreCase))
-            return $"TRY_CAST(TRUNC(TRY_CAST({expr} AS DOUBLE)) AS {sqlType})";
+            return $"TRY_CAST(TRUNC(COALESCE(TRY_CAST({expr} AS DOUBLE), TRY_CAST(TRY_CAST({expr} AS BOOLEAN) AS DOUBLE))) AS {sqlType})";
+        if (string.Equals(sqlType, "DOUBLE", StringComparison.OrdinalIgnoreCase))
+            return $"COALESCE(TRY_CAST({expr} AS DOUBLE), TRY_CAST(TRY_CAST({expr} AS BOOLEAN) AS DOUBLE))";
         return $"TRY_CAST({expr} AS {sqlType})";
     }
 
