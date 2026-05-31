@@ -46,6 +46,25 @@ public class DatetimeFunctionTests
     }
 
     [Fact]
+    public void Converts_UnixtimeSeconds_To_Naive_Utc_Timestamp()
+    {
+        // TO_TIMESTAMP returns TIMESTAMPTZ; without AT TIME ZONE 'UTC' the value session-tz-coerces
+        // when compared to a naive Timestamp column, which dropped all rows in a real prod formula.
+        var converter = new KqlToSqlConverter();
+        var sql = converter.Convert("StormEvents | extend d=unixtime_seconds_todatetime(1779991350) | take 1 | project d");
+        Assert.Contains("AT TIME ZONE 'UTC'", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SET TimeZone='Europe/Zurich'";   // non-UTC session to expose the coercion
+        cmd.ExecuteNonQuery();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(new DateTime(2026, 5, 28, 18, 2, 30), reader.GetDateTime(0)); // naive UTC wall-clock, tz-independent
+    }
+
+    [Fact]
     public void Converts_UnixtimeMs_To_DuckDb_EpochMs()
     {
         var converter = new KqlToSqlConverter();

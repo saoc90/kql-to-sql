@@ -118,7 +118,10 @@ public class DuckDbDialect : ISqlDialect
             "make_datetime" when args.Length == 1 => $"CAST({args[0]} AS TIMESTAMP)",
             "make_timespan" when args.Length == 3 =>
                 $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
-            "unixtime_seconds_todatetime" => $"TO_TIMESTAMP(CAST({args[0]} AS DOUBLE))",
+            // TO_TIMESTAMP returns TIMESTAMP WITH TIME ZONE; KQL datetime is tz-agnostic and our
+            // Timestamp columns are naive TIMESTAMP. Project to UTC wall-clock so comparisons don't
+            // depend on the DuckDB session TimeZone (the ms/us/ns variants below are already naive).
+            "unixtime_seconds_todatetime" => $"(TO_TIMESTAMP(CAST({args[0]} AS DOUBLE)) AT TIME ZONE 'UTC')",
             "unixtime_milliseconds_todatetime" => $"EPOCH_MS(CAST({args[0]} AS BIGINT))",
             "unixtime_microseconds_todatetime" => $"MAKE_TIMESTAMP(CAST({args[0]} AS BIGINT))",
             "unixtime_nanoseconds_todatetime" => $"MAKE_TIMESTAMP(CAST({args[0]} AS BIGINT) / 1000)",

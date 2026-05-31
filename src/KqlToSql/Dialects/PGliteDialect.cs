@@ -90,7 +90,8 @@ public class PGliteDialect : ISqlDialect
             "make_datetime" when args.Length == 1 => $"CAST({args[0]} AS TIMESTAMP)",
             "make_timespan" when args.Length == 3 =>
                 $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
-            "unixtime_seconds_todatetime" => $"TO_TIMESTAMP({args[0]})",
+            // to_timestamp returns timestamptz; KQL datetime is tz-agnostic → project to UTC wall-clock.
+            "unixtime_seconds_todatetime" => $"(TO_TIMESTAMP({args[0]}) AT TIME ZONE 'UTC')",
             "unixtime_milliseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000)",
             "unixtime_microseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000000)",
             "unixtime_nanoseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000000000)",
