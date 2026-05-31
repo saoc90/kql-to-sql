@@ -9,20 +9,27 @@ async function boot() {
     // 1. Initialize hash-based navigation
     initNavigation();
 
-    // 2. Initialize the KQL-to-SQL WASM bridge (may take a few seconds)
-    try {
-        await globalThis.KqlBridge.initialize();
-        console.log('[App] KQL Bridge ready');
-    } catch (err) {
-        console.error('[App] KQL Bridge init failed:', err);
-        // Non-fatal: users can still run SQL directly
-    }
+    // 2. Kick off the KQL-to-SQL WASM bridge in the BACKGROUND. It's a multi-MB download, so awaiting
+    //    it here would freeze the whole UI behind the loading overlay (it looks like a hang on a cold
+    //    load). Instead we let it load while the UI comes up: SQL mode works immediately, and KQL
+    //    execution already guards on KqlBridge.isReady() until the engine finishes. A small badge
+    //    (#engine-loading) signals progress and clears when ready.
+    globalThis.KqlBridge.initialize()
+        .then(() => {
+            console.log('[App] KQL Bridge ready');
+            document.getElementById('engine-loading')?.classList.add('d-none');
+        })
+        .catch(err => {
+            console.error('[App] KQL Bridge init failed:', err);
+            const badge = document.getElementById('engine-loading');
+            if (badge) { badge.classList.remove('bg-warning'); badge.classList.add('bg-danger'); badge.textContent = 'Engine failed to load'; }
+        });
 
-    // 3. Initialize UI modules
+    // 3. Initialize UI modules (these don't need the WASM bridge)
     await initQueryEditor();
     await initFileManagerUI();
 
-    // 4. Show the app, hide loading overlay
+    // 4. Show the app immediately — don't wait for the WASM engine
     document.getElementById('app').classList.remove('d-none');
     const overlay = document.getElementById('loading-overlay');
     if (overlay) {
@@ -30,7 +37,7 @@ async function boot() {
         setTimeout(() => overlay.remove(), 300);
     }
 
-    console.log('[App] Initialization complete');
+    console.log('[App] UI ready (query engine loading in background)');
 }
 
 boot().catch(err => {
