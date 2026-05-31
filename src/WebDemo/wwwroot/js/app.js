@@ -13,17 +13,11 @@ function revealApp() {
     }
 }
 
-async function boot() {
-    console.log('[App] Starting initialization...');
-
-    // 1. Initialize hash-based navigation
-    initNavigation();
-
-    // 2. Kick off the KQL-to-SQL WASM bridge in the BACKGROUND. It's a multi-MB download (and on
-    //    memory-constrained mobile browsers it can stall indefinitely while instantiating), so
-    //    awaiting it here would freeze the whole UI behind the overlay — the reported "hang". Let it
-    //    load while the UI comes up: SQL mode works immediately, KQL execution already guards on
-    //    KqlBridge.isReady(), and the #engine-loading badge shows progress / failure.
+function startEngine() {
+    // Load the KQL-to-SQL WASM bridge. Multi-MB download; on memory-constrained mobile browsers it
+    // can even stall while instantiating. It is started AFTER the UI/editor is up (see boot) so its
+    // download doesn't starve Monaco — and never awaited on the UI's critical path. SQL works
+    // immediately; KQL execution guards on KqlBridge.isReady(); the #engine-loading badge shows state.
     globalThis.KqlBridge.initialize()
         .then(() => {
             console.log('[App] KQL Bridge ready');
@@ -34,12 +28,20 @@ async function boot() {
             const badge = document.getElementById('engine-loading');
             if (badge) { badge.classList.remove('bg-warning'); badge.classList.add('bg-danger'); badge.textContent = 'Engine unavailable'; }
         });
+}
 
-    // 3. Safety net: never let the overlay block the UI for more than a few seconds, even if Monaco
-    //    or the engine are slow on a constrained/mobile connection. The UI fills in as pieces arrive.
-    const safety = setTimeout(() => { console.warn('[App] Reveal safety timeout fired'); revealApp(); }, 6000);
+async function boot() {
+    console.log('[App] Starting initialization...');
 
-    // 4. Initialize UI modules (these don't need the WASM bridge)
+    // 1. Initialize hash-based navigation
+    initNavigation();
+
+    // 2. Safety net: never let the overlay block the UI for more than a few seconds, even if Monaco
+    //    is slow on a constrained/mobile connection. The UI fills in as pieces arrive.
+    const safety = setTimeout(() => { console.warn('[App] Reveal safety timeout fired'); revealApp(); startEngine(); }, 6000);
+
+    // 3. Bring up the UI/editor FIRST (Monaco). The heavy engine download is deferred until after this
+    //    so it can't starve Monaco — otherwise the editor never appears while the engine downloads.
     try {
         await initQueryEditor();
         await initFileManagerUI();
@@ -47,9 +49,10 @@ async function boot() {
         console.error('[App] UI init error:', err);
     }
 
-    // 5. Show the app — don't wait for the WASM engine
+    // 4. Show the app, then start the engine in the background.
     clearTimeout(safety);
     revealApp();
+    startEngine();
     console.log('[App] UI ready (query engine loading in background)');
 }
 
