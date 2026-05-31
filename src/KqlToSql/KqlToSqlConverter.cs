@@ -321,6 +321,15 @@ public class KqlToSqlConverter
         if (expression is ParenthesizedExpression penexpr)
             return TryConvertScalarLet(name, penexpr.Expression);
 
+        // `let X = Y` where Y is an already-bound scalar let — propagate Y's scalar SQL so X is a
+        // scalar alias, not a CTE `SELECT * FROM Y` (Y is a scalar, not a table). Real formulas do
+        // this (e.g. `let PreviousEndTime = StartTime;`).
+        if (expression is NameReference nameRef && _scalarLets.TryGetValue(nameRef.SimpleName, out var existingScalar))
+        {
+            _scalarLets[name] = existingScalar;
+            return true;
+        }
+
         // datetime literal: let X = datetime(...)
         if (expression is LiteralExpression lit)
         {

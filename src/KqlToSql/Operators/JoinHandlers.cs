@@ -279,20 +279,50 @@ internal class JoinHandlers : OperatorHandlerBase
         // keeps both sides' copy of the join key; the right-side copy is suffixed `1` just
         // like any other duplicate column.
         var parts = new List<string> { "L.*" };
+        // `used` grows as we alias, so a right column colliding with the left set (or with an
+        // already-emitted suffix) takes the NEXT free index. This matches KQL across a chain of
+        // joins: a `Ts` column joined 4 times becomes Ts1, Ts2, Ts3, Ts4 (not Ts1 four times).
+        var used = new HashSet<string>(leftSet, StringComparer.OrdinalIgnoreCase);
         foreach (var rc in rightCols)
         {
             var quoted = ExpressionSqlBuilder.QuoteIdentifierIfReserved(rc);
-            if (leftSet.Contains(rc))
+            if (used.Contains(rc))
             {
-                var suffixed = ExpressionSqlBuilder.QuoteIdentifierIfReserved(rc + "1");
-                parts.Add($"R.{quoted} AS {suffixed}");
+                var name = NextFreeSuffix(rc, used);
+                used.Add(name);
+                parts.Add($"R.{quoted} AS {ExpressionSqlBuilder.QuoteIdentifierIfReserved(name)}");
             }
             else
             {
+                used.Add(rc);
                 parts.Add($"R.{quoted}");
             }
         }
         return string.Join(", ", parts);
+    }
+
+    /// <summary>The lowest <c>name{n}</c> (n≥1) not already in <paramref name="used"/> — KQL's
+    /// duplicate-column suffixing across joins.</summary>
+    private static string NextFreeSuffix(string name, HashSet<string> used)
+    {
+        int n = 1; string cand;
+        do { cand = name + n; n++; } while (used.Contains(cand));
+        return cand;
+    }
+
+    /// <summary>Output column names of a join that keeps both sides: left columns, then right columns
+    /// with collisions suffixed to the next free index (used both to emit the SELECT and to enumerate
+    /// a join's columns for a downstream operator).</summary>
+    private static List<string> MergeJoinColumns(IReadOnlyList<string> leftCols, IReadOnlyList<string> rightCols)
+    {
+        var used = new HashSet<string>(leftCols, StringComparer.OrdinalIgnoreCase);
+        var outCols = new List<string>(leftCols);
+        foreach (var rc in rightCols)
+        {
+            var name = used.Contains(rc) ? NextFreeSuffix(rc, used) : rc;
+            used.Add(name); outCols.Add(name);
+        }
+        return outCols;
     }
 
     private IReadOnlyList<string>? TryEnumerateColumns(Expression? expr)
@@ -463,6 +493,21 @@ internal class JoinHandlers : OperatorHandlerBase
             case SerializeOperator:
             case AsOperator:
                 return input;
+            case JoinOperator jop:
+            {
+                // Enumerate a join's output so a chain of joins (and a later project-away of the
+                // suffixed duplicates, e.g. Ts1..Ts4) resolves. Approximate all kinds as both-sides
+                // merge — semi/anti are rarely followed by a project-away of right columns.
+                if (input == null || jop.Expression == null) return null;
+                var rcols = TryEnumerateColumns(jop.Expression);
+                return rcols == null ? null : MergeJoinColumns(input, rcols);
+            }
+            case LookupOperator lop:
+            {
+                if (input == null || lop.Expression == null) return null;
+                var rcols = TryEnumerateColumns(lop.Expression);
+                return rcols == null ? null : MergeJoinColumns(input, rcols);
+            }
             case MvExpandOperator mve:
             {
                 // mv-expand keeps the input column set when the target is an existing column.

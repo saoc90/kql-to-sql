@@ -104,12 +104,15 @@ internal class ExpressionSqlBuilder
         {
             BinaryExpression bin when bin.Kind == SyntaxKind.EqualExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} = {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+            // KQL `!=` keeps nulls: `null != <non-null>` is true (e.g. `where IsDeleted != true` keeps
+            // rows where IsDeleted is null), whereas SQL `x <> v` yields NULL → drops them. IS DISTINCT
+            // FROM (supported by DuckDB and Postgres) reproduces KQL's null-keeping behaviour.
             BinaryExpression bin when bin.Kind == SyntaxKind.NotEqualExpression =>
-                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} <> {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} IS DISTINCT FROM {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.EqualTildeExpression =>
                 $"UPPER({ConvertExpression(bin.Left, leftAlias, rightAlias)}) = UPPER({ConvertExpression(bin.Right, leftAlias, rightAlias)})",
             BinaryExpression bin when bin.Kind == SyntaxKind.BangTildeExpression =>
-                $"UPPER({ConvertExpression(bin.Left, leftAlias, rightAlias)}) <> UPPER({ConvertExpression(bin.Right, leftAlias, rightAlias)})",
+                $"UPPER({ConvertExpression(bin.Left, leftAlias, rightAlias)}) IS DISTINCT FROM UPPER({ConvertExpression(bin.Right, leftAlias, rightAlias)})",
             BinaryExpression bin when bin.Kind == SyntaxKind.GreaterThanExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} > {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.LessThanExpression =>
@@ -277,7 +280,10 @@ internal class ExpressionSqlBuilder
         bool isStringIndex =
             indexNode is LiteralExpression lit && lit.Kind == SyntaxKind.StringLiteralExpression
             || indexNode is CompoundStringLiteralExpression
-            || indexNode is FunctionCallExpression fce && IsStringReturningFunction(fce);
+            || indexNode is FunctionCallExpression fce && IsStringReturningFunction(fce)
+            // The index may be a string-typed variable (e.g. a `: string` function parameter like
+            // `dm[field]`) that resolved to a quoted SQL string literal — dict key, not array index.
+            || indexExpr.TrimStart().StartsWith("'", StringComparison.Ordinal);
 
         // If the base is a JSON object (e.g. from dynamic({...})), the bracket access needs a json path lookup
         // rather than LIST indexing. Detect the ::JSON suffix produced by ConvertDynamic.
@@ -294,13 +300,13 @@ internal class ExpressionSqlBuilder
         {
             return $"json_extract((SELECT * FROM {cteRef.Name.SimpleName} LIMIT 1), '$.' || {indexExpr})";
         }
-        // String index on an arbitrary base → JSON dict access. Use json_extract (not
-        // _string) so numeric comparisons like `dict[key] > 0` still bind — DuckDB can
-        // compare its JSON type against numbers; trim(both '"' ...) elsewhere still
-        // handles string equality for keys that are quoted.
+        // String index on an arbitrary base → JSON dict access. Trim surrounding quotes so the
+        // result is the scalar string (matching KQL `tostring(dict[key])` → unquoted, e.g. for
+        // bag_pack values), consistent with the literal-key path. Numeric comparisons still bind:
+        // DuckDB implicitly casts the trimmed text to a number for `dict[key] > 0`.
         if (isStringIndex)
         {
-            return $"json_extract({baseExpr}, '$.' || {indexExpr})";
+            return $"trim(both '\"' from json_extract({baseExpr}, '$.' || {indexExpr}))";
         }
 
         // KQL uses 0-based indexing, DuckDB LIST uses 1-based
@@ -996,12 +1002,21 @@ internal class ExpressionSqlBuilder
             }
         }
         else if (lit.Kind is SyntaxKind.LongLiteralExpression
-                    or SyntaxKind.IntLiteralExpression
-                    or SyntaxKind.RealLiteralExpression
-                    or SyntaxKind.DecimalLiteralExpression)
+                    or SyntaxKind.IntLiteralExpression)
         {
             // Use the parsed value (as SQL number) rather than text, so "int(0)" → "0" not "int(0)".
             return System.Convert.ToString(lit.LiteralValue, CultureInfo.InvariantCulture) ?? lit.ToString().Trim();
+        }
+        else if (lit.Kind is SyntaxKind.RealLiteralExpression
+                    or SyntaxKind.DecimalLiteralExpression)
+        {
+            // Preserve real-ness: a real literal like 10.0 must not render as "10" — an engine whose
+            // '/' integer-divides (e.g. Postgres) would then treat 10.0/4 as integer division. Append
+            // ".0" when the value renders as a plain integer so it stays a real/decimal in SQL.
+            var s = System.Convert.ToString(lit.LiteralValue, CultureInfo.InvariantCulture) ?? lit.ToString().Trim();
+            var body = s.StartsWith("-", StringComparison.Ordinal) ? s.Substring(1) : s;
+            if (body.Length > 0 && body.All(char.IsDigit)) s += ".0";
+            return s;
         }
         else if (lit.Kind == SyntaxKind.BooleanLiteralExpression)
         {

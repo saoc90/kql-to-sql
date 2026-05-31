@@ -18,7 +18,7 @@ public class WhereOperatorTests
         Assert.DoesNotContain("WHERE LAG(", sql, StringComparison.OrdinalIgnoreCase);
         // Must be wrapped as inner subquery with _w_0 alias
         Assert.Contains("_w_0", sql);
-        Assert.Contains("WHERE _w_0 <>", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WHERE _w_0 IS DISTINCT FROM", sql, StringComparison.OrdinalIgnoreCase);
 
         // Must execute without error on DuckDB and return rows
         using var conn = StormEventsDatabase.GetConnection();
@@ -66,7 +66,7 @@ public class WhereOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | where State != 'TEXAS' | project State";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State FROM StormEvents WHERE State <> 'TEXAS'", sql);
+        Assert.Equal("SELECT State FROM StormEvents WHERE State IS DISTINCT FROM 'TEXAS'", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -98,7 +98,7 @@ public class WhereOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | where State !~ 'texas' | project State";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State FROM StormEvents WHERE UPPER(State) <> UPPER('texas')", sql);
+        Assert.Equal("SELECT State FROM StormEvents WHERE UPPER(State) IS DISTINCT FROM UPPER('texas')", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

@@ -51,7 +51,7 @@ StormEvents
 //also here
 | count";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COUNT(*) AS Count FROM StormEvents WHERE State <> ''", sql);
+        Assert.Equal("SELECT COUNT(*) AS Count FROM StormEvents WHERE State IS DISTINCT FROM ''", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

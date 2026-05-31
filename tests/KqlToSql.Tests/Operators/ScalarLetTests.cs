@@ -31,7 +31,8 @@ StormEvents | where InjuriesIndirect > v | take 1 | project InjuriesIndirect";
         var sql = converter.Convert(kql);
         Assert.DoesNotContain(" v AS NOT MATERIALIZED", sql);
         Assert.DoesNotContain(" v AS MATERIALIZED", sql);
-        // Numeric LiteralValue rendering drops trailing zero: 10.0 → "10", 2.0 → "2".
-        Assert.Contains("10 / 2", sql);
+        // Real literals keep their ".0" so they stay reals in SQL (10.0 / 2.0), otherwise an engine
+        // whose '/' integer-divides would compute 10/2 as integer division.
+        Assert.Contains("10.0 / 2.0", sql);
     }
 }

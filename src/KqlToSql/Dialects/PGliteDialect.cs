@@ -247,11 +247,13 @@ public class PGliteDialect : ISqlDialect
             // array_agg -> NULL. COALESCE to an untyped '{}' literal (Postgres coerces it to the
             // array_agg element type). array_agg(DISTINCT ...) already returns sorted distinct values.
             "make_list" or "makelist" => $"COALESCE(array_agg({args[0]}), '{{}}')",
-            "make_list_if" or "makelistif" => $"COALESCE(array_agg(CASE WHEN {args[1]} THEN {args[0]} END), '{{}}')",
+            // *_if must SKIP non-matching rows (Kusto), not include them as NULL — use FILTER, not
+            // CASE (array_agg keeps the CASE's NULLs, leaking nulls into the array).
+            "make_list_if" or "makelistif" => $"COALESCE(array_agg({args[0]}) FILTER (WHERE {args[1]}), '{{}}')",
             "make_list_with_nulls" => $"COALESCE(array_agg({args[0]}), '{{}}')",
             "strcat_array" => $"string_agg({args[0]}, {args[1]})",
             "make_set" => $"COALESCE(array_agg(DISTINCT {args[0]}), '{{}}')",
-            "make_set_if" => $"COALESCE(array_agg(DISTINCT CASE WHEN {args[1]} THEN {args[0]} END), '{{}}')",
+            "make_set_if" => $"COALESCE(array_agg(DISTINCT {args[0]}) FILTER (WHERE {args[1]}), '{{}}')",
             "min" => $"MIN({args[0]})",
             "minif" => $"MIN(CASE WHEN {args[1]} THEN {args[0]} END)",
             "max" => $"MAX({args[0]})",
