@@ -24,6 +24,12 @@ jobs:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
+      # 0. Install the wasm-tools workload so the publish relinks and optimizes the native runtime.
+      #    Without it, `dotnet publish` warns "Publishing without optimizations" and ships a larger,
+      #    unoptimized runtime that is slower to download and instantiate (notably on mobile).
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
       # 1. Publish the WASM bridge (produces _framework/ with dotnet.js + WASM)
       - name: Publish KqlWasmBridge
         run: dotnet publish src/KqlWasmBridge/KqlWasmBridge.csproj -c Release -o build-wasm
