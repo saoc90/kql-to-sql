@@ -29,6 +29,6 @@ public class LookupOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "Facts | lookup Dims on Key1, $left.Col1 == $right.Col2";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* EXCLUDE (Key1, Col1) FROM Facts AS L LEFT OUTER JOIN Dims AS R ON L.Key1 = R.Key1 AND L.Col1 = R.Col2", sql);
+        Assert.Equal("SELECT L.*, R.* EXCLUDE (Key1, Col2) FROM Facts AS L LEFT OUTER JOIN Dims AS R ON L.Key1 = R.Key1 AND L.Col1 = R.Col2", sql);
     }
 }

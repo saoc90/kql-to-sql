@@ -166,6 +166,9 @@ internal class JoinHandlers : OperatorHandlerBase
 
         var conditions = new List<string>();
         var leftKeys = new List<string>();
+        // Lookup drops the RIGHT-side join-key columns (Kusto keeps only the left copy),
+        // unlike join which suffixes them. Track the right key names separately.
+        var rightKeys = new List<string>();
         foreach (var se in onClause.Expressions)
         {
             var expr = se.Element;
@@ -173,6 +176,7 @@ internal class JoinHandlers : OperatorHandlerBase
             {
                 var name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.SimpleName);
                 leftKeys.Add(name);
+                rightKeys.Add(name);
                 conditions.Add($"L.{name} = R.{name}");
             }
             else if (expr is BinaryExpression be && be.Kind == SyntaxKind.EqualExpression)
@@ -181,6 +185,7 @@ internal class JoinHandlers : OperatorHandlerBase
                 var right = Expr.ConvertExpression(be.Right, "L", "R");
                 conditions.Add($"{left} = {right}");
                 leftKeys.Add(ExpressionSqlBuilder.QuoteIdentifierIfReserved(ExpressionSqlBuilder.ExtractLeftKey(be.Left)));
+                rightKeys.Add(ExpressionSqlBuilder.QuoteIdentifierIfReserved(ExpressionSqlBuilder.ExtractRightKey(be.Right)));
             }
             else
             {
@@ -192,11 +197,12 @@ internal class JoinHandlers : OperatorHandlerBase
 
         var leftCols = TryEnumerateColumns(leftExpression);
         var rightCols = TryEnumerateColumns(lookup.Expression);
-        var keySet = new HashSet<string>(leftKeys.Select(UnquoteIdent), StringComparer.OrdinalIgnoreCase);
-        var selectClause = BuildJoinSelectClause(leftCols, rightCols, keySet);
+        var rightKeySet = new HashSet<string>(rightKeys.Select(UnquoteIdent), StringComparer.OrdinalIgnoreCase);
+        var selectClause = BuildLookupSelectClause(leftCols, rightCols, rightKeySet);
         if (selectClause == null)
         {
-            var rightColumns = Dialect.SelectExclude(leftKeys.ToArray());
+            // Drop the RIGHT-side key columns (not the left keys): `R.* EXCLUDE (<rightKeys>)`.
+            var rightColumns = Dialect.SelectExclude(rightKeys.ToArray());
             selectClause = rightColumns.Contains("/*")
                 ? "*"
                 : $"L.*, R.{rightColumns}";
@@ -354,6 +360,35 @@ internal class JoinHandlers : OperatorHandlerBase
         int n = 1; string cand;
         do { cand = name + n; n++; } while (used.Contains(cand));
         return cand;
+    }
+
+    /// <summary>Select clause for `lookup`: keeps every left column, then every right column
+    /// EXCEPT the right-side join keys (Kusto keeps only the left copy of a matched key).
+    /// Remaining right columns that collide with the left set are suffixed Col1→Col11, matching
+    /// Kusto. Returns null when either side's schema is unknown so the caller falls back to
+    /// `R.* EXCLUDE (rightKeys)`.</summary>
+    private string? BuildLookupSelectClause(IReadOnlyList<string>? leftCols, IReadOnlyList<string>? rightCols, HashSet<string> rightKeys)
+    {
+        if (leftCols == null || rightCols == null) return null;
+        var parts = new List<string> { "L.*" };
+        var used = new HashSet<string>(leftCols, StringComparer.OrdinalIgnoreCase);
+        foreach (var rc in rightCols)
+        {
+            if (rightKeys.Contains(rc)) continue; // right-side join key — dropped by lookup
+            var quoted = ExpressionSqlBuilder.QuoteIdentifierIfReserved(rc);
+            if (used.Contains(rc))
+            {
+                var name = NextFreeSuffix(rc, used);
+                used.Add(name);
+                parts.Add($"R.{quoted} AS {ExpressionSqlBuilder.QuoteIdentifierIfReserved(name)}");
+            }
+            else
+            {
+                used.Add(rc);
+                parts.Add($"R.{quoted}");
+            }
+        }
+        return string.Join(", ", parts);
     }
 
     /// <summary>Output column names of a join that keeps both sides: left columns, then right columns

@@ -1473,6 +1473,22 @@ internal class ExpressionSqlBuilder
         };
     }
 
+    /// <summary>The right-side key name of a join/lookup `on` element. A bare `NameReference`
+    /// (`Key`) keys on the same name on both sides; `$left.X == $right.Y` keys on `Y`.
+    /// Used by `lookup` to drop the right-side key column (Kusto keeps the left copy only).</summary>
+    internal static string ExtractRightKey(Expression expr)
+    {
+        return expr switch
+        {
+            NameReference nr => nr.SimpleName,
+            PathExpression pe when pe.Expression is NameReference nr && nr.SimpleName == "$right" => (pe.Selector as NameReference)?.SimpleName ?? pe.Selector.ToString().Trim(),
+            BinaryExpression be when be.Kind == SyntaxKind.EqualExpression => ExtractRightKey(be.Right),
+            BinaryExpression be when be.Kind == SyntaxKind.AndExpression => ExtractRightKey(be.Right),
+            ParenthesizedExpression pe2 => ExtractRightKey(pe2.Expression),
+            _ => "_joinkey"
+        };
+    }
+
     internal static bool TryParseTimespan(string text, out long milliseconds)
     {
         milliseconds = 0;
