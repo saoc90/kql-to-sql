@@ -442,6 +442,13 @@ if (leftIsTimespan || rightIsTimespan) return true;
             order = $"{expr} DESC";
         }
 
+        // Mirror ApplySort: if leftSql already carries a top-level trailing ORDER BY
+        // (e.g. a preceding | sort by / | order by / | top) or a top-level GROUP BY,
+        // wrap it as a subquery so we don't emit an invalid doubled ORDER BY or place
+        // ORDER BY inside the GROUP BY scope. Kusto's `top` fully supersedes any prior
+        // sort, so re-ordering the wrapped result is semantically correct.
+        if (HasTrailingOrderBy(leftSql) || HasTopLevelGroupBy(leftSql))
+            return $"SELECT * FROM ({leftSql}) ORDER BY {order} LIMIT {count}";
         return $"{leftSql} ORDER BY {order} LIMIT {count}";
     }
 

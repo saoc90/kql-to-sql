@@ -788,10 +788,18 @@ internal class ExpressionSqlBuilder
             items = list.Expressions.Select(e => ConvertExpression(e.Element, leftAlias, rightAlias)).ToArray();
         }
 
+        // AST-level detection: each RHS element that wraps a make_list/make_set aggregate
+        // (e.g. `in (toscalar(T | summarize make_list(x)))`) produces a dynamic array. KQL
+        // unwraps such an array and tests element membership, so the DuckDB equivalent must use
+        // list_contains, not IN. The make_list/make_set aggregates are emitted as
+        // COALESCE(LIST(...), []), which the string heuristic below does not recognize.
+        var astArrayElement = list.Expressions.Count == items.Length
+            && Enumerable.Range(0, items.Length).All(i => IsArrayProducingExpression(list.Expressions[i].Element));
+
         // DuckDB can't compare VARCHAR against VARCHAR[] in IN. When all RHS items are array-
         // producing expressions (subqueries returning LISTs, LIST_VALUE literals, or scalar-lets
         // bound to arrays), concat them into a single flat list and use list_contains.
-        if (items.Length >= 1 && items.All(IsArrayLikeExpression))
+        if (items.Length >= 1 && (astArrayElement || items.All(IsArrayLikeExpression)))
         {
             var arrayExpr = items.Length == 1
                 ? items[0]
@@ -821,6 +829,17 @@ internal class ExpressionSqlBuilder
 
         var op = (inExpr.Kind == SyntaxKind.NotInExpression || inExpr.Kind == SyntaxKind.NotInCsExpression) ? "NOT IN" : "IN";
         return $"{left} {op} ({string.Join(", ", items)})";
+    }
+
+    /// <summary>True when the KQL expression evaluates to a dynamic array — currently detected by an
+    /// embedded make_list/make_set aggregate (e.g. `toscalar(T | summarize make_list(x))`), whose
+    /// emitted SQL is COALESCE(LIST(...), []) and is not caught by the SELECT-LIST( string heuristic.</summary>
+    private static bool IsArrayProducingExpression(Expression element)
+    {
+        return element.GetDescendantsOrSelf<FunctionCallExpression>()
+            .Any(fce => fce.IsAny(
+                Aggregates.MakeList, Aggregates.MakeListIf, Aggregates.MakeListWithNulls, Aggregates.MakeList_Deprecated,
+                Aggregates.MakeSet, Aggregates.MakeSetIf, Aggregates.MakeSet_Deprecated));
     }
 
     private static bool IsArrayLikeExpression(string sql)

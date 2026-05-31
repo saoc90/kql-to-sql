@@ -222,15 +222,7 @@ internal class JoinHandlers : OperatorHandlerBase
         }
 
         foreach (var expr in union.Expressions)
-        {
-            var sql = Converter.ConvertNode(expr.Element);
-            if (sourceColumn != null)
-            {
-                var name = expr.Element.ToString().Trim();
-                sql = $"SELECT *, '{name}' AS {sourceColumn} FROM ({sql})";
-            }
-            parts.Add($"({sql})");
-        }
+            AppendUnionExpression(expr.Element, sourceColumn, parts);
 
         // Use DuckDB 'UNION ALL BY NAME' so column sets can differ — missing columns fill NULL.
         // KQL's union semantics are by-name, not positional.
@@ -244,19 +236,73 @@ internal class JoinHandlers : OperatorHandlerBase
 
         var parts = new List<string>();
         foreach (var expr in union.Expressions)
-        {
-            var sql = Converter.ConvertNode(expr.Element);
-            if (sourceColumn != null)
-            {
-                var name = expr.Element.ToString().Trim();
-                sql = $"SELECT *, '{name}' AS {sourceColumn} FROM ({sql})";
-            }
-            parts.Add($"({sql})");
-        }
+            AppendUnionExpression(expr.Element, sourceColumn, parts);
 
         // Use DuckDB 'UNION ALL BY NAME' so column sets can differ — missing columns fill NULL.
         // KQL's union semantics are by-name, not positional.
         return string.Join(" UNION ALL BY NAME ", parts);
+    }
+
+    /// <summary>Converts one `union` operand into one-or-more SQL parts. A wildcard table-set
+    /// reference (`union Table_States*`, parsed as a NameReference whose Name is a WildcardedName)
+    /// is expanded — verified against live Kusto — to a UNION ALL of every in-scope let-defined
+    /// view whose name matches the pattern (case-sensitive, `*` = zero-or-more chars). A plain
+    /// (non-wildcard) operand keeps the original single-part behavior.</summary>
+    private void AppendUnionExpression(Expression element, string? sourceColumn, List<string> parts)
+    {
+        if (element is NameReference nr && nr.Name is WildcardedName wild)
+        {
+            foreach (var cteName in Converter.CteNames)
+            {
+                if (!WildcardMatches(wild.SimpleName, cteName))
+                    continue;
+                var quoted = ExpressionSqlBuilder.QuoteIdentifierIfReserved(cteName);
+                var matchSql = $"SELECT * FROM {quoted}";
+                if (sourceColumn != null)
+                    matchSql = $"SELECT *, '{cteName}' AS {sourceColumn} FROM ({matchSql})";
+                parts.Add($"({matchSql})");
+            }
+            return;
+        }
+
+        var sql = Converter.ConvertNode(element);
+        if (sourceColumn != null)
+        {
+            var name = element.ToString().Trim();
+            sql = $"SELECT *, '{name}' AS {sourceColumn} FROM ({sql})";
+        }
+        parts.Add($"({sql})");
+    }
+
+    /// <summary>Glob match for a Kusto wildcard table pattern. `*` matches zero-or-more characters;
+    /// the literal segments between `*`s must appear in order. Case-sensitive, matching Kusto's
+    /// case-sensitive entity-name resolution (verified live: a lowercase pattern matches nothing).</summary>
+    private static bool WildcardMatches(string pattern, string candidate)
+    {
+        var segments = pattern.Split('*');
+        int pos = 0;
+        for (int s = 0; s < segments.Length; s++)
+        {
+            var seg = segments[s];
+            if (seg.Length == 0) continue;
+            if (s == 0)
+            {
+                if (!candidate.StartsWith(seg, StringComparison.Ordinal)) return false;
+                pos = seg.Length;
+            }
+            else if (s == segments.Length - 1)
+            {
+                if (!candidate.EndsWith(seg, StringComparison.Ordinal)) return false;
+                if (candidate.Length - seg.Length < pos) return false;
+            }
+            else
+            {
+                int idx = candidate.IndexOf(seg, pos, StringComparison.Ordinal);
+                if (idx < 0) return false;
+                pos = idx + seg.Length;
+            }
+        }
+        return true;
     }
 
     // ─── Column enumeration for join-duplicate suffixing ────────────────────────

@@ -40,6 +40,27 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             return Dialect.Qualify(innerSql, qualifyCondition);
         }
 
+        // take_any(*) / take_any(col, *) — Kusto returns one ARBITRARY row per group with ALL
+        // columns (verified live). Same SELECT * + QUALIFY ROW_NUMBER() shape as arg_max(*),
+        // but with no ORDER BY (any row qualifies). The explicit col arg in take_any(col, *) is
+        // redundant once * is present, so it is ignored — * already projects every column.
+        if (summarize.Aggregates.Count == 1 &&
+            summarize.Aggregates[0].Element is Expression takeAnyExpr &&
+            takeAnyExpr is FunctionCallExpression takeFce &&
+            takeFce.IsAny(Aggregates.TakeAny, Aggregates.TakeAnyIf) &&
+            takeFce.ArgumentList.Expressions.Any(a => a.Element is StarExpression))
+        {
+            var fromSql = ExtractFrom(leftSql);
+
+            var partition = byColumns.Length > 0
+                ? $"PARTITION BY {string.Join(", ", byColumns.Select(b => b.Group))}"
+                : string.Empty;
+
+            var qualifyCondition = $"ROW_NUMBER() OVER ({partition}) = 1";
+            var innerSql = IsFullyParenthesized(fromSql) ? fromSql.Substring(1, fromSql.Length - 2) : $"SELECT * FROM {fromSql}";
+            return Dialect.Qualify(innerSql, qualifyCondition);
+        }
+
         var aggregates = new List<string>();
         // Live Kusto suffixes repeated arg_max/arg_min key aliases: Timestamp, Timestamp1, Timestamp2, ...
         var keyAliasCounts = new Dictionary<string, int>(StringComparer.Ordinal);

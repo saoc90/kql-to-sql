@@ -32,6 +32,10 @@ public class KqlToSqlConverter
     /// <summary>Removes a CTE by name (no-op if it doesn't exist).</summary>
     internal void RemoveCte(string name) => _ctes.Remove(name);
 
+    /// <summary>The names of all currently in-scope CTEs (let-defined views), in registration order.
+    /// Used to expand KQL wildcard table-set unions (`union Prefix*`) to the matching views.</summary>
+    internal IEnumerable<string> CteNames => _ctes.Keys;
+
     /// <summary>Renames a CTE (preserving insertion order is not guaranteed — acceptable for this use).</summary>
     internal void RenameCte(string oldName, string newName)
     {
