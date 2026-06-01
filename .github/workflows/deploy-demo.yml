@@ -24,12 +24,15 @@ jobs:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
-      # 1. Publish the WASM bridge (produces _framework/ with dotnet.js + WASM).
-      #    NOTE: do NOT add the `wasm-tools` workload here. It relinks the runtime with WASM SIMD
-      #    enabled by default, which instantiates fine on desktop but FAILS on mobile browsers that
-      #    lack SIMD support — the engine then hangs on "Engine loading…". The generic prebuilt
-      #    runtime (no workload) is larger but runs everywhere. Revisit optimization only with
-      #    <WasmEnableSIMD>false</WasmEnableSIMD> and after verifying on a real mobile browser.
+      # 0. Install the wasm-tools workload so the publish relinks/optimizes the native runtime
+      #    (halves dotnet.native.wasm: ~2.9 MB -> ~1.5 MB). The relinked runtime uses WASM SIMD,
+      #    which needs a modern browser (iOS Safari 16.4+, recent Chrome/Firefox) — fine for current
+      #    targets. (The earlier "Engine loading…" hang was NOT this — it was a never-committed
+      #    chartRenderer.js asset that 404'd and broke the JS module chain.)
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      # 1. Publish the WASM bridge (produces _framework/ with dotnet.js + WASM)
       - name: Publish KqlWasmBridge
         run: dotnet publish src/KqlWasmBridge/KqlWasmBridge.csproj -c Release -o build-wasm
 
