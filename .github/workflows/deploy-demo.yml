@@ -24,13 +24,12 @@ jobs:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
-      # 0. Install the wasm-tools workload so the publish relinks and optimizes the native runtime.
-      #    Without it, `dotnet publish` warns "Publishing without optimizations" and ships a larger,
-      #    unoptimized runtime that is slower to download and instantiate (notably on mobile).
-      - name: Install wasm-tools workload
-        run: dotnet workload install wasm-tools
-
-      # 1. Publish the WASM bridge (produces _framework/ with dotnet.js + WASM)
+      # 1. Publish the WASM bridge (produces _framework/ with dotnet.js + WASM).
+      #    NOTE: do NOT add the `wasm-tools` workload here. It relinks the runtime with WASM SIMD
+      #    enabled by default, which instantiates fine on desktop but FAILS on mobile browsers that
+      #    lack SIMD support — the engine then hangs on "Engine loading…". The generic prebuilt
+      #    runtime (no workload) is larger but runs everywhere. Revisit optimization only with
+      #    <WasmEnableSIMD>false</WasmEnableSIMD> and after verifying on a real mobile browser.
       - name: Publish KqlWasmBridge
         run: dotnet publish src/KqlWasmBridge/KqlWasmBridge.csproj -c Release -o build-wasm
 
