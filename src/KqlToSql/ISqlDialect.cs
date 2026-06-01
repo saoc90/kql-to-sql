@@ -51,6 +51,12 @@ public interface ISqlDialect
     /// <summary>Generates a null-safe cast expression. DuckDB uses TRY_CAST, PGlite falls back to CAST.</summary>
     string SafeCast(string expr, string sqlType) => $"TRY_CAST({expr} AS {sqlType})";
 
+    /// <summary>Parses a value to a timestamp the way KQL's lenient <c>todatetime()</c> does. By default
+    /// this is just a null-safe TIMESTAMP cast; dialects whose native cast only accepts ISO-8601 (e.g.
+    /// DuckDB) override this to add format fallbacks so locale/US/abbreviated date strings parse instead
+    /// of silently becoming NULL.</summary>
+    string ParseDateTime(string expr) => SafeCast(expr, "TIMESTAMP");
+
     /// <summary>True when the engine's `/` operator already performs KQL-style integer (truncating)
     /// division for integer operands (PostgreSQL does; DuckDB does real division and needs a rewrite).</summary>
     bool NativeIntegerDivision => false;

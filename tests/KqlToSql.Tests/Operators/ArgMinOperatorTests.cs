@@ -38,7 +38,8 @@ public class ArgMinOperatorTests
         Assert.True(reader.Read());
         Assert.False(string.IsNullOrWhiteSpace(reader.GetString(0)));
         Assert.False(string.IsNullOrWhiteSpace(reader.GetString(1)));
-        Assert.False(string.IsNullOrWhiteSpace(reader.GetString(2)));
+        // EndTime is a real TIMESTAMP in the dataset, not a string — assert it's present.
+        Assert.False(reader.IsDBNull(2));
     }
 }
 

@@ -379,6 +379,20 @@ public class DuckDbDialect : ISqlDialect
     /// CAST(real AS INTEGER) rounds to nearest. Route integer targets through TRUNC(double) so the
     /// result matches Kusto. String inputs still parse (TRY_CAST(... AS DOUBLE)) and non-numeric → NULL,
     /// matching KQL's null-on-failure. Non-integer targets use the default TRY_CAST.</summary>
+    /// <summary>KQL todatetime() parses many textual formats; DuckDB's CAST AS TIMESTAMP only accepts
+    /// ISO-8601, silently yielding NULL for locale/US/abbreviated date strings (which then collapse a
+    /// whole `summarize by bin(todatetime(col), 1d)` into a single NULL group). Fall back to
+    /// try_strptime over common non-ISO formats. TRY_CAST still handles ISO input and already-typed
+    /// timestamps first; casting to VARCHAR keeps try_strptime valid when expr is already a TIMESTAMP.</summary>
+    public string ParseDateTime(string expr)
+    {
+        return $"COALESCE(TRY_CAST({expr} AS TIMESTAMP), TRY_STRPTIME(CAST({expr} AS VARCHAR), "
+            + "['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', "
+            + "'%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', "
+            + "'%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', "
+            + "'%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))";
+    }
+
     public string SafeCast(string expr, string sqlType)
     {
         // KQL toint/tolong/toreal/todouble coerce a *dynamic* JSON boolean: true→1, false→0

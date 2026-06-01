@@ -10,6 +10,21 @@ window.db = null;
 function convertBigIntToNumber(obj) {
     if (obj === null || obj === undefined) return obj;
     if (typeof obj === 'bigint') return Number(obj);
+    // DuckDB-WASM returns TIMESTAMP/DATE cells as JS Date objects on some builds. Dates have no own
+    // enumerable properties, so the generic object branch below would rebuild them as {} and they'd
+    // render as "[object Object]". Emit ISO text so the value survives JSON serialization.
+    if (obj instanceof Date) return obj.toISOString();
+    // DuckDB HUGEINT/UHUGEINT (e.g. the result of SUM over INTEGER) arrives via Arrow as a 4×uint32
+    // little-endian word array (a typed array). The generic object branch would emit it as
+    // {"0":..,"1":..} — reconstruct the actual integer instead.
+    if (ArrayBuffer.isView(obj) && !(obj instanceof DataView)) {
+        if (obj.length === 4) {
+            let v = 0n;
+            for (let i = 3; i >= 0; i--) v = (v << 32n) | BigInt(obj[i] >>> 0);
+            return Number(BigInt.asIntN(128, v));
+        }
+        return Array.from(obj, x => (typeof x === 'bigint' ? Number(x) : x));
+    }
     if (Array.isArray(obj)) return obj.map(convertBigIntToNumber);
     if (typeof obj === 'object') {
         const converted = {};

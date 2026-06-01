@@ -18,6 +18,37 @@ export function columnsOf(data) {
     return [];
 }
 
+/** Formats a Date as "2007-01-01 00:00:00" (UTC wall-clock — KQL datetimes are tz-agnostic). */
+function formatDate(d) {
+    if (isNaN(d.getTime())) return '';
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} `
+        + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+/** Tidies an ISO timestamp string (2007-01-01T00:00:00.000Z) to "2007-01-01 00:00:00". */
+function formatDateTimeString(s) {
+    const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/.exec(s);
+    return m ? `${m[1]} ${m[2]}` : s;
+}
+
+/** Renders a single cell value to text. Datetimes are shown as a readable date regardless of whether
+ *  the engine handed back a Date, an ISO string, or epoch ms/µs. Objects fall back to JSON so a stray
+ *  value never shows as the useless "[object Object]". */
+function formatCell(val, type) {
+    if (val == null) return '';
+    if (val instanceof Date) return formatDate(val);
+    if (type === 'datetime') {
+        if (typeof val === 'number') {
+            // Arrow may report timestamps as epoch ms or µs depending on the column unit.
+            return formatDate(new Date(Math.abs(val) > 1e14 ? val / 1000 : val));
+        }
+        if (typeof val === 'string') return formatDateTimeString(val);
+    }
+    if (typeof val === 'object') return JSON.stringify(val);
+    return String(val);
+}
+
 export function renderResults(data, theadId, tbodyId) {
     const thead = document.getElementById(theadId);
     const tbody = document.getElementById(tbodyId);
@@ -30,7 +61,9 @@ export function renderResults(data, theadId, tbodyId) {
     if (rows.length === 0) return;
 
     // Header — preserve the column order reported by the engine when available.
-    const columns = columnsOf(data).map(c => c.name);
+    const cols = columnsOf(data);
+    const columns = cols.map(c => c.name);
+    const typeByName = Object.fromEntries(cols.map(c => [c.name, c.type]));
     const headerRow = document.createElement('tr');
     columns.forEach(col => {
         const th = document.createElement('th');
@@ -45,8 +78,7 @@ export function renderResults(data, theadId, tbodyId) {
         const tr = document.createElement('tr');
         columns.forEach(col => {
             const td = document.createElement('td');
-            const val = row[col];
-            td.textContent = val != null ? String(val) : '';
+            td.textContent = formatCell(row[col], typeByName[col]);
             td.title = td.textContent;
             tr.appendChild(td);
         });

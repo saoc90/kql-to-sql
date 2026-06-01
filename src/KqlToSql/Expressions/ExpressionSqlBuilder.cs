@@ -464,6 +464,10 @@ internal class ExpressionSqlBuilder
                 ? sneArg.Expression
                 : fce.ArgumentList.Expressions[0].Element;
             var arg = ConvertExpression(argNode, leftAlias, rightAlias);
+            // todatetime()/datetime() use the dialect's lenient datetime parser (KQL parses many
+            // textual formats, not just ISO-8601); other conversions are null-safe casts.
+            if (string.Equals(sqlType, "TIMESTAMP", StringComparison.OrdinalIgnoreCase))
+                return _dialect.ParseDateTime(arg);
             // KQL type conversions return null on failure (e.g. tolong('') → null)
             return _dialect.SafeCast(arg, sqlType);
         }

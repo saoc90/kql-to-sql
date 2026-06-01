@@ -100,13 +100,46 @@ public class TypeCastFunctionTests
 | take 1
 | project todatetime('1950-01-03 00:00:00')";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT TRY_CAST('1950-01-03 00:00:00' AS TIMESTAMP) AS Column1 FROM StormEvents LIMIT 1", sql);
+        Assert.Equal("SELECT COALESCE(TRY_CAST('1950-01-03 00:00:00' AS TIMESTAMP), TRY_STRPTIME(CAST('1950-01-03 00:00:00' AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS Column1 FROM StormEvents LIMIT 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         var result = (DateTime)cmd.ExecuteScalar()!;
         Assert.Equal(new DateTime(1950, 1, 3, 0, 0, 0), result);
+    }
+
+    [Theory]
+    // KQL todatetime() is lenient: non-ISO formats DuckDB's bare cast rejects must still parse,
+    // instead of becoming NULL (which silently collapses `summarize by bin(todatetime(col),1d)`).
+    [InlineData("1.1.2007, 00:00:00")]   // German locale (D.M.Y)
+    [InlineData("27.1.2007, 14:00:00")]
+    [InlineData("1/1/2007 12:00:00 AM")] // US locale
+    [InlineData("2007-01-01T00:00:00.0000000Z")] // Kusto ISO export
+    [InlineData("2007-01-01 00:00:00")]  // ISO
+    public void ToDateTime_Parses_NonIso_Formats(string value)
+    {
+        var converter = new KqlToSqlConverter();
+        var sql = converter.Convert($"StormEvents | take 1 | project d = todatetime('{value}')");
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        var result = cmd.ExecuteScalar();
+        Assert.IsType<DateTime>(result);            // parsed, not NULL
+        Assert.Equal(2007, ((DateTime)result!).Year);
+    }
+
+    [Fact]
+    public void ToDateTime_Unparseable_Yields_Null()
+    {
+        var converter = new KqlToSqlConverter();
+        var sql = converter.Convert("StormEvents | take 1 | project d = todatetime('not a date')");
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        Assert.True(cmd.ExecuteScalar() is null or DBNull);
     }
 
     [Fact]
