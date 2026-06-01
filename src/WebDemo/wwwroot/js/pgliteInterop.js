@@ -163,8 +163,16 @@ function classifyPgOid(oid) {
 export async function queryJson(sql) {
     if (!pg) await init();
     try {
-        // Use rowMode:'array' to preserve duplicate column values from joins
-        const res = await pg.query(sql, [], { rowMode: 'array' });
+        // Use rowMode:'array' to preserve duplicate column values from joins.
+        // Keep date/timestamp/timestamptz as their raw Postgres text (identity parsers): the default
+        // client parser turns "timestamp without time zone" into a *local-time* JS Date, which then
+        // renders shifted by the browser's UTC offset. KQL datetimes are UTC wall-clock, so the raw
+        // text is what we want to display. (OIDs: 1082 date, 1114 timestamp, 1184 timestamptz.)
+        const keepText = v => v;
+        const res = await pg.query(sql, [], {
+            rowMode: 'array',
+            parsers: { 1082: keepText, 1114: keepText, 1184: keepText },
+        });
         const fields = res.fields || [];
 
         // Deduplicate column names (KQL style: col, col1, col2, ...)

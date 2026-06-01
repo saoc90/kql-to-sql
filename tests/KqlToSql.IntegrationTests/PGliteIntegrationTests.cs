@@ -225,6 +225,23 @@ public class PGliteIntegrationTests : IAsyncLifetime
         Assert.All(rows, r => Assert.Equal("NORTH", r.GetProperty("region").GetString()));
     }
 
+    [Fact]
+    public async Task PGlite_Summarize_By_Bin_Datetime()
+    {
+        // Regression: bin(todatetime(col), 1d) used to emit DuckDB's epoch_ms(), which Postgres lacks
+        // ("function epoch_ms(timestamp without time zone) does not exist"). The PGlite dialect must
+        // use EXTRACT(EPOCH ...)/to_timestamp instead, and the day-bins must not collapse to one row.
+        var kql = "StormEvents | summarize damage = sum(toint(DAMAGE_PROPERTY)) by day = bin(todatetime(BEGIN_DATE_TIME), 1d)";
+        var sql = _converter.Convert(kql);
+
+        Assert.DoesNotContain("epoch_ms", sql, System.StringComparison.OrdinalIgnoreCase);
+
+        var rows = await Query(sql);
+        // 5 seed rows on 5 distinct calendar days → 5 day-bins (not 1).
+        Assert.Equal(5, rows.Count);
+        Assert.All(rows, r => Assert.False(r.GetProperty("day").ValueKind == JsonValueKind.Null));
+    }
+
     private async Task<List<JsonElement>> Query(string sql)
     {
         var json = await _fixture.NodeJS.InvokeFromFileAsync<string>(

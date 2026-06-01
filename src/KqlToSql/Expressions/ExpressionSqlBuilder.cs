@@ -1147,7 +1147,8 @@ internal class ExpressionSqlBuilder
             var text = lit.ToString().Trim().Trim('"', '\'');
             if (TryParseTimespan(text, out var ms))
             {
-                return $"EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST({value} AS TIMESTAMP))/{ms})*{ms} AS BIGINT))";
+                var em = _dialect.EpochMillis(value);
+                return _dialect.TimestampFromMillis($"FLOOR({em}/{ms})*{ms}");
             }
         }
 
@@ -1156,8 +1157,9 @@ internal class ExpressionSqlBuilder
         // bare arithmetic TIMESTAMP / INTERVAL is illegal. Reduce both to milliseconds and round-trip.
         if (IsIntervalExpression(size))
         {
-            var sizeMs = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({size}) AS TIMESTAMP))";
-            return $"EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST({value} AS TIMESTAMP))/{sizeMs})*{sizeMs} AS BIGINT))";
+            var sizeMs = _dialect.IntervalMillis(size);
+            var em = _dialect.EpochMillis(value);
+            return _dialect.TimestampFromMillis($"FLOOR({em}/{sizeMs})*{sizeMs}");
         }
         return $"FLOOR(({value})/({size}))*({size})";
     }
@@ -1177,16 +1179,19 @@ internal class ExpressionSqlBuilder
             var text = lit.ToString().Trim().Trim('"', '\'');
             if (TryParseTimespan(text, out var ms))
             {
-                return $"EPOCH_MS(CAST(FLOOR((EPOCH_MS(CAST({value} AS TIMESTAMP)) - EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP)))/{ms})*{ms} + EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP)) AS BIGINT))";
+                var emV = _dialect.EpochMillis(value);
+                var emF = _dialect.EpochMillis(fixedPoint);
+                return _dialect.TimestampFromMillis($"FLOOR(({emV} - {emF})/{ms})*{ms} + {emF}");
             }
         }
 
         var size = ConvertExpression(sizeExpr, leftAlias, rightAlias);
         if (IsIntervalExpression(size))
         {
-            var sizeMs = $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({size}) AS TIMESTAMP))";
-            var fixedMs = $"EPOCH_MS(CAST({fixedPoint} AS TIMESTAMP))";
-            return $"EPOCH_MS(CAST(FLOOR((EPOCH_MS(CAST({value} AS TIMESTAMP)) - {fixedMs})/{sizeMs})*{sizeMs} + {fixedMs} AS BIGINT))";
+            var sizeMs = _dialect.IntervalMillis(size);
+            var emV = _dialect.EpochMillis(value);
+            var emF = _dialect.EpochMillis(fixedPoint);
+            return _dialect.TimestampFromMillis($"FLOOR(({emV} - {emF})/{sizeMs})*{sizeMs} + {emF}");
         }
         return $"FLOOR(({value} - {fixedPoint})/({size}))*({size}) + {fixedPoint}";
     }

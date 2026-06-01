@@ -57,6 +57,16 @@ public interface ISqlDialect
     /// of silently becoming NULL.</summary>
     string ParseDateTime(string expr) => SafeCast(expr, "TIMESTAMP");
 
+    /// <summary>Milliseconds-since-epoch of a timestamp expression. Used by datetime bin()/bin_at().
+    /// Defaults to DuckDB's EPOCH_MS; Postgres-family dialects override (no epoch_ms function).</summary>
+    string EpochMillis(string tsExpr) => $"EPOCH_MS(CAST({tsExpr} AS TIMESTAMP))";
+
+    /// <summary>A timestamp from a milliseconds-since-epoch expression (inverse of <see cref="EpochMillis"/>).</summary>
+    string TimestampFromMillis(string msExpr) => $"EPOCH_MS(CAST({msExpr} AS BIGINT))";
+
+    /// <summary>Milliseconds in an interval/timespan expression.</summary>
+    string IntervalMillis(string intervalExpr) => $"EPOCH_MS(CAST(TIMESTAMP 'epoch' + ({intervalExpr}) AS TIMESTAMP))";
+
     /// <summary>True when the engine's `/` operator already performs KQL-style integer (truncating)
     /// division for integer operands (PostgreSQL does; DuckDB does real division and needs a rewrite).</summary>
     bool NativeIntegerDivision => false;

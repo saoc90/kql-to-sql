@@ -360,6 +360,14 @@ public class PGliteDialect : ISqlDialect
     /// KQL toint/tolong/toreal/todouble coerce a dynamic JSON boolean (true→1, false→0; verified live).
     /// Dynamic values serialize to text, and Postgres CAST('true' AS double precision) errors, so route
     /// genuine boolean text ('true'/'false') to 1/0 first and only numeric-cast the remainder.</summary>
+    // Postgres has no epoch_ms; use EXTRACT(EPOCH ...)*1000 and to_timestamp(ms/1000). KQL datetimes
+    // are timezone-agnostic, so project to_timestamp's timestamptz back to UTC wall-clock.
+    public string EpochMillis(string tsExpr) => $"(EXTRACT(EPOCH FROM CAST({tsExpr} AS TIMESTAMP)) * 1000)";
+
+    public string TimestampFromMillis(string msExpr) => $"(TO_TIMESTAMP(({msExpr}) / 1000.0) AT TIME ZONE 'UTC')";
+
+    public string IntervalMillis(string intervalExpr) => $"(EXTRACT(EPOCH FROM ({intervalExpr})::interval) * 1000)";
+
     public string SafeCast(string expr, string sqlType)
     {
         var t = string.Equals(sqlType, "DOUBLE", System.StringComparison.OrdinalIgnoreCase)
