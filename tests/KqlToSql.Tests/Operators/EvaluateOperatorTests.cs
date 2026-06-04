@@ -41,10 +41,14 @@ public class EvaluateOperatorTests
     public void Converts_EvaluateBagUnpack()
     {
         var converter = new KqlToSqlConverter();
-        var kql = "T | evaluate bag_unpack(DynCol)";
+        // bag_unpack infers the bag's keys from the dynamic object literals upstream and projects one
+        // column per key (alphabetically ordered, as Kusto does), dropping the original bag column.
+        var kql = "datatable(d:dynamic)[dynamic({\"a\":1,\"b\":2})] | evaluate bag_unpack(d)";
         var sql = converter.Convert(kql);
-        Assert.Contains("UNNEST", sql);
-        Assert.Contains("DynCol", sql);
+        Assert.Contains("EXCLUDE (d)", sql);
+        Assert.Contains("d->>'$.a' AS a", sql);
+        Assert.Contains("d->>'$.b' AS b", sql);
+        Assert.DoesNotContain("'{}'", sql); // no longer emits an empty from_json schema
     }
 
     [Fact]

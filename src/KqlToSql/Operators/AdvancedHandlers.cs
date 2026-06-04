@@ -23,7 +23,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
         {
             "pivot" => ApplyEvaluatePivot(leftSql, fce),
             "narrow" => ApplyEvaluateNarrow(leftSql),
-            "bag_unpack" => ApplyEvaluateBagUnpack(leftSql, fce),
+            "bag_unpack" => ApplyEvaluateBagUnpack(leftSql, fce, evaluate),
             _ => throw new NotSupportedException($"Unsupported evaluate plugin '{pluginName}'")
         };
     }
@@ -198,15 +198,73 @@ internal class AdvancedHandlers : OperatorHandlerBase
         return $"UNPIVOT ({leftSql}) ON COLUMNS(*) INTO NAME \"Column\" VALUE \"Value\"";
     }
 
-    internal string ApplyEvaluateBagUnpack(string leftSql, FunctionCallExpression fce)
+    internal string ApplyEvaluateBagUnpack(string leftSql, FunctionCallExpression fce, EvaluateOperator evaluate)
     {
         if (fce.ArgumentList.Expressions.Count < 1)
             throw new NotSupportedException("bag_unpack() requires at least 1 argument");
 
         var column = Expr.ConvertExpression(fce.ArgumentList.Expressions[0].Element);
+
+        // Optional second argument: a column-name prefix applied to every unpacked key.
+        var prefix = string.Empty;
+        if (fce.ArgumentList.Expressions.Count >= 2
+            && fce.ArgumentList.Expressions[1].Element is LiteralExpression plit
+            && plit.Kind == SyntaxKind.StringLiteralExpression
+            && plit.LiteralValue is string ps)
+        {
+            prefix = ps;
+        }
+
+        // DuckDB needs the output columns known at plan time, so we infer the bag's keys from the dynamic
+        // object literals feeding this column upstream. (from_json with an empty schema is what produced
+        // the original "Empty object in JSON structure" error.) Kusto emits the unpacked columns sorted
+        // alphabetically (ordinal), so we sort to match its column order/positions.
+        var keys = CollectBagKeys(evaluate);
+        keys.Sort(StringComparer.Ordinal);
         var fromSql = ExtractFrom(leftSql);
+
+        if (keys.Count == 0)
+        {
+            // No statically-knowable keys: fall back to dropping the bag column (Kusto would emit no
+            // unpacked columns for an empty/always-null bag anyway).
+            return $"SELECT {Dialect.SelectExclude(new[] { column })} FROM {fromSql}";
+        }
+
+        // `d->>'$.key'` (json_extract_string) returns each scalar as clean unquoted text and nested
+        // objects/arrays as their JSON text — matching how Kusto surfaces the unpacked values.
+        var projected = keys.Select(k =>
+        {
+            var outName = ExpressionSqlBuilder.QuoteIdentifierIfReserved(prefix + k);
+            var path = "'$." + k.Replace("'", "''") + "'";
+            return $"{column}->>{path} AS {outName}";
+        });
+
         var excludeClause = Dialect.SelectExclude(new[] { column });
-        return $"SELECT {excludeClause}, UNNEST(from_json({column}, '{{}}')) FROM {fromSql}";
+        return $"SELECT {excludeClause}, {string.Join(", ", projected)} FROM {fromSql}";
+    }
+
+    /// <summary>Collects, in first-seen order, the distinct keys of every dynamic object literal that
+    /// appears upstream of this evaluate operator — these become the bag_unpack output columns.</summary>
+    private static List<string> CollectBagKeys(EvaluateOperator evaluate)
+    {
+        var keys = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        // Walk up the pipe chain to the query root, then scan for dynamic object literals. Scanning from
+        // the root keeps it simple and robust to where the bag was constructed (datatable, extend pack(), …).
+        SyntaxNode? root = evaluate;
+        while (root.Parent != null) root = root.Parent;
+
+        foreach (var obj in root.GetDescendants<JsonObjectExpression>())
+        {
+            for (int i = 0; i < obj.Pairs.Count; i++)
+            {
+                var key = obj.Pairs[i].Element.Name.ValueText;
+                if (!string.IsNullOrEmpty(key) && seen.Add(key))
+                    keys.Add(key);
+            }
+        }
+        return keys;
     }
 
     internal string ApplyMakeSeries(string leftSql, MakeSeriesOperator makeSeries)
@@ -214,13 +272,15 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var onExpr = Expr.ConvertExpression(makeSeries.OnClause.Expression);
 
         string fromExpr, toExpr, stepExpr;
+        Expression stepNode;
         // Kusto `from F to T step S` is END-EXCLUSIVE; `in range(F, T, S)` reuses range() which is END-INCLUSIVE.
         bool inclusiveEnd;
         if (makeSeries.RangeClause is MakeSeriesFromToStepClause fromToStep)
         {
             fromExpr = Expr.ConvertExpression(fromToStep.MakeSeriesFromClause.Expression);
             toExpr = Expr.ConvertExpression(fromToStep.MakeSeriesToClause.Expression);
-            stepExpr = fromToStep.MakeSeriesStepClause.Expression.ToString().Trim();
+            stepNode = fromToStep.MakeSeriesStepClause.Expression;
+            stepExpr = stepNode.ToString().Trim();
             inclusiveEnd = false;
         }
         else if (makeSeries.RangeClause is MakeSeriesInRangeClause inRange)
@@ -230,26 +290,48 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 throw new NotSupportedException("make-series in range() requires 3 arguments");
             fromExpr = Expr.ConvertExpression(rangeArgs[0].Element);
             toExpr = Expr.ConvertExpression(rangeArgs[1].Element);
-            stepExpr = rangeArgs[2].Element.ToString().Trim();
+            stepNode = rangeArgs[2].Element;
+            stepExpr = stepNode.ToString().Trim();
             inclusiveEnd = true;
         }
         else
         {
             throw new NotSupportedException($"Unsupported make-series range clause: {makeSeries.RangeClause.GetType().Name}");
         }
-        _ = inclusiveEnd;
 
-        string stepInterval;
-        if (ExpressionSqlBuilder.TryParseTimespan(stepExpr, out var stepMs))
+        // The axis type is dictated by the step: a timespan literal (1d, 1h, 5m, ...) means a
+        // datetime axis; anything else (a number) means a NUMERIC axis. DuckDB's range()/generate_series
+        // need an INTERVAL step for a datetime axis but reject one on a numeric axis — emitting an
+        // INTERVAL on a numeric axis is the root cause of "No function range(INTEGER,INTEGER,INTERVAL)".
+        bool datetimeAxis = ExpressionSqlBuilder.TryParseTimespan(stepExpr, out var stepMs);
+
+        var fromSql = ExtractFrom(leftSql);
+
+        string timeSeries;        // SELECT ... AS _ts  — the generated axis grid points
+        string bucketExpr;        // maps an on-axis value onto the grid point it belongs to
+        if (datetimeAxis)
         {
-            stepInterval = $"{stepMs} * INTERVAL '1 millisecond'";
+            // `range(from, to, step)` is END-EXCLUSIVE (matches Kusto `from..to..step`);
+            // `generate_series(from, to, step)` is END-INCLUSIVE (matches Kusto `in range(...)`).
+            var axisFunc = inclusiveEnd ? "generate_series" : "range";
+            var stepInterval = $"{stepMs} * INTERVAL '1 millisecond'";
+            timeSeries = $"SELECT UNNEST({axisFunc}({fromExpr}, {toExpr}, {stepInterval})) AS _ts";
+            // Floor each datetime to the step grid via epoch-ms, then reconstruct the timestamp.
+            bucketExpr = $"EPOCH_MS(CAST(FLOOR(EPOCH_MS({onExpr})/{stepMs})*{stepMs} AS BIGINT))";
         }
         else
         {
-            stepInterval = $"INTERVAL '{stepExpr}'";
+            // Numeric axis. DuckDB's range()/generate_series only accept BIGINT steps, so build the grid
+            // arithmetically from an index range — this also supports fractional steps. The point count is
+            // ceil((to-from)/step), end-exclusive (+1 for the inclusive `in range(...)` form).
+            var stepNum = Expr.ConvertExpression(stepNode);
+            var extra = inclusiveEnd ? " + 1" : "";
+            var npts = $"CAST(CEIL((({toExpr}) - ({fromExpr}))/({stepNum})) AS BIGINT){extra}";
+            timeSeries = $"SELECT ({fromExpr}) + _i*({stepNum}) AS _ts FROM range(0, {npts}) AS _r(_i)";
+            // Snap each value to its grid point: from + floor((on-from)/step)*step.
+            bucketExpr = $"(({fromExpr}) + FLOOR((({onExpr}) - ({fromExpr}))/({stepNum}))*({stepNum}))";
         }
-
-        var fromSql = ExtractFrom(leftSql);
+        _ = stepMs;
 
         // Build aggregate expressions
         var aggParts = new List<(string SelectExpr, string Alias, string? Default)>();
@@ -286,7 +368,9 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 aggSql = Expr.ConvertExpression(mse.Expression);
             }
 
-            string? defaultVal = null;
+            // Gaps are filled with `default=` when given; otherwise Kusto fills numeric series with 0
+            // (its type default). Always carry a fill value so the output array has no NULL holes.
+            string defaultVal = "0";
             if (mse.DefaultExpression is DefaultExpressionClause dec)
             {
                 defaultVal = Expr.ConvertExpression(dec.Expression);
@@ -302,20 +386,17 @@ internal class AdvancedHandlers : OperatorHandlerBase
             byColumns.AddRange(byClause.Expressions.Select(e => Expr.ConvertExpression(e.Element)));
         }
 
-        // Build: generate time series, cross join with by-columns, left join with aggregated data.
-        // Use interval math directly on the datetime bounds (no TIMESTAMP->BIGINT cast, which DuckDB rejects).
-        // `range(from, to, step)` is END-EXCLUSIVE (matches Kusto `from..to..step`);
-        // `generate_series(from, to, step)` is END-INCLUSIVE (matches Kusto `in range(...)`).
-        var axisFunc = inclusiveEnd ? "generate_series" : "range";
-        var timeSeries = $"SELECT UNNEST({axisFunc}({fromExpr}, {toExpr}, {stepInterval})) AS _ts";
-
+        // Build: generate the axis grid (computed above as `timeSeries`), optionally cross join with
+        // by-columns, then left join with the per-bucket aggregated data.
         var aggSelectList = string.Join(", ", aggParts.Select(a =>
             a.Default != null
                 ? $"LIST(COALESCE({a.Alias}_val, {a.Default}) ORDER BY _ts) AS {a.Alias}"
                 : $"LIST({a.Alias}_val ORDER BY _ts) AS {a.Alias}"));
 
-        var dataAggSelect = string.Join(", ", aggParts.Select(a => $"{a.SelectExpr} AS {a.Alias}_val"));
-        var bucketExpr = $"EPOCH_MS(CAST(FLOOR(EPOCH_MS({onExpr})/{stepMs})*{stepMs} AS BIGINT))";
+        // DuckDB's SUM over integers yields HUGEINT, which surfaces to the host as a value type that
+        // doesn't round-trip through JSON cleanly. Coerce numeric aggregates to DOUBLE so the resulting
+        // dynamic array compares value-for-value against Kusto's (integer JSON canonicalizes 10.0 -> 10).
+        var dataAggSelect = string.Join(", ", aggParts.Select(a => $"CAST({a.SelectExpr} AS DOUBLE) AS {a.Alias}_val"));
 
         var groupByData = byColumns.Count > 0
             ? $"{string.Join(", ", byColumns)}, "
@@ -323,18 +404,27 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
         var dataAgg = $"SELECT {groupByData}{bucketExpr} AS _bucket, {dataAggSelect} FROM {fromSql} GROUP BY {groupByData}_bucket";
 
+        // Inside a dynamic array, Kusto renders each datetime as an ISO-8601 string with a trailing Z and
+        // 7 fractional digits (e.g. 2020-01-01T00:00:00.0000000Z). DuckDB's default LIST<TIMESTAMP>->JSON
+        // uses a different spelling, so format axis timestamps to Kusto's shape (numeric axes pass through).
+        var axisElem = datetimeAxis
+            ? "strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z'"
+            : "_axis._ts";
+
         if (byColumns.Count > 0)
         {
             var bySelect = string.Join(", ", byColumns);
             var crossJoin = $"SELECT DISTINCT {bySelect} FROM {fromSql}";
             var tsAxis = $"SELECT _g.*, _t._ts FROM ({crossJoin}) AS _g CROSS JOIN ({timeSeries}) AS _t";
             var joinCond = string.Join(" AND ", byColumns.Select(c => $"_axis.{c} = _data.{c}").Append("_axis._ts = _data._bucket"));
-            return $"SELECT {string.Join(", ", byColumns.Select(c => $"_axis.{c}"))}, LIST(_axis._ts ORDER BY _axis._ts) AS {onExpr}, {aggSelectList.Replace("_val", "_val")} FROM ({tsAxis}) AS _axis LEFT JOIN ({dataAgg}) AS _data ON {joinCond} GROUP BY {string.Join(", ", byColumns.Select(c => $"_axis.{c}"))}";
+            // Kusto column order: by-columns, then aggregates, then the axis (`on`) column last.
+            return $"SELECT {string.Join(", ", byColumns.Select(c => $"_axis.{c}"))}, {aggSelectList}, LIST({axisElem} ORDER BY _axis._ts) AS {onExpr} FROM ({tsAxis}) AS _axis LEFT JOIN ({dataAgg}) AS _data ON {joinCond} GROUP BY {string.Join(", ", byColumns.Select(c => $"_axis.{c}"))}";
         }
         else
         {
             var joinCond = "_axis._ts = _data._bucket";
-            return $"SELECT LIST(_axis._ts ORDER BY _axis._ts) AS {onExpr}, {aggSelectList} FROM ({timeSeries}) AS _axis LEFT JOIN ({dataAgg}) AS _data ON {joinCond}";
+            // Kusto column order: aggregates first, then the axis (`on`) column last.
+            return $"SELECT {aggSelectList}, LIST({axisElem} ORDER BY _axis._ts) AS {onExpr} FROM ({timeSeries}) AS _axis LEFT JOIN ({dataAgg}) AS _data ON {joinCond}";
         }
     }
 
@@ -463,26 +553,36 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var column = Expr.ConvertExpression(topHitters.OfExpression);
         var fromSql = ExtractFrom(leftSql);
 
+        // Determine the per-group weight and the output metric column name.
+        //  - plain `top-hitters N of g`        → weight = COUNT(*),   column = approximate_count_<g>
+        //  - `top-hitters N of g by v`         → weight = SUM(v),     column = approximate_sum_<v>
+        // Kusto's `by` clause takes a plain numeric column (it is the summed weight); aggregate calls
+        // like count()/sum() are rejected by Kusto, so we never group on the raw column here (which was
+        // the root cause of "column must appear in the GROUP BY clause").
+        string weightExpr, metricAlias;
         if (topHitters.ByClause is TopHittersByClause byClause)
         {
-            string byExpr;
-            if (byClause.Expression is FunctionCallExpression bfce)
-            {
-                var name = bfce.Name.SimpleName.ToLowerInvariant();
-                var bArgs = bfce.ArgumentList.Expressions
-                    .Select(a => Expr.ConvertExpression(a.Element)).ToArray();
-                byExpr = Dialect.TryTranslateAggregate(name, bArgs)
-                    ?? $"{name}({string.Join(", ", bArgs)})";
-            }
-            else
-            {
-                byExpr = Expr.ConvertExpression(byClause.Expression);
-            }
-            return $"SELECT {column}, {byExpr} AS approximate_count FROM {fromSql} GROUP BY {column} ORDER BY approximate_count DESC LIMIT {count}";
+            var byExpr = Expr.ConvertExpression(byClause.Expression);
+            weightExpr = $"SUM({byExpr})";
+            metricAlias = $"approximate_sum_{SimpleNameOf(byClause.Expression) ?? byExpr}";
         }
+        else
+        {
+            weightExpr = "COUNT(*)";
+            metricAlias = $"approximate_count_{SimpleNameOf(topHitters.OfExpression) ?? column}";
+        }
+        metricAlias = ExpressionSqlBuilder.QuoteIdentifierIfReserved(metricAlias);
 
-        return $"SELECT {column}, COUNT(*) AS approximate_count FROM {fromSql} GROUP BY {column} ORDER BY approximate_count DESC LIMIT {count}";
+        // Kusto selects the heaviest N groups, then returns them ordered by weight ASCENDING (ties broken
+        // by the group value). Select with weight DESC + group DESC, then re-sort the survivors ascending.
+        var ranked = $"SELECT {column}, {weightExpr} AS {metricAlias} FROM {fromSql} " +
+                     $"GROUP BY {column} ORDER BY {metricAlias} DESC, {column} DESC LIMIT {count}";
+        return $"SELECT * FROM ({ranked}) ORDER BY {metricAlias} ASC, {column} ASC";
     }
+
+    /// <summary>The bare identifier of an expression when it is a simple column reference, else null.</summary>
+    private static string? SimpleNameOf(Expression expr) =>
+        expr is NameReference nr && !string.IsNullOrEmpty(nr.SimpleName) ? nr.SimpleName : null;
 
     internal string ApplyTopNested(string leftSql, TopNestedOperator topNested)
     {
