@@ -140,6 +140,7 @@ public class DuckDbDialect : ISqlDialect
             "unixtime_microseconds_todatetime" => $"MAKE_TIMESTAMP(CAST({args[0]} AS BIGINT))",
             "unixtime_nanoseconds_todatetime" => $"MAKE_TIMESTAMP(CAST({args[0]} AS BIGINT) / 1000)",
             "datetime_part" => $"EXTRACT({args[0].Trim('\'')} FROM CAST({args[1]} AS TIMESTAMP))",
+            "format_timespan" when args.Length >= 2 => FormatTimespan(args[0], args[1]),
             "format_timespan" => $"CAST({args[0]} AS VARCHAR)",
 
             // String functions
@@ -168,15 +169,23 @@ public class DuckDbDialect : ISqlDialect
             // Array/dynamic functions
             // strcat_array(array, delimiter) joins array elements — a scalar (the aggregate map has a
             // same-named string_agg for the aggregate form; this is the scalar array form).
-            "strcat_array" when args.Length == 2 => $"ARRAY_TO_STRING({args[0]}, {args[1]})",
-            "array_length" => $"LEN({args[0]})",
-            "array_index_of" => $"(LIST_POSITION({args[0]}, {args[1]}) - 1)",
-            "array_sort_asc" => $"LIST_SORT({args[0]})",
-            "array_sort_desc" => $"LIST_REVERSE_SORT({args[0]})",
-            "array_concat" => $"LIST_CONCAT({string.Join(", ", args)})",
-            "array_reverse" => $"LIST_REVERSE({args[0]})",
-            "array_slice" when args.Length == 3 => $"LIST_SLICE({args[0]}, {args[1]} + 1, {args[2]} + 1)",
-            "array_sum" => $"LIST_SUM({args[0]})",
+            "strcat_array" when args.Length == 2 => $"ARRAY_TO_STRING({CoerceArr(args[0])}, {args[1]})",
+            // Arrays reach these either as native LIST (dynamic([..])/split) or as a JSON value
+            // (from dynamic property/index navigation, e.g. d.a). CoerceArr normalizes a JSON array
+            // to a native LIST<JSON> via '$[*]' so LIST_* builtins type-check on both forms. When an
+            // input was JSON, the array-returning result is wrapped in TO_JSON so it serializes as a
+            // JSON array (numbers unquoted) matching the dynamic oracle, and stays navigable downstream.
+            "array_length" => $"LEN({CoerceArr(args[0])})",
+            "array_index_of" => $"(LIST_POSITION({CoerceArr(args[0])}, {args[1]}) - 1)",
+            "array_sort_asc" => WrapArr(IsJsonArg(args[0]), $"LIST_SORT({CoerceArr(args[0])})"),
+            "array_sort_desc" => WrapArr(IsJsonArg(args[0]), $"LIST_REVERSE_SORT({CoerceArr(args[0])})"),
+            "array_concat" => WrapArr(args.Any(IsJsonArg), $"LIST_CONCAT({string.Join(", ", args.Select(CoerceArr))})"),
+            "array_reverse" => WrapArr(IsJsonArg(args[0]), $"LIST_REVERSE({CoerceArr(args[0])})"),
+            "array_slice" when args.Length == 3 => WrapArr(IsJsonArg(args[0]), $"LIST_SLICE({CoerceArr(args[0])}, {args[1]} + 1, {args[2]} + 1)"),
+            // array_sum: elements may be JSON text — cast each to DOUBLE before summing.
+            "array_sum" => IsJsonArg(args[0])
+                ? $"LIST_SUM(LIST_TRANSFORM({CoerceArr(args[0])}, x -> CAST(x AS DOUBLE)))"
+                : $"LIST_SUM({args[0]})",
             "bag_keys" => $"JSON_KEYS({args[0]})",
             "bag_has_key" => $"(JSON_EXTRACT({args[0]}, '$.' || TRIM({args[1]}, '\"''')) IS NOT NULL)",
             "bag_merge" => $"JSON_MERGE_PATCH({args[0]}, {args[1]})",
@@ -280,7 +289,11 @@ public class DuckDbDialect : ISqlDialect
 
             // Conditional / type functions
             "iff" => null, // handled structurally in ExpressionSqlBuilder
-            "gettype" or "typeof" => $"TYPEOF({args[0]})",
+            // typeof() exposes the engine type name (used internally, e.g. buildschema). gettype()
+            // must return Kusto type names — map DuckDB's TYPEOF onto long/real/string/bool/datetime/
+            // timespan/guid/array/dictionary. JSON values resolve array vs dictionary via json_type.
+            "gettype" => GetTypeKusto(args[0]),
+            "typeof" => $"TYPEOF({args[0]})",
             "isnan" => $"ISNAN({args[0]})",
             "isinf" => $"ISINF({args[0]})",
             "isfinite" => $"ISFINITE({args[0]})",
@@ -391,7 +404,10 @@ public class DuckDbDialect : ISqlDialect
 
     public string JsonAccess(string baseSql, string jsonPath)
     {
-        return $"trim(both '\"' from json_extract({baseSql}, '$.{jsonPath}'))";
+        // Return the navigable JSON value (not a trimmed scalar string) so chained property/index
+        // access and array functions operate consistently on the result, and so the dynamic value
+        // matches the Kusto oracle's JSON serialization (e.g. d.a.b → {"c":42}, d.s → "hello").
+        return $"json_extract({baseSql}, '$.{jsonPath}')";
     }
 
     /// <summary>KQL toint/tolong truncate toward zero (toint(2.6)=2, toint(-2.6)=-2); DuckDB's
@@ -487,6 +503,33 @@ public class DuckDbDialect : ISqlDialect
         return false;
     }
 
+    /// <summary>True when an array argument is a JSON value (a dynamic-navigation result, dynamic
+    /// literal, or JSON builtin) rather than a native LIST. Such inputs must be element-extracted with
+    /// '$[*]' before LIST_* builtins, and array-returning results re-serialized with TO_JSON.</summary>
+    private static bool IsJsonArg(string sql)
+    {
+        var t = sql.TrimEnd();
+        var s = t.TrimStart('(').TrimStart();
+        return t.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("json_extract(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("JSON_EXTRACT(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("json_object(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("JSON_MERGE_PATCH(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("TO_JSON(", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Normalize an array argument so LIST_* builtins type-check. Native LIST expressions pass
+    /// through unchanged; a JSON value (dynamic navigation result, e.g. json_extract(d, '$.a')) is
+    /// converted to a native LIST&lt;JSON&gt; by extracting all elements with the '$[*]' wildcard path.</summary>
+    private static string CoerceArr(string sql) =>
+        IsJsonArg(sql) ? $"json_extract({sql}, '$[*]')" : sql;
+
+    /// <summary>Re-serialize a LIST-producing array result as a JSON array (TO_JSON) when the input(s)
+    /// were JSON — so the output matches the dynamic oracle's JSON serialization (unquoted numbers) and
+    /// remains navigable. Native-LIST inputs are left as native lists (they already serialize correctly).</summary>
+    private static string WrapArr(bool fromJson, string listSql) =>
+        fromJson ? $"TO_JSON({listSql})" : listSql;
+
     private static bool IsArrayLikeText(string sql)
     {
         var t = sql.TrimStart('(').TrimEnd(')').TrimStart();
@@ -575,6 +618,131 @@ public class DuckDbDialect : ISqlDialect
         }
 
         return $"'{sb.ToString().Replace("'", "''")}'";
+    }
+
+    /// <summary>
+    /// Render a KQL format_timespan(timespan, format) call. The format string is a .NET-style custom
+    /// TimeSpan format (e.g. 'd.hh:mm:ss', 'hh:mm', 'ss.fff'). We compute total signed microseconds from
+    /// the interval, take a leading sign + absolute components (days/hours/minutes/seconds/fraction) and
+    /// concatenate per the format. Each specifier run uses its length for zero-padding (h vs hh, etc).
+    /// 'h'/'m'/'s' are within-their-parent (hours 0-23, minutes 0-59, …) matching .NET semantics.
+    /// </summary>
+    private static string FormatTimespan(string intervalSql, string formatLiteral)
+    {
+        // Only handle genuine string-literal formats; otherwise fall back to a raw cast.
+        if (formatLiteral.Length < 2 || formatLiteral[0] != '\'' || formatLiteral[^1] != '\'')
+            return $"CAST({intervalSql} AS VARCHAR)";
+        var fmt = formatLiteral.Substring(1, formatLiteral.Length - 2).Replace("''", "'");
+
+        // Signed total microseconds, and the absolute value used for component math.
+        var totalUs = $"(EXTRACT(EPOCH FROM ({intervalSql})) * 1000000)";
+        var absUs = $"ABS({totalUs})";
+
+        string Comp(long unitUs, long? modUnits) =>
+            modUnits is { } m
+                ? $"CAST(FLOOR(MOD({absUs}, {unitUs * m}) / {unitUs}) AS BIGINT)"
+                : $"CAST(FLOOR({absUs} / {unitUs}) AS BIGINT)";
+        string Pad(string numeric, int width) =>
+            width <= 1 ? $"CAST({numeric} AS VARCHAR)" : $"LPAD(CAST({numeric} AS VARCHAR), {width}, '0')";
+
+        var parts = new List<string>();
+        var literalRun = new System.Text.StringBuilder();
+        void FlushLiteral()
+        {
+            if (literalRun.Length == 0) return;
+            parts.Add($"'{literalRun.ToString().Replace("'", "''")}'");
+            literalRun.Clear();
+        }
+
+        int i = 0;
+        while (i < fmt.Length)
+        {
+            char c = fmt[i];
+            int run = 1;
+            while (i + run < fmt.Length && fmt[i + run] == c) run++;
+
+            switch (c)
+            {
+                case 'd':
+                    FlushLiteral();
+                    parts.Add(Pad(Comp(86400000000L, null), run));
+                    i += run;
+                    break;
+                case 'h':
+                    FlushLiteral();
+                    parts.Add(Pad(Comp(3600000000L, 24), run));
+                    i += run;
+                    break;
+                case 'H':
+                    FlushLiteral();
+                    parts.Add(Pad(Comp(3600000000L, 24), run));
+                    i += run;
+                    break;
+                case 'm':
+                    FlushLiteral();
+                    parts.Add(Pad(Comp(60000000L, 60), run));
+                    i += run;
+                    break;
+                case 's':
+                    FlushLiteral();
+                    parts.Add(Pad(Comp(1000000L, 60), run));
+                    i += run;
+                    break;
+                case 'f':
+                case 'F':
+                {
+                    FlushLiteral();
+                    // N fractional digits of the second. Microsecond precision (max 6 meaningful);
+                    // request beyond 6 is right-padded with zeros.
+                    int n = run;
+                    int meaningful = Math.Min(n, 6);
+                    var fracUs = $"CAST(MOD({absUs}, 1000000) AS BIGINT)";
+                    var digits = $"CAST(FLOOR({fracUs} / {(long)Math.Pow(10, 6 - meaningful)}) AS BIGINT)";
+                    var padded = $"LPAD(CAST({digits} AS VARCHAR), {meaningful}, '0')";
+                    if (n > 6) padded = $"({padded} || '{new string('0', n - 6)}')";
+                    if (c == 'F')
+                        // Uppercase F: omit if the fractional part is zero (no padding kept).
+                        parts.Add($"CASE WHEN {fracUs} = 0 THEN '' ELSE {padded} END");
+                    else
+                        parts.Add(padded);
+                    i += run;
+                    break;
+                }
+                case '\\':
+                    // escape next char as literal
+                    if (i + 1 < fmt.Length) { literalRun.Append(fmt[i + 1]); i += 2; }
+                    else { literalRun.Append(c); i++; }
+                    break;
+                default:
+                    literalRun.Append(c);
+                    i++;
+                    break;
+            }
+        }
+        FlushLiteral();
+
+        var sign = $"CASE WHEN {totalUs} < 0 THEN '-' ELSE '' END";
+        var body = parts.Count == 0 ? "''" : string.Join(" || ", parts);
+        return $"({sign} || {body})";
+    }
+
+    /// <summary>Map DuckDB's TYPEOF onto Kusto's gettype() type names. JSON values disambiguate
+    /// array vs dictionary via json_type; native LIST types ('...[]') are arrays.</summary>
+    private static string GetTypeKusto(string arg)
+    {
+        var t = $"TYPEOF({arg})";
+        return
+            $"CASE " +
+            $"WHEN {t} IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' " +
+            $"WHEN {t} IN ('FLOAT','DOUBLE','REAL') OR {t} LIKE 'DECIMAL%' THEN 'real' " +
+            $"WHEN {t} = 'VARCHAR' THEN 'string' " +
+            $"WHEN {t} = 'BOOLEAN' THEN 'bool' " +
+            $"WHEN {t} IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' " +
+            $"WHEN {t} LIKE 'INTERVAL%' THEN 'timespan' " +
+            $"WHEN {t} = 'UUID' THEN 'guid' " +
+            $"WHEN {t} LIKE '%[]' OR {t} LIKE 'STRUCT%' OR {t} LIKE 'MAP%' THEN 'array' " +
+            $"WHEN {t} = 'JSON' THEN (CASE WHEN json_type(CAST({arg} AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) " +
+            $"ELSE LOWER({t}) END";
     }
 
     private static bool HasTopLevelSetOp(string sql)

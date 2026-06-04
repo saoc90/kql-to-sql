@@ -30,6 +30,17 @@ public interface ISqlDialect
     /// <summary>Generates a JSON field access expression.</summary>
     string JsonAccess(string baseSql, string jsonPath);
 
+    /// <summary>Index a JSON value by a (possibly dynamic) string key expression, returning the
+    /// navigable JSON child. The key expression is already rendered SQL (e.g. a quoted literal or a
+    /// column reference).</summary>
+    string JsonIndexByKey(string baseSql, string keyExpr) =>
+        $"json_extract({baseSql}, '$.' || {keyExpr})";
+
+    /// <summary>Index a JSON array by a 0-based (possibly dynamic) integer position expression,
+    /// returning the navigable JSON element.</summary>
+    string JsonIndexByPosition(string baseSql, string indexExpr) =>
+        $"json_extract({baseSql}, '$[' || ({indexExpr}) || ']')";
+
     /// <summary>Generates a SELECT clause that excludes specific columns (e.g. "* EXCLUDE (col)").</summary>
     string SelectExclude(string[] columns);
 

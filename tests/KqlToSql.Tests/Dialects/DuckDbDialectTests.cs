@@ -258,7 +258,7 @@ public class DuckDbDialectTests
     public void DuckDb_JsonAccess_Returns_Correct_Syntax()
     {
         var dialect = new DuckDbDialect();
-        Assert.Equal("trim(both '\"' from json_extract(col, '$.path'))", dialect.JsonAccess("col", "path"));
+        Assert.Equal("json_extract(col, '$.path')", dialect.JsonAccess("col", "path"));
     }
 
     [Fact]

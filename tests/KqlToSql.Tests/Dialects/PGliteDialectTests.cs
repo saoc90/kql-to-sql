@@ -259,11 +259,11 @@ public class PGliteDialectTests
     }
 
     [Fact]
-    public void PGlite_FormatTimespan_Uses_CastAsText()
+    public void PGlite_FormatTimespan_HonorsFormat()
     {
         var dialect = new PGliteDialect();
         var result = dialect.TryTranslateFunction("format_timespan", new[] { "duration", "'hh:mm'" });
-        Assert.Equal("CAST(duration AS TEXT)", result);
+        Assert.Equal("(CASE WHEN (EXTRACT(EPOCH FROM (duration)::interval) * 1000000) < 0 THEN '-' ELSE '' END || LPAD((FLOOR(MOD((ABS((EXTRACT(EPOCH FROM (duration)::interval) * 1000000)))::numeric, 86400000000) / 3600000000)::bigint)::text, 2, '0') || ':' || LPAD((FLOOR(MOD((ABS((EXTRACT(EPOCH FROM (duration)::interval) * 1000000)))::numeric, 3600000000) / 60000000)::bigint)::text, 2, '0'))", result);
     }
 
     // --- String function tests ---
@@ -769,28 +769,28 @@ public class PGliteDialectTests
     public void PGlite_JsonAccess_Single_Key()
     {
         var dialect = new PGliteDialect();
-        Assert.Equal("(col::jsonb->>'name')", dialect.JsonAccess("col", "name"));
+        Assert.Equal("(col::jsonb->'name')", dialect.JsonAccess("col", "name"));
     }
 
     [Fact]
     public void PGlite_JsonAccess_Nested_Path()
     {
         var dialect = new PGliteDialect();
-        Assert.Equal("(col::jsonb->'address'->>'city')", dialect.JsonAccess("col", "address.city"));
+        Assert.Equal("(col::jsonb->'address'->'city')", dialect.JsonAccess("col", "address.city"));
     }
 
     [Fact]
     public void PGlite_Extend_DotNotation_JsonAccess_CastsToJsonb()
     {
         var sql = _converter.Convert("StormEvents | take 10 | extend test = StormSummary.TotalDamages");
-        Assert.Equal("SELECT *, (StormSummary::jsonb->>'TotalDamages') AS test FROM StormEvents LIMIT 10", sql);
+        Assert.Equal("SELECT *, (StormSummary::jsonb->'TotalDamages') AS test FROM StormEvents LIMIT 10", sql);
     }
 
     [Fact]
     public void PGlite_Extend_BracketNotation_JsonAccess_CastsToJsonb()
     {
         var sql = _converter.Convert("StormEvents | take 10 | extend test = StormSummary['TotalDamages']");
-        Assert.Equal("SELECT *, (StormSummary::jsonb->>'TotalDamages') AS test FROM StormEvents LIMIT 10", sql);
+        Assert.Equal("SELECT *, (StormSummary::jsonb->'TotalDamages') AS test FROM StormEvents LIMIT 10", sql);
     }
 
     [Fact]
@@ -799,7 +799,7 @@ public class PGliteDialectTests
         var sql = _converter.Convert("StormEvents | take 10 | extend test = toint(StormSummary.TotalDamages)");
         // toint truncates toward zero (Kusto) — route through TRUNC(double precision) before the integer cast.
         // A dynamic JSON boolean coerces true→1 / false→0, so boolean text is mapped before the numeric cast.
-        Assert.Equal("SELECT *, CAST(TRUNC(CASE WHEN lower(((StormSummary::jsonb->>'TotalDamages'))::text) IN ('true','false') THEN (lower(((StormSummary::jsonb->>'TotalDamages'))::text) = 'true')::int::double precision ELSE CAST((StormSummary::jsonb->>'TotalDamages') AS double precision) END) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
+        Assert.Equal("SELECT *, CAST(TRUNC(CASE WHEN lower(((StormSummary::jsonb->'TotalDamages'))::text) IN ('true','false') THEN (lower(((StormSummary::jsonb->'TotalDamages'))::text) = 'true')::int::double precision ELSE CAST((StormSummary::jsonb->'TotalDamages') AS double precision) END) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
     }
 
     [Fact]
@@ -808,7 +808,7 @@ public class PGliteDialectTests
         var sql = _converter.Convert("StormEvents | take 10 | extend test = toint(StormSummary['TotalDamages'])");
         // toint truncates toward zero (Kusto) — route through TRUNC(double precision) before the integer cast.
         // A dynamic JSON boolean coerces true→1 / false→0, so boolean text is mapped before the numeric cast.
-        Assert.Equal("SELECT *, CAST(TRUNC(CASE WHEN lower(((StormSummary::jsonb->>'TotalDamages'))::text) IN ('true','false') THEN (lower(((StormSummary::jsonb->>'TotalDamages'))::text) = 'true')::int::double precision ELSE CAST((StormSummary::jsonb->>'TotalDamages') AS double precision) END) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
+        Assert.Equal("SELECT *, CAST(TRUNC(CASE WHEN lower(((StormSummary::jsonb->'TotalDamages'))::text) IN ('true','false') THEN (lower(((StormSummary::jsonb->'TotalDamages'))::text) = 'true')::int::double precision ELSE CAST((StormSummary::jsonb->'TotalDamages') AS double precision) END) AS INTEGER) AS test FROM StormEvents LIMIT 10", sql);
     }
 
     [Fact]

@@ -105,6 +105,7 @@ public class PGliteDialect : ISqlDialect
             "unixtime_microseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000000)",
             "unixtime_nanoseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000000000)",
             "datetime_part" => $"EXTRACT({args[0].Trim('\'')} FROM {args[1]})",
+            "format_timespan" when args.Length >= 2 => FormatTimespan(args[0], args[1]),
             "format_timespan" => $"CAST({args[0]} AS TEXT)",
 
             // String functions
@@ -220,7 +221,11 @@ public class PGliteDialect : ISqlDialect
             "jaccard_index" => $"((SELECT COUNT(*) FROM UNNEST({args[0]}) x WHERE x = ANY({args[1]}))::DOUBLE PRECISION / (SELECT COUNT(DISTINCT x) FROM UNNEST({args[0]} || {args[1]}) x)::DOUBLE PRECISION)",
 
             // Type/conditional functions
-            "gettype" or "typeof" => $"PG_TYPEOF({args[0]})::text",
+            // gettype() must return Kusto type names — map Postgres PG_TYPEOF onto long/real/string/
+            // bool/datetime/timespan/guid/array/dictionary. jsonb resolves array vs dictionary via
+            // jsonb_typeof. typeof() keeps the raw engine type name (internal use).
+            "gettype" => GetTypeKusto(args[0]),
+            "typeof" => $"PG_TYPEOF({args[0]})::text",
             "isnan" => $"({args[0]} = 'NaN'::double precision)",
             "isinf" => $"({args[0]} = 'Infinity'::double precision OR {args[0]} = '-Infinity'::double precision)",
             "isfinite" => $"ISFINITE({args[0]}::timestamp)",
@@ -307,15 +312,21 @@ public class PGliteDialect : ISqlDialect
 
     public string JsonAccess(string baseSql, string jsonPath)
     {
+        // Return the navigable jsonb value (using -> rather than ->>) so chained property/index access
+        // and array functions operate consistently, and so the result matches the Kusto oracle's JSON
+        // serialization (e.g. d.a.b → {"c":42}, d.s → "hello").
         var parts = jsonPath.Split('.');
-        if (parts.Length == 1)
-        {
-            return $"({baseSql}::jsonb->>'{parts[0]}')";
-        }
-        // For nested access: col::jsonb->'a'->>'b'
-        var intermediate = string.Join("", parts.Take(parts.Length - 1).Select(p => $"->'{p}'"));
-        return $"({baseSql}::jsonb{intermediate}->>'{parts.Last()}')";
+        var chain = string.Join("", parts.Select(p => $"->'{p}'"));
+        return $"({baseSql}::jsonb{chain})";
     }
+
+    // Index a jsonb value by a string key, returning navigable jsonb (-> not ->>).
+    public string JsonIndexByKey(string baseSql, string keyExpr) =>
+        $"({baseSql}::jsonb->({keyExpr}))";
+
+    // Index a jsonb array by a 0-based integer position, returning navigable jsonb.
+    public string JsonIndexByPosition(string baseSql, string indexExpr) =>
+        $"({baseSql}::jsonb->(({indexExpr})::int))";
 
     public string SelectExclude(string[] columns)
     {
@@ -377,6 +388,105 @@ public class PGliteDialect : ISqlDialect
     public string TimestampFromMillis(string msExpr) => $"(TO_TIMESTAMP(({msExpr}) / 1000.0) AT TIME ZONE 'UTC')";
 
     public string IntervalMillis(string intervalExpr) => $"(EXTRACT(EPOCH FROM ({intervalExpr})::interval) * 1000)";
+
+    /// <summary>Map Postgres PG_TYPEOF onto Kusto's gettype() type names. jsonb values disambiguate
+    /// array vs dictionary via jsonb_typeof; native array types ('...[]') are arrays.</summary>
+    private static string GetTypeKusto(string arg)
+    {
+        var t = $"PG_TYPEOF({arg})::text";
+        return
+            $"CASE " +
+            $"WHEN {t} IN ('smallint','integer','bigint') THEN 'long' " +
+            $"WHEN {t} IN ('real','double precision','numeric') THEN 'real' " +
+            $"WHEN {t} IN ('text','character varying','character','\"char\"','name') THEN 'string' " +
+            $"WHEN {t} = 'boolean' THEN 'bool' " +
+            $"WHEN {t} IN ('timestamp without time zone','timestamp with time zone','date') THEN 'datetime' " +
+            $"WHEN {t} = 'interval' THEN 'timespan' " +
+            $"WHEN {t} = 'uuid' THEN 'guid' " +
+            $"WHEN {t} LIKE '%[]' THEN 'array' " +
+            $"WHEN {t} IN ('jsonb','json') THEN (CASE WHEN jsonb_typeof(({arg})::jsonb) = 'array' THEN 'array' ELSE 'dictionary' END) " +
+            $"ELSE {t} END";
+    }
+
+    /// <summary>
+    /// Render a KQL format_timespan(timespan, format) call for Postgres. Mirrors the DuckDB
+    /// implementation: signed total microseconds → leading sign + absolute components per the
+    /// .NET-style custom format string ('d.hh:mm:ss', 'hh:mm', 'ss.fff', …).
+    /// </summary>
+    private static string FormatTimespan(string intervalSql, string formatLiteral)
+    {
+        if (formatLiteral.Length < 2 || formatLiteral[0] != '\'' || formatLiteral[^1] != '\'')
+            return $"CAST({intervalSql} AS TEXT)";
+        var fmt = formatLiteral.Substring(1, formatLiteral.Length - 2).Replace("''", "'");
+
+        var totalUs = $"(EXTRACT(EPOCH FROM ({intervalSql})::interval) * 1000000)";
+        var absUs = $"ABS({totalUs})";
+
+        string Comp(long unitUs, long? modUnits) =>
+            modUnits is { } m
+                ? $"FLOOR(MOD(({absUs})::numeric, {unitUs * m}) / {unitUs})::bigint"
+                : $"FLOOR(({absUs}) / {unitUs})::bigint";
+        string Pad(string numeric, int width) =>
+            width <= 1 ? $"({numeric})::text" : $"LPAD(({numeric})::text, {width}, '0')";
+
+        var parts = new System.Collections.Generic.List<string>();
+        var literalRun = new System.Text.StringBuilder();
+        void FlushLiteral()
+        {
+            if (literalRun.Length == 0) return;
+            parts.Add($"'{literalRun.ToString().Replace("'", "''")}'");
+            literalRun.Clear();
+        }
+
+        int i = 0;
+        while (i < fmt.Length)
+        {
+            char c = fmt[i];
+            int run = 1;
+            while (i + run < fmt.Length && fmt[i + run] == c) run++;
+
+            switch (c)
+            {
+                case 'd':
+                    FlushLiteral(); parts.Add(Pad(Comp(86400000000L, null), run)); i += run; break;
+                case 'h':
+                case 'H':
+                    FlushLiteral(); parts.Add(Pad(Comp(3600000000L, 24), run)); i += run; break;
+                case 'm':
+                    FlushLiteral(); parts.Add(Pad(Comp(60000000L, 60), run)); i += run; break;
+                case 's':
+                    FlushLiteral(); parts.Add(Pad(Comp(1000000L, 60), run)); i += run; break;
+                case 'f':
+                case 'F':
+                {
+                    FlushLiteral();
+                    int n = run;
+                    int meaningful = System.Math.Min(n, 6);
+                    var fracUs = $"MOD(({absUs})::numeric, 1000000)::bigint";
+                    var digits = $"FLOOR(({fracUs}) / {(long)System.Math.Pow(10, 6 - meaningful)})::bigint";
+                    var padded = $"LPAD(({digits})::text, {meaningful}, '0')";
+                    if (n > 6) padded = $"({padded} || '{new string('0', n - 6)}')";
+                    if (c == 'F')
+                        parts.Add($"CASE WHEN ({fracUs}) = 0 THEN '' ELSE {padded} END");
+                    else
+                        parts.Add(padded);
+                    i += run;
+                    break;
+                }
+                case '\\':
+                    if (i + 1 < fmt.Length) { literalRun.Append(fmt[i + 1]); i += 2; }
+                    else { literalRun.Append(c); i++; }
+                    break;
+                default:
+                    literalRun.Append(c); i++; break;
+            }
+        }
+        FlushLiteral();
+
+        var sign = $"CASE WHEN {totalUs} < 0 THEN '-' ELSE '' END";
+        var body = parts.Count == 0 ? "''" : string.Join(" || ", parts);
+        return $"({sign} || {body})";
+    }
 
     public string SafeCast(string expr, string sqlType)
     {

@@ -16,7 +16,7 @@ public class DynamicAccessTests
 | project StateFromMetadata, InjuriesFromMetadata
 | take 3";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT StateFromMetadata, InjuriesFromMetadata FROM (SELECT *, trim(both '\"' from json_extract(Metadata, '$.state')) AS StateFromMetadata, trim(both '\"' from json_extract(Metadata, '$.injuries')) AS InjuriesFromMetadata FROM (SELECT *, json_object('state', State, 'injuries', InjuriesDirect) AS Metadata FROM StormEvents)) LIMIT 3", sql);
+        Assert.Equal("SELECT StateFromMetadata, InjuriesFromMetadata FROM (SELECT *, json_extract(Metadata, '$.state') AS StateFromMetadata, json_extract(Metadata, '$.injuries') AS InjuriesFromMetadata FROM (SELECT *, json_object('state', State, 'injuries', InjuriesDirect) AS Metadata FROM StormEvents)) LIMIT 3", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

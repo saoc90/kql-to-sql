@@ -285,12 +285,8 @@ internal class ExpressionSqlBuilder
             // `dm[field]`) that resolved to a quoted SQL string literal — dict key, not array index.
             || indexExpr.TrimStart().StartsWith("'", StringComparison.Ordinal);
 
-        // If the base is a JSON object (e.g. from dynamic({...})), the bracket access needs a json path lookup
-        // rather than LIST indexing. Detect the ::JSON suffix produced by ConvertDynamic.
-        if (baseExpr.TrimEnd().EndsWith("::JSON", StringComparison.OrdinalIgnoreCase))
-        {
-            return $"json_extract_string({baseExpr}, '$.' || {indexExpr})";
-        }
+        bool baseIsJson = IsJsonBaseExpr(baseExpr);
+
         // Base is a NameReference to a scalar CTE (e.g. `let mapJobToRecipe = view() { toscalar(...) }`).
         // The CTE can't be array-subscripted; the KQL semantics are JSON dict access. Inline a subquery
         // against the CTE and json_extract the key. Single-column scalar CTEs emit one scalar row — the
@@ -298,19 +294,42 @@ internal class ExpressionSqlBuilder
         if (ee.Expression is NameReference cteRef && _ctes != null
             && _ctes.ContainsKey(cteRef.Name.SimpleName))
         {
-            return $"json_extract((SELECT * FROM {cteRef.Name.SimpleName} LIMIT 1), '$.' || {indexExpr})";
-        }
-        // String index on an arbitrary base → JSON dict access. Trim surrounding quotes so the
-        // result is the scalar string (matching KQL `tostring(dict[key])` → unquoted, e.g. for
-        // bag_pack values), consistent with the literal-key path. Numeric comparisons still bind:
-        // DuckDB implicitly casts the trimmed text to a number for `dict[key] > 0`.
-        if (isStringIndex)
-        {
-            return $"trim(both '\"' from json_extract({baseExpr}, '$.' || {indexExpr}))";
+            return _dialect.JsonIndexByKey($"(SELECT * FROM {cteRef.Name.SimpleName} LIMIT 1)", indexExpr);
         }
 
-        // KQL uses 0-based indexing, DuckDB LIST uses 1-based
+        // JSON base (dynamic object/array literal, json_extract result, bag_pack/json_object, etc):
+        // index/key access returns the navigable JSON value so chained .[]/array funcs work AND the
+        // result matches the oracle's dynamic JSON serialization.
+        if (baseIsJson)
+        {
+            return isStringIndex
+                ? _dialect.JsonIndexByKey(baseExpr, indexExpr)
+                : _dialect.JsonIndexByPosition(baseExpr, indexExpr);
+        }
+
+        // String index on a non-JSON base → JSON dict access (cast base to JSON).
+        if (isStringIndex)
+        {
+            return _dialect.JsonIndexByKey(baseExpr, indexExpr);
+        }
+
+        // KQL uses 0-based indexing, DuckDB LIST uses 1-based.
         return $"{baseExpr}[{indexExpr} + 1]";
+    }
+
+    // True when the SQL expression evaluates to a JSON value (and so must be navigated with json_extract
+    // rather than native LIST subscripting). Covers dynamic literals (::JSON), json_extract results,
+    // and JSON-producing builtins (json_object/bag_pack, json_merge_patch, etc).
+    private static bool IsJsonBaseExpr(string baseExpr)
+    {
+        var t = baseExpr.TrimEnd();
+        if (t.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase)) return true;
+        var s = t.TrimStart('(').TrimStart();
+        return s.StartsWith("json_extract(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("json_object(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("json_merge_patch(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("JSON_MERGE_PATCH(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("to_json(", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsStringReturningFunction(FunctionCallExpression fce) =>
@@ -320,35 +339,54 @@ internal class ExpressionSqlBuilder
 
     private string ConvertDynamic(DynamicExpression de, string? leftAlias, string? rightAlias)
     {
-        // Inspect the DIRECT inner expression (not recursive descendants): a top-level object whose
-        // value happens to contain a nested array must NOT be misclassified as an array.
-        var inner = de.Expression;
+        // Inspect the DIRECT child expression (not arbitrary descendants — a descendant search would
+        // mis-classify dynamic({"a":[1,2]}) as an array because it'd find the nested [1,2] first).
+        var child = de.Expression;
 
-        // dynamic([...]) of pure scalars → native DuckDB LIST so array functions (LEN/LIST_*) work.
-        // Arrays containing objects/arrays can't be a homogeneous LIST, so fall through to JSON.
-        if (inner is JsonArrayExpression arr && arr.Values.All(v => IsScalarJsonValue(v.Element)))
+        // dynamic([...]) → LIST_VALUE so native array functions keep working on top-level arrays.
+        // Nested objects/arrays inside the array are serialized to JSON so they remain navigable.
+        if (child is JsonArrayExpression topArr)
         {
-            var elements = arr.Values.Select(v => ConvertExpression(v.Element, leftAlias, rightAlias));
+            var elements = topArr.Values
+                .Select(v => ConvertDynamicElementSql(v.Element, leftAlias, rightAlias))
+                .ToArray();
             return $"LIST_VALUE({string.Join(", ", elements)})";
         }
 
-        // dynamic(null) → SQL NULL
-        if (inner is null || (inner is LiteralExpression nl && nl.Kind == SyntaxKind.NullLiteralExpression))
-            return "NULL";
+        // dynamic({key:val}) → strict JSON object, recursively serialized (nested objects/arrays kept).
+        if (child is JsonObjectExpression topObj)
+            return $"'{SerializeDynamicJson(topObj).Replace("'", "''")}'::JSON";
 
-        // Everything else (objects, nested/complex arrays, scalars like dynamic(1)/dynamic("x")) →
-        // a recursively-serialized JSON value.
-        var json = DynamicToJson(inner);
-        return $"'{json.Replace("'", "''")}'::JSON";
+        // dynamic(null) / dynamic(<scalar literal>)
+        if (child is LiteralExpression clit)
+        {
+            if (clit.Kind == SyntaxKind.NullLiteralExpression) return "NULL";
+            return $"'{SerializeDynamicJson(clit).Replace("'", "''")}'::JSON";
+        }
+
+        // Fallback: any other shape — recursively serialize to JSON.
+        var text = de.ToString().Trim();
+        if (text.Contains("null", StringComparison.OrdinalIgnoreCase))
+            return "NULL";
+        return $"'{SerializeDynamicJson(child).Replace("'", "''")}'::JSON";
     }
 
-    private static bool IsScalarJsonValue(Expression e) =>
-        e is LiteralExpression ||
-        (e is PrefixUnaryExpression pu && pu.Expression is LiteralExpression);
+    // Emit the SQL for one element of a top-level dynamic array (LIST_VALUE). Scalars pass through
+    // ConvertExpression (so 1 stays an INTEGER element, 'x' a VARCHAR element). Nested objects/arrays
+    // are serialized to JSON text so the LIST element is navigable JSON.
+    private string ConvertDynamicElementSql(Expression expr, string? leftAlias, string? rightAlias)
+    {
+        if (expr is JsonObjectExpression or JsonArrayExpression)
+        {
+            var json = SerializeDynamicJson(expr);
+            return $"'{json.Replace("'", "''")}'::JSON";
+        }
+        return ConvertExpression(expr, leftAlias, rightAlias);
+    }
 
-    /// <summary>Recursively serialize a dynamic literal's syntax to a JSON string (no SQL expressions),
-    /// handling nested objects, arrays, and scalar literals at every level.</summary>
-    private static string DynamicToJson(Expression expr)
+    // Recursively serialize a dynamic literal/object/array expression to a JSON text fragment
+    // (no SQL expressions). Handles nested objects and arrays so dynamic({"a":{"b":[1,2]}}) round-trips.
+    private static string SerializeDynamicJson(Expression expr)
     {
         switch (expr)
         {
@@ -356,26 +394,36 @@ internal class ExpressionSqlBuilder
             {
                 var pairs = Enumerable.Range(0, obj.Pairs.Count)
                     .Select(i => obj.Pairs[i].Element)
-                    .Select(p => $"{JsonString(p.Name.ValueText)}:{DynamicToJson(p.Value)}");
-                return "{" + string.Join(",", pairs) + "}";
+                    .Select(p =>
+                    {
+                        var key = p.Name.ValueText.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                        return $"\"{key}\":{SerializeDynamicJson(p.Value)}";
+                    });
+                return $"{{{string.Join(",", pairs)}}}";
             }
             case JsonArrayExpression arr:
-                return "[" + string.Join(",", arr.Values.Select(v => DynamicToJson(v.Element))) + "]";
-            case ParenthesizedExpression pe:
-                return DynamicToJson(pe.Expression);
-            case PrefixUnaryExpression pu when pu.Expression is LiteralExpression:
             {
-                var op = pu.Operator.Text;
-                return op + DynamicToJson(pu.Expression);
+                var items = arr.Values.Select(v => SerializeDynamicJson(v.Element));
+                return $"[{string.Join(",", items)}]";
             }
+            case ParenthesizedExpression pe:
+                return SerializeDynamicJson(pe.Expression);
+            case PrefixUnaryExpression pu when pu.Kind == SyntaxKind.UnaryMinusExpression:
+            {
+                var inner = SerializeDynamicJson(pu.Expression);
+                return inner.StartsWith("-", StringComparison.Ordinal) ? inner : $"-{inner}";
+            }
+            case PrefixUnaryExpression pu when pu.Kind == SyntaxKind.UnaryPlusExpression:
+                return SerializeDynamicJson(pu.Expression);
             case LiteralExpression lit:
-                return LiteralToJson(lit);
+                return SerializeDynamicLiteral(lit);
             default:
                 return "null";
         }
     }
 
-    private static string LiteralToJson(LiteralExpression lit)
+    // Serialize a single dynamic literal value as JSON-compatible text.
+    private static string SerializeDynamicLiteral(LiteralExpression lit)
     {
         if (lit.Kind == SyntaxKind.NullLiteralExpression) return "null";
         if (lit.Kind == SyntaxKind.BooleanLiteralExpression)
@@ -384,13 +432,14 @@ internal class ExpressionSqlBuilder
                 or SyntaxKind.RealLiteralExpression or SyntaxKind.DecimalLiteralExpression)
             return System.Convert.ToString(lit.LiteralValue, CultureInfo.InvariantCulture) ?? "null";
         if (lit.Kind == SyntaxKind.StringLiteralExpression && lit.LiteralValue is string sv)
-            return JsonString(sv);
-        // Timespan, datetime, or anything else: render as a JSON string of the raw text.
-        return JsonString(lit.ToString().Trim().Trim('"', '\''));
+        {
+            var escaped = sv.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+            return $"\"{escaped}\"";
+        }
+        // Timespan, DateTime, or any other literal: wrap raw text as JSON string
+        var raw = lit.ToString().Trim().Trim('"', '\'');
+        return $"\"{raw.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
     }
-
-    private static string JsonString(string s) =>
-        "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
     private static readonly HashSet<string> DuckDbReservedWords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1150,7 +1199,12 @@ internal class ExpressionSqlBuilder
 
         if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dt))
         {
-            return $"TIMESTAMP '{dt:yyyy-MM-dd HH:mm:ss}'";
+            // Preserve sub-second precision (DuckDB TIMESTAMP is microsecond) — formatting as
+            // 'HH:mm:ss' alone silently truncated datetime(...123) to whole seconds, breaking
+            // format_datetime(..., 'fff') and any sub-second comparison.
+            return dt.Ticks % TimeSpan.TicksPerSecond == 0
+                ? $"TIMESTAMP '{dt:yyyy-MM-dd HH:mm:ss}'"
+                : $"TIMESTAMP '{dt:yyyy-MM-dd HH:mm:ss.ffffff}'";
         }
         return $"TIMESTAMP '{text}'";
     }
