@@ -51,6 +51,24 @@ public class BugFixTests
     }
 
     [Fact]
+    public void Sort_NamedExpression_DoesNotEmitAliasInOrderBy()
+    {
+        var converter = new KqlToSqlConverter();
+        var kql = "StormEvents | summarize count() by EventType | order by c = count_ | render columnchart";
+        var sql = converter.Convert(kql);
+
+        Assert.Equal("SELECT * FROM (SELECT EventType, COUNT(*) AS count_ FROM StormEvents GROUP BY ALL) ORDER BY count_ DESC", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.False(string.IsNullOrWhiteSpace(reader.GetString(0)));
+        Assert.True(reader.GetInt64(1) > 0);
+    }
+
+    [Fact]
     public void Extend_SubtractExpression()
     {
         var converter = new KqlToSqlConverter();
