@@ -276,13 +276,13 @@ internal class TabularHandlers : OperatorHandlerBase
         {
             if (se.Element is OrderedExpression oe)
             {
-                var expr = Expr.ConvertExpression(oe.Expression);
+                var expr = ConvertOrderExpression(oe.Expression);
                 var dir = oe.Ordering?.ToString().Trim().ToUpperInvariant() ?? "ASC";
                 orderings.Add($"{expr} {dir}");
             }
             else
             {
-                var expr = Expr.ConvertExpression(se.Element);
+                var expr = ConvertOrderExpression(se.Element);
                 orderings.Add($"{expr} DESC");
             }
         }
@@ -432,13 +432,13 @@ if (leftIsTimespan || rightIsTimespan) return true;
         string order;
         if (top.ByExpression is OrderedExpression oe)
         {
-            var expr = Expr.ConvertExpression(oe.Expression);
+            var expr = ConvertOrderExpression(oe.Expression);
             var dir = oe.Ordering?.ToString().Trim().ToUpperInvariant() ?? "DESC";
             order = $"{expr} {dir}";
         }
         else
         {
-            var expr = Expr.ConvertExpression(top.ByExpression);
+            var expr = ConvertOrderExpression(top.ByExpression);
             order = $"{expr} DESC";
         }
 
@@ -451,6 +451,11 @@ if (leftIsTimespan || rightIsTimespan) return true;
             return $"SELECT * FROM ({leftSql}) ORDER BY {order} LIMIT {count}";
         return $"{leftSql} ORDER BY {order} LIMIT {count}";
     }
+
+    private string ConvertOrderExpression(Expression expression)
+        => expression is SimpleNamedExpression sne
+            ? Expr.ConvertExpression(sne.Expression)
+            : Expr.ConvertExpression(expression);
 
     internal string ApplyCount(string leftSql, CountOperator count)
         => ReplaceSelectStar(leftSql, "COUNT(*) AS Count");
