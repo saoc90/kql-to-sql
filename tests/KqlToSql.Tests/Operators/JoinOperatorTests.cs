@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using DuckDB.NET.Data;
 using KqlToSql;
 using Xunit;
@@ -15,7 +16,7 @@ public class JoinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "X | join Y on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* RENAME (\"Key\" AS Key1) FROM (SELECT * FROM X QUALIFY ROW_NUMBER() OVER (PARTITION BY \"Key\") = 1) AS L INNER JOIN Y AS R ON L.\"Key\" = R.\"Key\"", sql);
+        Assert.Equal("SELECT L.*, R.* RENAME (\"Key\" AS Key1) FROM (SELECT * FROM X QUALIFY ROW_NUMBER() OVER (PARTITION BY \"Key\") = 1) AS L INNER JOIN Y AS R ON L.\"Key\" IS NOT DISTINCT FROM R.\"Key\"", sql);
 
         using var conn = new DuckDBConnection("DataSource=:memory:");
         conn.Open();
@@ -42,7 +43,7 @@ public class JoinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "X | join kind=leftouter Y on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* RENAME (\"Key\" AS Key1) FROM X AS L LEFT OUTER JOIN Y AS R ON L.\"Key\" = R.\"Key\"", sql);
+        Assert.Equal("SELECT L.*, R.* RENAME (\"Key\" AS Key1) FROM X AS L LEFT OUTER JOIN Y AS R ON L.\"Key\" IS NOT DISTINCT FROM R.\"Key\"", sql);
 
         using var conn = new DuckDBConnection("DataSource=:memory:");
         conn.Open();
@@ -76,7 +77,7 @@ public class JoinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "X | join kind=rightouter Y on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* RENAME (\"Key\" AS Key1) FROM X AS L RIGHT OUTER JOIN Y AS R ON L.\"Key\" = R.\"Key\"", sql);
+        Assert.Equal("SELECT L.*, R.* RENAME (\"Key\" AS Key1) FROM X AS L RIGHT OUTER JOIN Y AS R ON L.\"Key\" IS NOT DISTINCT FROM R.\"Key\"", sql);
 
         using var conn = new DuckDBConnection("DataSource=:memory:");
         conn.Open();
@@ -110,7 +111,7 @@ public class JoinOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "X | join kind=fullouter Y on Key";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT L.*, R.* RENAME (\"Key\" AS Key1) FROM X AS L FULL OUTER JOIN Y AS R ON L.\"Key\" = R.\"Key\"", sql);
+        Assert.Equal("SELECT L.*, R.* RENAME (\"Key\" AS Key1) FROM X AS L FULL OUTER JOIN Y AS R ON L.\"Key\" IS NOT DISTINCT FROM R.\"Key\"", sql);
 
         using var conn = new DuckDBConnection("DataSource=:memory:");
         conn.Open();
@@ -237,6 +238,97 @@ public class JoinOperatorTests
         // after project-away), and that the join clause is present.
         Assert.Contains("LEFT OUTER JOIN", sql);
         Assert.DoesNotContain("EXCLUDE (\"Timestamp\"", sql);
+    }
+
+    [Fact]
+    public void Join_DatatableKeyCollision_RightSharedColumn_Suffixed_With_1()
+    {
+        // Bug: when both sides share a non-join column name (v), Kusto renames the RIGHT copy to v1.
+        // The datatable schema must be enumerable so the suffix is applied (previously fell back to
+        // a key-only RENAME that left an unbound `v1` / duplicate `v`). Oracle: cols k,v,k1,v1.
+        DuckDbSetup.EnsureDuckDb();
+        var converter = new KqlToSqlConverter();
+        var kql = "let L=datatable(k:long,v:long)[1,10,2,20,3,30]; let R=datatable(k:long,v:long)[1,100,2,200]; L | join kind=leftouter R on k";
+        var sql = converter.Convert(kql);
+        Assert.Contains("R.v AS v1", sql);
+
+        using var conn = new DuckDBConnection("DataSource=:memory:");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        Assert.Equal(new[] { "k", "v", "k1", "v1" },
+            Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToArray());
+        var rows = new List<(long k, long v, long? k1, long? v1)>();
+        while (reader.Read())
+            rows.Add((reader.GetInt64(0), reader.GetInt64(1),
+                reader.IsDBNull(2) ? (long?)null : reader.GetInt64(2),
+                reader.IsDBNull(3) ? (long?)null : reader.GetInt64(3)));
+        Assert.Equal(3, rows.Count);
+        Assert.Contains(rows, r => r.k == 1 && r.v == 10 && r.k1 == 1 && r.v1 == 100);
+        Assert.Contains(rows, r => r.k == 2 && r.v == 20 && r.k1 == 2 && r.v1 == 200);
+        Assert.Contains(rows, r => r.k == 3 && r.v == 30 && r.k1 == null && r.v1 == null);
+    }
+
+    [Fact]
+    public void Join_FullOuter_StringColumns_PaddedWith_EmptyString_NumericsStayNull()
+    {
+        // Bug: Kusto fills unmatched STRING cells with '' (not NULL) on the nullable side of an
+        // outer join; numeric/other types stay NULL. Verified against the oracle.
+        DuckDbSetup.EnsureDuckDb();
+        var converter = new KqlToSqlConverter();
+        var kql = "let L=datatable(k:long,lv:string)[1,\"a\",2,\"b\",3,\"c\"]; let R=datatable(k:long,rv:string)[2,\"x\",4,\"y\"]; L | join kind=fullouter R on k";
+        var sql = converter.Convert(kql);
+        Assert.Contains("COALESCE(L.lv, '')", sql);
+        Assert.Contains("COALESCE(R.rv, '')", sql);
+
+        using var conn = new DuckDBConnection("DataSource=:memory:");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<(long? k, string lv, long? k1, string rv)>();
+        while (reader.Read())
+            rows.Add((
+                reader.IsDBNull(0) ? (long?)null : reader.GetInt64(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? (long?)null : reader.GetInt64(2),
+                reader.GetString(3)));
+        Assert.Equal(4, rows.Count);
+        // left-only rows: rv padded to '' but the long key k1 stays NULL
+        Assert.Contains(rows, r => r.k == 1 && r.lv == "a" && r.k1 == null && r.rv == "");
+        Assert.Contains(rows, r => r.k == 3 && r.lv == "c" && r.k1 == null && r.rv == "");
+        // matched row
+        Assert.Contains(rows, r => r.k == 2 && r.lv == "b" && r.k1 == 2 && r.rv == "x");
+        // right-only row: lv padded to '' but the long key k stays NULL
+        Assert.Contains(rows, r => r.k == null && r.lv == "" && r.k1 == 4 && r.rv == "y");
+    }
+
+    [Fact]
+    public void Join_NullKeys_Match_NullEqualsNull()
+    {
+        // Bug: Kusto treats null == null as equal in join keys; SQL `=` does not. The translator
+        // must emit IS NOT DISTINCT FROM so a null key on both sides joins.
+        DuckDbSetup.EnsureDuckDb();
+        var converter = new KqlToSqlConverter();
+        var kql = "let L=datatable(k:long,v:long)[1,10,long(null),20]; let R=datatable(k:long,w:long)[long(null),200,3,300]; L | join kind=inner R on k";
+        var sql = converter.Convert(kql);
+        Assert.Contains("IS NOT DISTINCT FROM", sql);
+
+        using var conn = new DuckDBConnection("DataSource=:memory:");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<(long? k, long v, long? k1, long w)>();
+        while (reader.Read())
+            rows.Add((
+                reader.IsDBNull(0) ? (long?)null : reader.GetInt64(0),
+                reader.GetInt64(1),
+                reader.IsDBNull(2) ? (long?)null : reader.GetInt64(2),
+                reader.GetInt64(3)));
+        Assert.Single(rows);
+        Assert.Contains(rows, r => r.k == null && r.v == 20 && r.k1 == null && r.w == 200);
     }
 
     private static void CreateJoinTables(DuckDBConnection conn)

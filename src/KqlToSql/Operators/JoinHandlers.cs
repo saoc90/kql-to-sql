@@ -47,13 +47,15 @@ internal class JoinHandlers : OperatorHandlerBase
             {
                 var name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.SimpleName);
                 leftKeys.Add(name);
-                conditions.Add($"L.{name} = R.{name}");
+                // KQL join keys treat null == null as equal; SQL `=` does not, so use the
+                // null-safe comparison (IS NOT DISTINCT FROM) to match the Kusto oracle.
+                conditions.Add($"L.{name} IS NOT DISTINCT FROM R.{name}");
             }
             else if (expr is BinaryExpression be && be.Kind == SyntaxKind.EqualExpression)
             {
                 var left = Expr.ConvertExpression(be.Left, "L", "R");
                 var right = Expr.ConvertExpression(be.Right, "L", "R");
-                conditions.Add($"{left} = {right}");
+                conditions.Add($"{left} IS NOT DISTINCT FROM {right}");
                 leftKeys.Add(ExpressionSqlBuilder.QuoteIdentifierIfReserved(ExpressionSqlBuilder.ExtractLeftKey(be.Left)));
             }
             else
@@ -88,7 +90,14 @@ internal class JoinHandlers : OperatorHandlerBase
         var leftCols = TryEnumerateColumns(leftExpression);
         var rightCols = TryEnumerateColumns(join.Expression);
         var keySet = new HashSet<string>(leftKeys.Select(UnquoteIdent), StringComparer.OrdinalIgnoreCase);
-        var selectClause = BuildJoinSelectClause(leftCols, rightCols, keySet);
+        // Outer joins pad the unmatched side's STRING columns with '' (not NULL) — verified
+        // against the Kusto oracle (only string-typed columns are padded; numerics stay NULL).
+        // LEFT→right side nullable, RIGHT→left side nullable, FULL→both nullable, INNER→neither.
+        bool leftNullable = kind is "rightouter" or "fullouter";
+        bool rightNullable = kind is "leftouter" or "fullouter";
+        var leftStr = leftNullable ? TryEnumerateStringColumns(leftExpression) : null;
+        var rightStr = rightNullable ? TryEnumerateStringColumns(join.Expression) : null;
+        var selectClause = BuildJoinSelectClause(leftCols, rightCols, keySet, leftStr, rightStr);
         if (selectClause == null)
         {
             // Schema not enumerable on one side — rename the right-side join keys to `<key>1`
@@ -177,13 +186,14 @@ internal class JoinHandlers : OperatorHandlerBase
                 var name = ExpressionSqlBuilder.QuoteIdentifierIfReserved(nr.SimpleName);
                 leftKeys.Add(name);
                 rightKeys.Add(name);
-                conditions.Add($"L.{name} = R.{name}");
+                // Null-safe key match: Kusto treats null == null as equal (see ApplyJoin).
+                conditions.Add($"L.{name} IS NOT DISTINCT FROM R.{name}");
             }
             else if (expr is BinaryExpression be && be.Kind == SyntaxKind.EqualExpression)
             {
                 var left = Expr.ConvertExpression(be.Left, "L", "R");
                 var right = Expr.ConvertExpression(be.Right, "L", "R");
-                conditions.Add($"{left} = {right}");
+                conditions.Add($"{left} IS NOT DISTINCT FROM {right}");
                 leftKeys.Add(ExpressionSqlBuilder.QuoteIdentifierIfReserved(ExpressionSqlBuilder.ExtractLeftKey(be.Left)));
                 rightKeys.Add(ExpressionSqlBuilder.QuoteIdentifierIfReserved(ExpressionSqlBuilder.ExtractRightKey(be.Right)));
             }
@@ -198,7 +208,12 @@ internal class JoinHandlers : OperatorHandlerBase
         var leftCols = TryEnumerateColumns(leftExpression);
         var rightCols = TryEnumerateColumns(lookup.Expression);
         var rightKeySet = new HashSet<string>(rightKeys.Select(UnquoteIdent), StringComparer.OrdinalIgnoreCase);
-        var selectClause = BuildLookupSelectClause(leftCols, rightCols, rightKeySet);
+        // lookup defaults to LEFT OUTER JOIN: unmatched right rows pad STRING columns with ''
+        // (not NULL), matching the Kusto oracle. kind=inner never pads.
+        var rightStr = joinType.StartsWith("LEFT", StringComparison.OrdinalIgnoreCase)
+            ? TryEnumerateStringColumns(lookup.Expression)
+            : null;
+        var selectClause = BuildLookupSelectClause(leftCols, rightCols, rightKeySet, rightStr);
         if (selectClause == null)
         {
             // Drop the RIGHT-side key columns (not the left keys): `R.* EXCLUDE (<rightKeys>)`.
@@ -211,50 +226,95 @@ internal class JoinHandlers : OperatorHandlerBase
         return $"SELECT {selectClause} FROM {UnwrapFrom(leftSql)} AS L {joinType} {UnwrapFrom(rightSql)} AS R ON {string.Join(" AND ", conditions)}";
     }
 
+    /// <summary>One operand of a union, paired with the AST expression it came from (for type/column
+    /// enumeration) and the source label Kusto assigns it. <c>WildcardName</c> is set when the operand
+    /// is a member expanded from a wildcard table-set pattern (which Kusto labels by table name, not
+    /// positionally).</summary>
+    private readonly struct UnionOperand
+    {
+        public UnionOperand(string sql, Expression? expr, string? wildcardName)
+        { Sql = sql; Expr = expr; WildcardName = wildcardName; }
+        public string Sql { get; }
+        public Expression? Expr { get; }
+        public string? WildcardName { get; }
+    }
+
     internal string ApplyUnion(string leftSql, UnionOperator union, Expression? leftExpression)
     {
-        var withSourceParam = union.Parameters.FirstOrDefault(p => p.Name.SimpleName.Equals("withsource", StringComparison.OrdinalIgnoreCase));
-        string? sourceColumn = withSourceParam != null ? withSourceParam.Expression.ToString().Trim() : null;
-
-        var parts = new List<string>();
-        if (sourceColumn != null)
+        var operands = new List<UnionOperand>
         {
-            var name = leftExpression?.ToString().Trim() ?? "";
-            parts.Add($"(SELECT *, '{name}' AS {sourceColumn} FROM ({leftSql}))");
-        }
-        else
-        {
-            parts.Add($"({leftSql})");
-        }
-
+            new UnionOperand(leftSql, leftExpression, null)
+        };
         foreach (var expr in union.Expressions)
-            AppendUnionExpression(expr.Element, sourceColumn, parts);
-
-        // Use DuckDB 'UNION ALL BY NAME' so column sets can differ — missing columns fill NULL.
-        // KQL's union semantics are by-name, not positional.
-        return string.Join(" UNION ALL BY NAME ", parts);
+            CollectUnionOperands(expr.Element, operands);
+        return BuildUnion(union, operands);
     }
 
     internal string ConvertUnion(UnionOperator union)
     {
+        var operands = new List<UnionOperand>();
+        foreach (var expr in union.Expressions)
+            CollectUnionOperands(expr.Element, operands);
+        return BuildUnion(union, operands);
+    }
+
+    /// <summary>Emits the UNION ALL of all operands. Each operand row is labelled per Kusto's
+    /// <c>withsource</c> rule (positional <c>union_arg{N}</c> for ordinary operands; the table name
+    /// for wildcard-expanded members). STRING columns that are absent from an operand but present
+    /// (as strings) in another are padded with <c>''</c> — Kusto fills missing string cells with the
+    /// empty string, not NULL (verified against the oracle); non-string missing cells stay NULL via
+    /// DuckDB's UNION ALL BY NAME.</summary>
+    private string BuildUnion(UnionOperator union, List<UnionOperand> operands)
+    {
         var withSourceParam = union.Parameters.FirstOrDefault(p => p.Name.SimpleName.Equals("withsource", StringComparison.OrdinalIgnoreCase));
         string? sourceColumn = withSourceParam != null ? withSourceParam.Expression.ToString().Trim() : null;
 
+        // Global string-column set and full column set across operands (only where enumerable).
+        var globalStringCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var perOperandCols = new List<HashSet<string>?>();
+        foreach (var op in operands)
+        {
+            var cols = op.Expr != null ? TryEnumerateColumns(op.Expr) : null;
+            var strs = op.Expr != null ? TryEnumerateStringColumns(op.Expr) : null;
+            perOperandCols.Add(cols != null ? new HashSet<string>(cols, StringComparer.OrdinalIgnoreCase) : null);
+            if (strs != null) foreach (var s in strs) globalStringCols.Add(s);
+        }
+
         var parts = new List<string>();
-        foreach (var expr in union.Expressions)
-            AppendUnionExpression(expr.Element, sourceColumn, parts);
+        for (int i = 0; i < operands.Count; i++)
+        {
+            var op = operands[i];
+            var label = op.WildcardName ?? $"union_arg{i}";
+
+            // Pad string columns this operand lacks but that exist (as strings) elsewhere → '' AS col.
+            var pads = new List<string>();
+            var own = perOperandCols[i];
+            if (own != null)
+                foreach (var sc in globalStringCols)
+                    if (!own.Contains(sc))
+                        pads.Add($"'' AS {ExpressionSqlBuilder.QuoteIdentifierIfReserved(sc)}");
+
+            var selectExtras = string.Join("", pads.Select(p => ", " + p));
+            if (sourceColumn != null)
+                selectExtras += $", '{label}' AS {sourceColumn}";
+
+            var sql = selectExtras.Length > 0
+                ? $"SELECT *{selectExtras} FROM ({op.Sql})"
+                : op.Sql;
+            parts.Add($"({sql})");
+        }
 
         // Use DuckDB 'UNION ALL BY NAME' so column sets can differ — missing columns fill NULL.
         // KQL's union semantics are by-name, not positional.
         return string.Join(" UNION ALL BY NAME ", parts);
     }
 
-    /// <summary>Converts one `union` operand into one-or-more SQL parts. A wildcard table-set
-    /// reference (`union Table_States*`, parsed as a NameReference whose Name is a WildcardedName)
-    /// is expanded — verified against live Kusto — to a UNION ALL of every in-scope let-defined
-    /// view whose name matches the pattern (case-sensitive, `*` = zero-or-more chars). A plain
-    /// (non-wildcard) operand keeps the original single-part behavior.</summary>
-    private void AppendUnionExpression(Expression element, string? sourceColumn, List<string> parts)
+    /// <summary>Flattens one `union` operand into the operand list. A wildcard table-set reference
+    /// (`union Table_States*`, parsed as a NameReference whose Name is a WildcardedName) expands —
+    /// verified against live Kusto — to every in-scope let-defined view whose name matches the
+    /// pattern (case-sensitive, `*` = zero-or-more chars), each labelled by its name. A plain operand
+    /// becomes a single positionally-labelled entry.</summary>
+    private void CollectUnionOperands(Expression element, List<UnionOperand> operands)
     {
         if (element is NameReference nr && nr.Name is WildcardedName wild)
         {
@@ -263,21 +323,13 @@ internal class JoinHandlers : OperatorHandlerBase
                 if (!WildcardMatches(wild.SimpleName, cteName))
                     continue;
                 var quoted = ExpressionSqlBuilder.QuoteIdentifierIfReserved(cteName);
-                var matchSql = $"SELECT * FROM {quoted}";
-                if (sourceColumn != null)
-                    matchSql = $"SELECT *, '{cteName}' AS {sourceColumn} FROM ({matchSql})";
-                parts.Add($"({matchSql})");
+                Expression? cteExpr = Converter.TryGetCteExpression(cteName, out var e) ? e : null;
+                operands.Add(new UnionOperand($"SELECT * FROM {quoted}", cteExpr, cteName));
             }
             return;
         }
 
-        var sql = Converter.ConvertNode(element);
-        if (sourceColumn != null)
-        {
-            var name = element.ToString().Trim();
-            sql = $"SELECT *, '{name}' AS {sourceColumn} FROM ({sql})";
-        }
-        parts.Add($"({sql})");
+        operands.Add(new UnionOperand(Converter.ConvertNode(element), element, null));
     }
 
     /// <summary>Glob match for a Kusto wildcard table pattern. `*` matches zero-or-more characters;
@@ -323,14 +375,33 @@ internal class JoinHandlers : OperatorHandlerBase
         return id;
     }
 
-    private string? BuildJoinSelectClause(IReadOnlyList<string>? leftCols, IReadOnlyList<string>? rightCols, HashSet<string> keys)
+    private string? BuildJoinSelectClause(IReadOnlyList<string>? leftCols, IReadOnlyList<string>? rightCols,
+        HashSet<string> keys, HashSet<string>? leftStringCols = null, HashSet<string>? rightStringCols = null)
     {
         if (leftCols == null || rightCols == null) return null;
         var leftSet = new HashSet<string>(leftCols, StringComparer.OrdinalIgnoreCase);
         // Live Kusto: every join kind (inner, innerunique, leftouter, rightouter, fullouter)
         // keeps both sides' copy of the join key; the right-side copy is suffixed `1` just
         // like any other duplicate column.
-        var parts = new List<string> { "L.*" };
+        // On an outer join, unmatched STRING cells of the nullable side become '' (not NULL);
+        // wrap each known-string column of that side in COALESCE(..., '').
+        // Keep the cheap `L.*` form unless the left side is the nullable one (right/full outer)
+        // and has known string columns to pad — only then enumerate the left columns explicitly.
+        var parts = new List<string>();
+        if (leftStringCols != null && leftStringCols.Count > 0)
+        {
+            foreach (var lc in leftCols)
+            {
+                var quoted = ExpressionSqlBuilder.QuoteIdentifierIfReserved(lc);
+                parts.Add(leftStringCols.Contains(lc)
+                    ? $"COALESCE(L.{quoted}, '') AS {quoted}"
+                    : $"L.{quoted}");
+            }
+        }
+        else
+        {
+            parts.Add("L.*");
+        }
         // `used` grows as we alias, so a right column colliding with the left set (or with an
         // already-emitted suffix) takes the NEXT free index. This matches KQL across a chain of
         // joins: a `Ts` column joined 4 times becomes Ts1, Ts2, Ts3, Ts4 (not Ts1 four times).
@@ -338,16 +409,18 @@ internal class JoinHandlers : OperatorHandlerBase
         foreach (var rc in rightCols)
         {
             var quoted = ExpressionSqlBuilder.QuoteIdentifierIfReserved(rc);
+            var pad = rightStringCols != null && rightStringCols.Contains(rc);
+            var rhs = pad ? $"COALESCE(R.{quoted}, '')" : $"R.{quoted}";
             if (used.Contains(rc))
             {
                 var name = NextFreeSuffix(rc, used);
                 used.Add(name);
-                parts.Add($"R.{quoted} AS {ExpressionSqlBuilder.QuoteIdentifierIfReserved(name)}");
+                parts.Add($"{rhs} AS {ExpressionSqlBuilder.QuoteIdentifierIfReserved(name)}");
             }
             else
             {
                 used.Add(rc);
-                parts.Add($"R.{quoted}");
+                parts.Add(pad ? $"{rhs} AS {quoted}" : rhs);
             }
         }
         return string.Join(", ", parts);
@@ -367,7 +440,8 @@ internal class JoinHandlers : OperatorHandlerBase
     /// Remaining right columns that collide with the left set are suffixed Col1→Col11, matching
     /// Kusto. Returns null when either side's schema is unknown so the caller falls back to
     /// `R.* EXCLUDE (rightKeys)`.</summary>
-    private string? BuildLookupSelectClause(IReadOnlyList<string>? leftCols, IReadOnlyList<string>? rightCols, HashSet<string> rightKeys)
+    private string? BuildLookupSelectClause(IReadOnlyList<string>? leftCols, IReadOnlyList<string>? rightCols,
+        HashSet<string> rightKeys, HashSet<string>? rightStringCols = null)
     {
         if (leftCols == null || rightCols == null) return null;
         var parts = new List<string> { "L.*" };
@@ -376,16 +450,18 @@ internal class JoinHandlers : OperatorHandlerBase
         {
             if (rightKeys.Contains(rc)) continue; // right-side join key — dropped by lookup
             var quoted = ExpressionSqlBuilder.QuoteIdentifierIfReserved(rc);
+            var pad = rightStringCols != null && rightStringCols.Contains(rc);
+            var rhs = pad ? $"COALESCE(R.{quoted}, '')" : $"R.{quoted}";
             if (used.Contains(rc))
             {
                 var name = NextFreeSuffix(rc, used);
                 used.Add(name);
-                parts.Add($"R.{quoted} AS {ExpressionSqlBuilder.QuoteIdentifierIfReserved(name)}");
+                parts.Add($"{rhs} AS {ExpressionSqlBuilder.QuoteIdentifierIfReserved(name)}");
             }
             else
             {
                 used.Add(rc);
-                parts.Add($"R.{quoted}");
+                parts.Add(pad ? $"{rhs} AS {quoted}" : rhs);
             }
         }
         return string.Join(", ", parts);
@@ -412,6 +488,215 @@ internal class JoinHandlers : OperatorHandlerBase
         return EnumerateColumns(expr, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
     }
 
+    // ─── Column TYPE tracking for outer-join / union string padding ──────────────
+    // Kusto fills unmatched cells of STRING columns on the nullable side of an outer join
+    // (and missing STRING columns in a union) with '' rather than NULL. To replicate this we
+    // need to know which output columns are string-typed. We can determine this exactly for
+    // datatable schemas and propagate it through the pass-through / projection operators that
+    // make up the join/union family. Columns whose type we cannot determine are simply omitted
+    // from the result set (and therefore not padded), which preserves the prior NULL behavior
+    // for unknown schemas rather than risking an incorrect '' on a non-string column.
+
+    private static readonly HashSet<string> StringTypeTokens =
+        new(StringComparer.OrdinalIgnoreCase) { "string" };
+
+    private HashSet<string>? TryEnumerateStringColumns(Expression? expr)
+    {
+        if (expr == null) return null;
+        var map = EnumerateColumnTypes(expr, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        if (map == null) return null;
+        return new HashSet<string>(
+            map.Where(kv => kv.Value).Select(kv => kv.Key),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Maps each enumerable output column name → true when it is known to be string-typed.
+    /// Returns null when the shape is unknown. Columns whose type is indeterminate are recorded as
+    /// false (treated as non-string → not padded).</summary>
+    private Dictionary<string, bool>? EnumerateColumnTypes(Expression expr, HashSet<string> visiting)
+    {
+        switch (expr)
+        {
+            case ParenthesizedExpression pe:
+                return EnumerateColumnTypes(pe.Expression, visiting);
+            case MaterializeExpression me:
+                return EnumerateColumnTypes(me.Expression, visiting);
+            case DataTableExpression dt:
+                return DataTableColumnTypes(dt);
+            case PipeExpression pipe:
+            {
+                var input = EnumerateColumnTypes(pipe.Expression, visiting);
+                return ApplyOperatorToTypes(input, pipe.Operator);
+            }
+            case NameReference nr:
+            {
+                var name = nr.SimpleName;
+                if (visiting.Contains(name)) return null;
+                if (Converter.TryGetCteExpression(name, out var cteExpr))
+                {
+                    visiting.Add(name);
+                    try { return EnumerateColumnTypes(cteExpr, visiting); }
+                    finally { visiting.Remove(name); }
+                }
+                return null; // base / well-known table — types unknown here
+            }
+            case FunctionCallExpression fce:
+            {
+                var fname = fce.Name.SimpleName;
+                if (visiting.Contains(fname)) return null;
+                if (Converter.TryGetUserFunctionBody(fname, out var body) && body.Expression != null)
+                {
+                    visiting.Add(fname);
+                    try { return EnumerateColumnTypes(body.Expression, visiting); }
+                    finally { visiting.Remove(fname); }
+                }
+                return null;
+            }
+            case FunctionDeclaration funcDecl when funcDecl.Body?.Expression != null:
+                return EnumerateColumnTypes(funcDecl.Body.Expression, visiting);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>Propagates string-ness across the operators that show up in the join/union family.
+    /// Only operators whose effect on column types is known are handled; anything else returns null
+    /// (unknown shape → caller skips padding).</summary>
+    private Dictionary<string, bool>? ApplyOperatorToTypes(Dictionary<string, bool>? input, QueryOperator op)
+    {
+        switch (op)
+        {
+            case FilterOperator:
+            case SortOperator:
+            case TakeOperator:
+            case TopOperator:
+            case SerializeOperator:
+            case AsOperator:
+                return input;
+            case ProjectOperator proj:
+            {
+                var result = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+                foreach (var se in proj.Expressions)
+                {
+                    if (se.Element is NameReference pnr)
+                        result[pnr.SimpleName] = input != null && input.TryGetValue(pnr.SimpleName, out var b) && b;
+                    else if (se.Element is SimpleNamedExpression sne)
+                        result[sne.Name.SimpleName] = IsStringExpression(sne.Expression, input);
+                    else
+                        return null;
+                }
+                return result;
+            }
+            case ProjectKeepOperator keep:
+            {
+                if (input == null) return null;
+                var result = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+                foreach (var se in keep.Expressions)
+                {
+                    if (se.Element is NameReference knr)
+                        result[knr.SimpleName] = input.TryGetValue(knr.SimpleName, out var b) && b;
+                    else return null;
+                }
+                return result;
+            }
+            case ProjectAwayOperator away:
+            {
+                if (input == null) return null;
+                var rm = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var se in away.Expressions) rm.Add(se.Element.ToString().Trim());
+                return input.Where(kv => !rm.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+            }
+            case ProjectRenameOperator ren:
+            {
+                if (input == null) return null;
+                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var se in ren.Expressions)
+                    if (se.Element is SimpleNamedExpression sne && sne.Expression is NameReference old)
+                        map[old.SimpleName] = sne.Name.SimpleName;
+                var result = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in input)
+                    result[map.TryGetValue(kv.Key, out var n) ? n : kv.Key] = kv.Value;
+                return result;
+            }
+            case ExtendOperator ext:
+            {
+                if (input == null) return null;
+                var result = new Dictionary<string, bool>(input, StringComparer.OrdinalIgnoreCase);
+                foreach (var se in ext.Expressions)
+                    if (se.Element is SimpleNamedExpression sne)
+                        result[sne.Name.SimpleName] = IsStringExpression(sne.Expression, input);
+                return result;
+            }
+            case DistinctOperator dist:
+            {
+                if (dist.Expressions.Count == 0) return input;
+                if (input == null) return null;
+                var result = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+                foreach (var se in dist.Expressions)
+                {
+                    if (se.Element is NameReference dnr)
+                        result[dnr.SimpleName] = input.TryGetValue(dnr.SimpleName, out var b) && b;
+                    else if (se.Element is SimpleNamedExpression dsne)
+                        result[dsne.Name.SimpleName] = IsStringExpression(dsne.Expression, input);
+                    else return null;
+                }
+                return result;
+            }
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>Best-effort: is this projected/extended expression string-typed? True only for forms
+    /// we can prove (string literal, a string-typed input column, or strcat/tostring/etc.).</summary>
+    private static bool IsStringExpression(Expression e, Dictionary<string, bool>? input)
+    {
+        switch (e)
+        {
+            case LiteralExpression lit:
+                return lit.Kind == SyntaxKind.StringLiteralExpression;
+            case ParenthesizedExpression pe:
+                return IsStringExpression(pe.Expression, input);
+            case NameReference nr:
+                return input != null && input.TryGetValue(nr.SimpleName, out var b) && b;
+            case FunctionCallExpression fce:
+            {
+                var n = fce.Name.SimpleName;
+                return n.Equals("strcat", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("tostring", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("toupper", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("tolower", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("substring", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("replace_string", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("trim", StringComparison.OrdinalIgnoreCase);
+            }
+            default:
+                return false;
+        }
+    }
+
+    private static List<string> DataTableColumnNames(DataTableExpression dt)
+    {
+        var names = new List<string>();
+        foreach (var col in dt.Schema.Columns)
+            if (col.Element is NameAndTypeDeclaration nat)
+                names.Add(nat.Name.SimpleName);
+        return names;
+    }
+
+    private static Dictionary<string, bool> DataTableColumnTypes(DataTableExpression dt)
+    {
+        var map = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var col in dt.Schema.Columns)
+            if (col.Element is NameAndTypeDeclaration nat)
+            {
+                var typeName = nat.Type?.ToString().Trim() ?? "";
+                map[nat.Name.SimpleName] = StringTypeTokens.Contains(typeName);
+            }
+        return map;
+    }
+
     private IReadOnlyList<string>? EnumerateColumns(Expression expr, HashSet<string> visiting)
     {
         switch (expr)
@@ -425,6 +710,8 @@ internal class JoinHandlers : OperatorHandlerBase
                 var inputCols = EnumerateColumns(pipe.Expression, visiting);
                 return ApplyOperatorToCols(inputCols, pipe.Operator);
             }
+            case DataTableExpression dt:
+                return DataTableColumnNames(dt);
             case NameReference nr:
             {
                 var name = nr.SimpleName;

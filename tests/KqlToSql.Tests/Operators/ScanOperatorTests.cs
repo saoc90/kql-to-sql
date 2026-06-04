@@ -120,4 +120,148 @@ public class ScanOperatorTests
             )";
         Assert.Throws<NotSupportedException>(() => _converter.Convert(kql));
     }
+
+    // -----------------------------------------------------------------------------------------
+    // Bare (non-step-prefixed) declared references read the value WITHIN the current row only:
+    // they reset to the declared default each row and do NOT carry across rows. These previously
+    // emitted SQL that referenced the column before it was defined.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Bare_Reference_Resolves_To_Default_Not_Carried_State()
+    {
+        // `cum = cum + v` with a BARE `cum` is per-row: cum = default(0) + v = v (NOT a running sum).
+        var kql = @"datatable(t:long, v:long)[1,5, 2,0, 3,0, 4,7, 5,0]
+            | sort by t asc
+            | scan declare (cum:long=0) with (
+                step s: true => cum = cum + v;
+            )";
+        var sql = _converter.Convert(kql);
+
+        // The bare state reference must resolve to the declared default, not an unbound column.
+        Assert.Equal("SELECT *, (0) + v AS cum FROM (VALUES (CAST(1 AS BIGINT), CAST(5 AS BIGINT)), (CAST(2 AS BIGINT), CAST(0 AS BIGINT)), (CAST(3 AS BIGINT), CAST(0 AS BIGINT)), (CAST(4 AS BIGINT), CAST(7 AS BIGINT)), (CAST(5 AS BIGINT), CAST(0 AS BIGINT))) AS t(t, v) ORDER BY t ASC NULLS FIRST", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var results = new List<long>();
+        while (reader.Read()) results.Add(reader.GetInt64(2));
+        Assert.Equal(new long[] { 5, 0, 0, 7, 0 }, results); // == v, per-row
+    }
+
+    [Fact]
+    public void Bare_Reference_Running_Max_Idiom_Is_Per_Row_Clamp()
+    {
+        // `mx = iff(v > mx, v, mx)` with a BARE `mx` clamps each row at the default: max(v, 0).
+        var kql = @"datatable(t:long, v:long)[1,5, 2,3, 3,99, 4,7]
+            | sort by t asc
+            | scan declare (mx:long=0) with (
+                step s: true => mx = iff(v > mx, v, mx);
+            )";
+        var sql = _converter.Convert(kql);
+
+        Assert.Equal("SELECT *, CASE WHEN v > (0) THEN v ELSE (0) END AS mx FROM (VALUES (CAST(1 AS BIGINT), CAST(5 AS BIGINT)), (CAST(2 AS BIGINT), CAST(3 AS BIGINT)), (CAST(3 AS BIGINT), CAST(99 AS BIGINT)), (CAST(4 AS BIGINT), CAST(7 AS BIGINT))) AS t(t, v) ORDER BY t ASC NULLS FIRST", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var results = new List<long>();
+        while (reader.Read()) results.Add(reader.GetInt64(2));
+        Assert.Equal(new long[] { 5, 3, 99, 7 }, results); // max(v, 0) == v here
+    }
+
+    [Fact]
+    public void Bare_Reference_Ema_Idiom_Is_Per_Row()
+    {
+        // `ema = 0.5*v + 0.5*ema` with BARE `ema` is per-row: 0.5*v + 0.5*0 = 0.5*v.
+        var kql = @"datatable(t:long, v:real)[1,1.0, 2,2.0, 3,3.0, 4,4.0]
+            | sort by t asc
+            | scan declare (ema:real=0.0) with (
+                step s: true => ema = 0.5*v + 0.5*ema;
+            )";
+        var sql = _converter.Convert(kql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var results = new List<double>();
+        while (reader.Read()) results.Add(Convert.ToDouble(reader.GetValue(2)));
+        Assert.Equal(new[] { 0.5, 1.0, 1.5, 2.0 }, results);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Step-prefixed references (`s.col`) read the PREVIOUS row's value — true carried state.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Prefixed_Reference_Running_Max_Uses_Window()
+    {
+        // `mx = iff(v > s.mx, v, s.mx)` is a running max → MAX(...) OVER (...) clamped by the seed.
+        var kql = @"datatable(t:long, v:long)[1,5, 2,3, 3,99, 4,7]
+            | sort by t asc
+            | scan declare (mx:long=0) with (
+                step s: true => mx = iff(v > s.mx, v, s.mx);
+            )";
+        var sql = _converter.Convert(kql);
+
+        Assert.Contains("GREATEST(MAX(v) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 0)", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var results = new List<long>();
+        while (reader.Read()) results.Add(reader.GetInt64(2));
+        Assert.Equal(new long[] { 5, 5, 99, 99 }, results); // running max
+    }
+
+    [Fact]
+    public void Prefixed_Reference_Recurrence_Uses_Recursive_Cte()
+    {
+        // A genuine recurrence `ema = 0.5*v + 0.5*s.ema` is not a single window aggregate →
+        // recursive CTE carrying the declared (DOUBLE) state row by row.
+        var kql = @"datatable(t:long, v:real)[1,1.0, 2,2.0, 3,3.0, 4,4.0]
+            | sort by t asc
+            | scan declare (ema:real=0.0) with (
+                step s: true => ema = 0.5*v + 0.5*s.ema;
+            )";
+        var sql = _converter.Convert(kql);
+
+        Assert.Contains("WITH RECURSIVE", sql);
+        Assert.Contains("CAST(0.5 * v + 0.5 * p.ema AS DOUBLE)", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        // Column order after the recursive join: t, v, ema.
+        var results = new List<double>();
+        while (reader.Read()) results.Add(reader.GetDouble(2));
+        Assert.Equal(new[] { 0.5, 1.25, 2.125, 3.0625 }, results); // exact recurrence, no DECIMAL drift
+    }
+
+    [Fact]
+    public void Prefixed_Reference_Cumulative_Sum_Uses_Window()
+    {
+        // `cum = s.cum + v` (prefixed) is the true running sum.
+        var kql = @"datatable(t:long, v:long)[1,5, 2,0, 3,0, 4,7, 5,0]
+            | sort by t asc
+            | scan declare (cum:long=0) with (
+                step s: true => cum = s.cum + v;
+            )";
+        var sql = _converter.Convert(kql);
+
+        Assert.Contains("SUM(v) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)", sql);
+
+        using var conn = StormEventsDatabase.GetConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        var results = new List<long>();
+        while (reader.Read()) results.Add(reader.GetInt64(2));
+        Assert.Equal(new long[] { 5, 5, 5, 12, 12 }, results); // running sum
+    }
 }
