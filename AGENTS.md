@@ -117,3 +117,31 @@ Report any operators or functions in the docs that are not in the checklist
 (either as implemented or explicitly unsupported). Focus on commonly-used
 functions only, skip obscure plugins."
 ```
+
+### 5. Differential fuzzing against a real Kusto engine
+
+**When to run:** After changing any operator handler, dialect, or expression builder — and
+periodically to find new divergences. This is the strongest correctness check: it compares the
+translator's output against a *real* Kusto engine, not hand-written expectations.
+
+**What it does:** Runs the same KQL on the **Kustainer** emulator (the oracle) and on
+translator→DuckDB, then compares results (order-insensitive multiset by default, float/datetime
+tolerance, dynamic/JSON canonicalization, with nondeterministic/approximate cases excluded).
+
+**How to run:**
+1. Start Kustainer (Podman or Docker):
+   `podman run -e ACCEPT_EULA=Y -m 4G -d -p 8080:8080 mcr.microsoft.com/azuredataexplorer/kustainer-linux:latest`
+2. Validate the harness seeds: `dotnet run --project tests/KqlToSql.Fuzzer -- seedtest`
+3. Generate + run the combinatorial corpus, then report:
+   `dotnet run --project tests/KqlToSql.Fuzzer -- generate --out fuzzing/corpus/tier1.jsonl`
+   `dotnet run --project tests/KqlToSql.Fuzzer -- run --in fuzzing/corpus/tier1.jsonl --out fuzzing/verdicts/tier1.jsonl`
+   `dotnet run --project tests/KqlToSql.Fuzzer -- report --in fuzzing/verdicts/tier1.jsonl --out fuzzing/reports`
+4. Single-query triage: `dotnet run --project tests/KqlToSql.Fuzzer -- diff1 --kql "<KQL>"` (prints
+   the generated SQL, Kusto-vs-DuckDB results, and the verdict).
+5. The xUnit `tests/KqlToSql.DifferentialTests` project runs curated + regression cases against
+   Kustainer and **skips cleanly** when it is unavailable (CI stays green).
+
+**Adversarial agent campaign** (find weird combinations): the Workflow script
+`fuzzing/fuzz-campaign.workflow.js` fans out one agent per operator family to invent self-contained
+KQL, runs each through the harness, and loops until findings go dry. See `fuzzing/FIXES.md` for the
+findings and root-cause fixes.

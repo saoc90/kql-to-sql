@@ -53,6 +53,28 @@ public class GeneratedRegressionTests
         { "timespan-tick", "print sp2 = 1d + 1tick, big = 100000tick" },
         // strcat_array scalar.
         { "strcat_array", "print j = strcat_array(dynamic([1,2,3]), \"-\")" },
+
+        // --- sub-agent cluster fixes ---
+        // joins: outer-join string '' padding, key-name collision rename, null==null keys.
+        { "join-collision", "let L=datatable(k:long,v:long)[1,10,2,20,3,30]; let R=datatable(k:long,v:long)[1,100,2,200]; L | join kind=leftouter R on k" },
+        { "join-fullouter-strpad", "let L=datatable(k:long,lv:string)[1,\"a\",2,\"b\",3,\"c\"]; let R=datatable(k:long,rv:string)[2,\"x\",4,\"y\"]; L | join kind=fullouter R on k" },
+        { "union-pad", "let A=datatable(x:long,y:string)[1,\"a\",2,\"b\"]; let B=datatable(x:long,y:string)[3,\"c\"]; A | union B" },
+        // parse family.
+        { "parse-simple", "datatable(s:string)[\"id:7 val:foo\",\"id:8 val:bar\"] | parse kind=simple s with \"id:\" id:long \" val:\" val:string" },
+        { "parse-kv", "datatable(s:string)[\"x:10|y:20|z:30\"] | parse-kv s as (x:int, y:int, z:int) with (pair_delimiter='|', kv_delimiter=':')" },
+        // scan: bare ref stays per-row (matches Kusto).
+        { "scan-per-row", "datatable(t:long, v:long)[1,5, 2,0, 3,0, 4,7] | sort by t asc | scan declare (cum:long=0) with (step s: true => cum = cum + v;)" },
+        // make-series / bag_unpack / top-hitters.
+        { "make-series-numeric", "datatable(x:long)[1,2,3,4,5] | make-series total=sum(x) default=0 on x from 1 to 5 step 1" },
+        { "make-series-datetime", "datatable(t:datetime,v:long)[datetime(2020-01-01),10,datetime(2020-01-03),30] | make-series s=sum(v) default=0 on t from datetime(2020-01-01) to datetime(2020-01-05) step 1d" },
+        { "bag_unpack", "datatable(d:dynamic)[dynamic({\"a\":1,\"b\":2,\"c\":3})] | evaluate bag_unpack(d)" },
+        { "top-hitters", "datatable(g:string,v:long)[\"a\",1,\"a\",2,\"b\",3,\"c\",4,\"c\",5,\"c\",6] | top-hitters 2 of g by v" },
+        // dynamic property navigation, format_timespan, gettype.
+        { "dynamic-nested-access", "print d = dynamic({\"a\":{\"b\":{\"c\":42}}}) | extend v = d.a.b.c" },
+        { "dynamic-index-access", "print d = dynamic({\"a\":[1,2],\"b\":[3,4]}) | extend ka = d[\"a\"], k0 = d[\"a\"][0]" },
+        { "bag_keys-mv-expand", "print d = dynamic({\"x\":1,\"y\":2,\"z\":3}) | extend ks = bag_keys(d) | mv-expand k = ks to typeof(string)" },
+        { "format_timespan-fmt", "print ft = format_timespan(2d + 3h + 4m + 5s, \"d.hh:mm:ss\")" },
+        { "gettype", "print a=gettype(1), b=gettype(1.5), c=gettype(\"x\"), d=gettype(true), e=gettype(dynamic([1,2]))" },
     };
 
     [SkippableTheory]

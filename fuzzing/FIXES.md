@@ -6,10 +6,12 @@ DuckDB) against a **real Kusto engine** (the Kustainer emulator over HTTP). 10 s
 (`datatable`/`print`/`range`, so both engines get identical input). See `tests/KqlToSql.Fuzzer`
 (harness + console driver) and `tests/KqlToSql.DifferentialTests` (xUnit, gated on Kustainer).
 
-**Headline:** 720 → **652** bug candidates after fixes; exact-MATCH 792 → **853**; invalid-SQL
-errors (`SqlExecError`) 235 → **182**. Full machine-readable detail: `reports/` (original campaign)
-and `reports2/` (post-fix). Each fixed root cause has a guardrail in
-`tests/KqlToSql.DifferentialTests/Regression/GeneratedRegressionTests.cs`.
+**Headline (all fixes — direct + 5 sub-agent clusters):** 720 → **467** bug candidates;
+exact-MATCH 792 → **1038**; invalid-SQL errors (`SqlExecError`) 235 → **116**; column-shape
+mismatches 19 → **3**. Full machine-readable detail: `reports/` (original campaign) and
+`reports3/` (final post-fix). Each fixed root cause has a guardrail in
+`tests/KqlToSql.DifferentialTests/Regression/GeneratedRegressionTests.cs` (38 cases). The existing
+unit suite stays green (577) and the differential suite is 71 green.
 
 ## Fixed (root cause, verified vs Kustainer, DuckDB + PGlite parity)
 
@@ -31,34 +33,31 @@ and `reports2/` (post-fix). Each fixed root cause has a guardrail in
 | 14 | `1tick` timespan literal → "tick not recognized" | DuckDB has no tick unit; emit `(N/10.0)*INTERVAL '1 microsecond'`. |
 | 15 | scalar `strcat_array(arr, delim)` → "does not exist" | It was only mapped as an aggregate; added the scalar `ARRAY_TO_STRING` mapping (both dialects). |
 
-## Remaining / deferred (documented, with root-cause pointers)
+## Also fixed — 5 sub-agent clusters (parallel git-worktree agents, integrated via 3-way merge)
 
-These were left for follow-up — larger refactors, architectural choices, or behaviors that warrant a
-deliberate decision. Counts are approximate cluster sizes from the campaign.
+- **joins / lookup / union** (`JoinHandlers.cs`): outer-join `''` string padding, key-name collision
+  rename (`vN`), `null == null` key equality, `union` source/padding.
+- **parse / parse-kv / search** (`ParseHandlers.cs`): regex escaping, greedy trailing token,
+  parse-kv delimiters, search term-to-column binding.
+- **scan** (`ScanHandler.cs`): carried-state (`s.<col>`) step support; bare references correctly stay
+  per-row (verified against Kusto).
+- **make-series / bag_unpack / top-hitters** (`AdvancedHandlers.cs`): numeric vs datetime axis step,
+  default fill; key inference for bag_unpack; top-hitters group-by.
+- **dynamic property access / format strings / scalar casts** (`ExpressionSqlBuilder.cs` + dialects):
+  `d.a.b`/`d[k]`/`d[i]` now return navigable JSON so chained access and array funcs work;
+  `format_timespan`/`format_datetime` honor the format; `gettype` → Kusto type names.
 
-- **Join/lookup/union NULL-padding & key-name collision** (~40): Kustainer fills unmatched outer-join
-  cells of *string* columns with `''` (not NULL), renames a colliding right key to `c1`/`v1`, and
-  treats `null == null` as equal in join keys. Touches all of `JoinHandlers`. Confirm the target
-  semantics, then coalesce/rename consistently. Source: `src/KqlToSql/Operators/JoinHandlers.cs`.
-- **`search` operator** (~15): column-scoped terms, `kind=case_sensitive`, the synthetic `$table`
-  column, and binding terms to row columns are not implemented faithfully (terms compile to
-  tautologies). Source: `src/KqlToSql/Operators/ParseHandlers.cs`.
-- **`parse` / `parse-kv`** (~30): regex over-escaping (`\d` → `\\d`), the trailing unterminated token
-  compiling as non-greedy, and `parse-kv` delimiter options. Source: `ParseHandlers.cs`.
-- **`make-series`** (~25): numeric `from..to..step` ranges emit `range(INT,INT,INTERVAL)`; default
-  fill / `series_fill_forward` gaps. Source: `src/KqlToSql/Operators/AdvancedHandlers.cs`.
-- **`scan`** (~10): multi-assignment single-step bodies reference step-local columns that aren't in
-  scope (`column "s"/"cum" not found`). Source: `src/KqlToSql/Operators/ScanHandler.cs`.
-- **`bag_unpack`** (~5): emits `from_json(.., '{}')` with an empty schema instead of inferring keys.
-- **Nested dynamic property access returning JSON** (~40): `d.a.b`/`d["k"]`/`d[i]` return a VARCHAR
-  rather than a navigable dynamic, so chained access and array funcs on the result fail
-  (`UNNEST requires a single list`, `+(VARCHAR, INT)`). This is the dual LIST-vs-JSON representation
-  of `dynamic`; unifying it is an architectural change.
-- **`format_timespan` / `format_datetime` format strings** (~15): format specifiers are partially or
-  not honored (`format_timespan` ignores the format and casts).
-- **Int/long overflow semantics** (~6): Kusto wraps on overflow; DuckDB raises. `int(2147483647)+1`.
-- **`gettype`, string→number casts, `datetime(null)` arithmetic, NaN equality** (assorted): subtle
-  scalar-semantics differences.
+## Remaining (genuinely hard / by-spec — 467 candidates, documented)
+
+- **dynamic type fidelity**: many remaining `MismatchRows` carry a benign `TYPE_MISMATCH` sub-verdict
+  (Kusto `dynamic` vs DuckDB JSON-as-string) — values match, only the declared column type differs.
+- **Int/long overflow semantics**: Kusto wraps on overflow; DuckDB raises (`int(2147483647)+1`).
+- **`toint`/`tolong` of decimal strings**: `toint("3.14")` → Kusto null vs DuckDB 3.
+- **NaN equality**: `real(nan)==real(nan)` is false in KQL, true in DuckDB.
+- **Approximate/nondeterministic by spec** (excluded from "bug" counts but present in the corpus):
+  `dcount`/`hll`/`percentile`, `arg_max`/`arg_min` ties, `sample`, `rand`/`now`.
+- **Deep parse/search edge cases and `format_*` specifier coverage**: partial; the common cases are
+  fixed, exotic format strings / multi-table search remain.
 
 To reproduce or re-measure: start Kustainer (`podman run -e ACCEPT_EULA=Y -m 4G -d -p 8080:8080
 mcr.microsoft.com/azuredataexplorer/kustainer-linux:latest`), then
