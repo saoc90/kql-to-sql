@@ -1,0 +1,46 @@
+datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1 ] | extend ni=int(null) | extend a=i+ni, b=i*ni, c=i-ni, d=ni/i | project i, ni, a, b, c, d
+datatable(i:int)[ 1,2,3 ] | extend x=int(null) | where x > 0 | count
+datatable(i:int)[ 1,2,3 ] | extend x=int(null) | where x <= 0 | count
+datatable(i:int)[ 1,2,3 ] | extend x=int(null) | where not(x > 0) | count
+datatable(i:int)[ 1,2,3 ] | extend x=int(null) | where x == x | count
+datatable(r:real)[ 1.0, 2.0, 3.0 ] | extend x=real(null) | summarize s=sum(x), a=avg(x), mn=min(x), mx=max(x), c=count(), cx=count(x)
+datatable(r:real)[ 1.0, 2.0, 3.0 ] | extend x=iif(r>1.5, r, real(null)) | summarize s=sum(x), a=avg(x), mn=min(x), mx=max(x), cnt=count(), cntx=count(x)
+datatable(s:string)[ "a", "", "b" ] | extend e=isempty(s), ne=isnotempty(s), n=isnull(s), nn=isnotnull(s) | project s, e, ne, n, nn
+datatable(s:string)[ "a", "" ] | union (datatable(s:string)[ "c" ] | extend s=tostring(dynamic(null))) | extend e=isempty(s), n=isnull(s) | project s, e, n
+print x = coalesce(int(null), int(null), 5, 7)
+print x = coalesce(real(null), real(null))
+print a = isnull(int(null)), b = isnull(5), c = isnull(real(null)), d = isnull(""), e = isnull("x")
+print a = iif(bool(null), "t", "f"), b = case(bool(null), "c1", true, "c2", "def")
+datatable(x:long)[ 5, 10, 15 ] | extend y=long(null) | order by y asc, x asc | project x, y
+datatable(x:long)[ 5, 10, 15 ] | extend y=iif(x==10, long(null), x) | order by y desc | project x, y
+datatable(x:long)[ 5, 10, 15 ] | extend y=iif(x==10, long(null), x) | order by y asc | project x, y
+datatable(x:long)[ 5, 10, 15 ] | extend y=iif(x==10, long(null), x) | sort by y asc nulls first | project x, y
+datatable(x:long)[ 5, 10, 15 ] | extend y=iif(x==10, long(null), x) | sort by y asc nulls last | project x, y
+datatable(x:int)[ 1, 2, 3 ] | where false | count
+datatable(x:int)[ 1, 2, 3 ] | where true | count
+datatable(x:int)[ 1, 2, 3 ] | where x > 5 and x < 3 | project x
+datatable(x:int)[ 1, 2, 3 ] | where 1 == 2 | summarize s=sum(x), c=count()
+datatable(x:int)[ ] | count
+datatable(x:int)[ ] | summarize s=sum(x), a=avg(x), mn=min(x), mx=max(x), c=count()
+datatable(x:int)[ ] | extend y=x+1 | project x, y
+datatable(x:int)[ ] | order by x asc | take 5
+datatable(x:int)[ ] | summarize c=count() by x
+datatable(x:long, g:string)[ 1,"a", 2,"a" ] | where false | summarize s=sum(x) by g
+print x = int(2147483647) + 1
+print x = long(9223372036854775807)
+print x = 1 / 0
+print x = 1.0 / 0.0
+print x = 0.0 / 0.0
+print x = todouble("nan"), y = todouble("inf"), z = todouble("-inf")
+datatable(r:real)[ 1.0, 2.0 ] | extend x=todouble("nan") | summarize mn=min(x), mx=max(x), s=sum(x)
+print d = datetime(9999-12-31 23:59:59.9999999)
+print d = datetime(0001-01-01), e = datetime(0001-01-01) + 1tick
+print s = strcat("a", "", "b"), e = strcat(tostring(int(null)), "z")
+print l = strlen(""), n = strlen(tostring(dynamic(null)))
+print sub = substring("abc", 5, 3), neg = substring("abc", -1, 2)
+datatable(s:string)[ "Hello", "", "World" ] | extend up=toupper(s), lo=tolower(s), rev=reverse(s), len=strlen(s) | project s, up, lo, rev, len
+print x = replace_string("", "a", "b"), y = replace_string("aaa", "", "X")
+datatable(x:int)[ 1, 2, 3 ] | extend big = strrep("z", 100) | summarize ml = max(strlen(big))
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | extend nv=iif(v==30, long(null), v) | summarize s=sum(nv), c=count(), cv=count(nv), dc=countif(isnotnull(nv)) by k | order by k asc
+datatable(d:dynamic)[ dynamic(null), dynamic({"a":1}), dynamic([]) ] | extend t=gettype(d), n=isnull(d), an=array_length(d) | project t, n, an
+range x from 1 to 0 step 1 | count

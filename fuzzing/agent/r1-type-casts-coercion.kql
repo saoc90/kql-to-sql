@@ -1,0 +1,49 @@
+datatable(i:int, l:long)[ 7,2, -7,2, 7,-2, -7,-2 ] | extend q = i / l, r = i % l
+print a = 7 / 2, b = -7 / 2, c = 7 / -2, d = -7 / -2, e = 7 % 3, f = -7 % 3, g = 7 % -3, h = -7 % -3
+datatable(a:long, b:long)[ 2147483647,1, -2147483648,1 ] | extend sum = a + b, prod = a * 2
+print x = toint(2147483647) + toint(1)
+print bigmul = tolong(2147483647) * tolong(2)
+print di = 10 / 3, dl = tolong(10) / tolong(3), dr = 10.0 / 3.0, mix = 10 / 3.0
+datatable(s:string)[ "123", "  45  ", "-9", "3.14", "abc", "", "0x1F", "1e3", "+7", "  " ] | extend ti = toint(s), tl = tolong(s), td = todouble(s)
+print p1 = toint("2147483648"), p2 = tolong("2147483648"), p3 = toint("99999999999")
+datatable(s:string)[ "true", "True", "FALSE", "1", "0", "yes", "", "tRuE" ] | extend b = tobool(s)
+print d1 = todecimal("3.14159"), d2 = todecimal("abc"), d3 = todecimal(10) / todecimal(3)
+print n1 = todouble("NaN"), n2 = todouble("Infinity"), n3 = todouble("-Infinity"), n4 = todouble("inf")
+print nan = real(nan), pinf = real(+inf), ninf = real(-inf), chk1 = isnan(real(nan)), chk2 = isinf(real(+inf)), chk3 = isfinite(1.0)
+print z = 0.0 / 0.0, pi = 1.0 / 0.0, ni = -1.0 / 0.0
+datatable(r:real)[ 0.0/0.0, 1.0/0.0, -1.0/0.0, 3.14, 0.0 ] | extend isn = isnan(r), isi = isinf(r), isf = isfinite(r)
+print g1 = gettype(1), g2 = gettype(1.0), g3 = gettype("s"), g4 = gettype(true), g5 = gettype(tolong(1)), g6 = gettype(datetime(2020-01-01))
+print g7 = gettype(dynamic({"a":1})), g8 = gettype(dynamic([1,2])), g9 = gettype(1s), g10 = gettype(todecimal(1))
+print rt = toreal("2.5") + toint("3"), m = toint("3") * todouble("1.5")
+datatable(i:int)[ 5, 4, 3, 2 ] | extend half = i / 2, halfd = i / 2.0, fl = floor(i / 2.0, 1)
+print neg = -5 % 3, pos = 5 % 3, negneg = -5 % -3, posneg = 5 % -3
+datatable(l:long)[ 9223372036854775807, -9223372036854775808 ] | extend plus = l + 1, minus = l - 1
+print bignum = 9223372036854775807, asreal = todouble(9223372036854775807)
+print c1 = tostring(123), c2 = tostring(1.5), c3 = tostring(true), c4 = tostring(datetime(2020-01-01)), c5 = tostring(1d)
+print ts1 = totimespan("1.02:03:04"), ts2 = totimespan("01:00:00"), ts3 = totimespan("abc")
+print dt1 = todatetime("2020-01-01"), dt2 = todatetime("2020-01-01T13:45:00Z"), dt3 = todatetime("not a date")
+datatable(t:datetime)[ datetime(2020-01-01), datetime(2021-06-15 12:30:00) ] | extend asl = tolong(t), asr = todouble(t)
+print span = totimespan("1d"), aslong = tolong(1d), asdouble = todouble(1h)
+datatable(r:real)[ 2.9, -2.9, 2.5, -2.5, 3.5 ] | extend ti = toint(r), tl = tolong(r)
+print round1 = toint(2.5), round2 = toint(3.5), round3 = toint(-2.5), round4 = toint(2.9)
+datatable(s:string)[ "1.5e10", "0.0001", "-0", "1_000", "Inf", "NaN", "0b101" ] | extend d = todouble(s)
+print bool2int = toint(true), bool2int2 = toint(false), bool2str = tostring(true)
+print intdiv = 7 / 2 * 2, order = 7 * 2 / 4, mixed = 7 / 2.0 * 2
+datatable(i:int, j:int)[ 10,0, -10,0, 0,0 ] | extend dz = i / j, mz = i % j
+print sci = 1.5e300 * 1.5e300, tiny = 1e-300 * 1e-300
+datatable(d:decimal)[ decimal(10), decimal(3), decimal(0) ] | extend div = d / decimal(3), gt = gettype(d)
+print h2i = toint("0xFF"), h2l = tolong("0x10")
+print cast_chain = toint(tostring(tolong(toint("42"))))
+datatable(l:long)[ 100, 7, 13 ] | extend asint = toint(l), back = tolong(toint(l)), mod = l % 6
+print mixmod = 7.5 % 2, mixmod2 = 7 % 2.5, negmod = -7.5 % 2
+datatable(r:real)[ 3.14159, -3.14159, 0.5, -0.5 ] | extend c = toint(r), fl = bin(r, 1)
+print empty1 = toint(""), empty2 = todouble(""), empty3 = tolong(""), empty4 = tobool("")
+datatable(s:string)[ "9223372036854775807", "9223372036854775808", "-9223372036854775808" ] | extend l = tolong(s)
+print nanarith = real(nan) + 1, nanmul = real(nan) * 0, infarith = real(+inf) - real(+inf)
+print comp1 = real(nan) == real(nan), comp2 = real(nan) != real(nan), comp3 = real(+inf) > 1e308
+datatable(i:int, r:real)[ 5,2.0, 7,0.0, -3,1.5 ] | extend sum = i + r, type = gettype(i + r), prod = i * r
+print longtrunc = tolong(9.99), longtrunc2 = tolong(-9.99), inttrunc = toint(9.99)
+datatable(x:dynamic)[ dynamic(1), dynamic(1.5), dynamic("3"), dynamic(true), dynamic(null) ] | extend ti = toint(x), td = todouble(x), ts = tostring(x)
+print parseint = toint("  42  "), parsereal = todouble("  3.14  ")
+print decdiv = decimal(1) / decimal(3), decmul = decimal(0.1) + decimal(0.2)
+datatable(l:long)[ 5, 0, -5 ] | extend asbool = tobool(l), back = tolong(tobool(l))

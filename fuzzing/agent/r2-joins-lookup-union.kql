@@ -1,0 +1,44 @@
+let L = datatable(k:long, v:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, v:long)[ 2,20, 3,30, 4,40 ]; L | join kind=fullouter R on k | project ck = coalesce(k, k1), lv = v, rv = v1 | order by ck asc
+let L = datatable(k:long, v:string)[ 1,"a", 2,"b" ]; let R = datatable(k:long, v:string)[ 1,"x", 2,"y" ]; L | join kind=leftouter R on k | summarize n = count(), distinctv = count_distinct(v1) by k | order by k asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c", 4,"d" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y" ]; L | join kind=leftouter R on k | where isempty(rv) | order by k asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c", 4,"d" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y" ]; L | join kind=leftouter R on k | where isnull(rv) | order by k asc
+let L = datatable(a:long, b:long, lv:string)[ 1,1,"p", 1,2,"q", 2,2,"r" ]; let R = datatable(a:long, b:long, rv:long)[ 1,2,100, 2,2,200, 9,9,900 ]; L | join kind=fullouter R on a, b | project la=a, lb=b, ra=a1, rb=b1, lv, rv | order by lv asc, rv asc
+let L = datatable(a:long, b:long)[ 1,1, 1,2, 2,2 ]; let R = datatable(a:long, b:long)[ 1,2, 2,2, 9,9 ]; L | join kind=leftanti R on a, b | order by a asc, b asc
+let L = datatable(a:long, b:long)[ 1,1, 1,2, 2,2 ]; let R = datatable(a:long, b:long)[ 1,2, 2,2, 9,9 ]; L | join kind=rightanti R on a, b | order by a asc, b asc
+let L = datatable(a:long, b:long)[ 1,1, 1,2, 2,2, 2,2 ]; let R = datatable(a:long, b:long)[ 1,2, 2,2, 2,2 ]; L | join kind=rightsemi R on a, b | order by a asc, b asc
+let L = datatable(k:long, lv:string)[ 1,"a", 1,"a2", 2,"b" ]; let R = datatable(k:long, rv:string)[ 1,"x", 1,"x2", 3,"z" ]; L | join kind=leftsemi R on k | order by lv asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", long(null),"n" ]; let R = datatable(k:long, rv:string)[ 1,"x", long(null),"m", 2,"y" ]; L | join kind=fullouter R on k | order by lv asc, rv asc
+let L = datatable(k:long, lv:string)[ 1,"a", long(null),"n1", long(null),"n2" ]; let R = datatable(k:long, rv:string)[ long(null),"m", 1,"x" ]; L | join kind=leftouter R on k | order by lv asc, rv asc
+let L = datatable(k:real, lv:string)[ 1.0,"a", 2.5,"b" ]; let R = datatable(k:real, rv:string)[ 1.0,"x", 2.5,"y" ]; L | join kind=inner R on k | order by lv asc
+let L = datatable(k:real, lv:string)[ real(nan),"a", 1.0,"b" ]; let R = datatable(k:real, rv:string)[ real(nan),"x", 1.0,"y" ]; L | join kind=inner R on k | order by lv asc
+let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, z:long)[ 3,30, 4,40 ]; A | union B | project x, y, z | order by x asc
+let A = datatable(x:long, y:string)[ 1,"a" ]; let B = datatable(x:string, y:long)[ "1",10 ]; A | union B | order by x asc
+let A = datatable(x:long)[ 1, 2 ]; let B = datatable(x:real)[ 1.5, 2.5 ]; A | union B | order by x asc
+let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, y:string)[ 2,"c", 3,"d" ]; union withsource=src kind=outer A, B | summarize n=count() by src, x | order by src asc, x asc
+let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, y:string)[ 2,"c", 3,"d" ]; union withsource=tbl A, B | join kind=inner (A | project x, ay=y) on x | order by x asc, y asc
+let L = datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ]; let R = datatable(k:long, v:long)[ 1,100, 3,300, 5,500 ]; L | union R | summarize s=sum(v) by k | order by k asc
+let L = datatable(k:long, lv:long)[ 1,10, 2,20 ]; let R = datatable(k:long, rv:long)[ 1,100, 2,200 ]; L | join kind=inner R on k | extend k1 = k1 + 1000 | project k, k1, lv, rv | order by k asc
+let L = datatable(k:long, v:long)[ 1,10, 2,20 ]; let R = datatable(k:long, v:long)[ 1,100, 2,200 ]; let M = datatable(k:long, v:long)[ 1,1000, 2,2000 ]; L | join kind=inner R on k | join kind=inner M on k | project k, v, v1, v2 | order by k asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 1,"x", 3,"z", 5,"w" ]; L | lookup kind=inner R on k | order by k asc
+let L = datatable(a:long, b:string, lv:long)[ 1,"p",10, 2,"q",20, 3,"r",30 ]; let R = datatable(a:long, b:string, rv:long)[ 1,"p",100, 2,"x",200 ]; L | lookup R on a, b | order by a asc
+let L = datatable(k:long, lv:string)[ 1,"a", 1,"a2", 2,"b" ]; let R = datatable(k:long, rv:string)[ 1,"x", 1,"x2", 2,"y" ]; L | lookup R on k | order by lv asc
+let L = datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ]; let R = datatable(k:long, v:long)[ 2,200, 3,300, 4,400 ]; L | join kind=fullouter R on k | extend mk = iff(isnull(k), k1, k), src = iff(isnull(k),"R", iff(isnull(k1),"L","both")) | order by mk asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b" ]; let R = datatable(k:long, rv:string)[ 1,"x", 2,"y" ]; L | join kind=inner (R | summarize rv2 = make_list(rv) by k) on k | order by k asc
+let L = datatable(g:string, k:long)[ "a",1, "a",2, "b",3 ]; let R = datatable(k:long, w:long)[ 1,100, 2,200, 3,300 ]; L | join kind=inner R on k | summarize tot=sum(w) by g | order by g asc
+let L = datatable(k:long, t:datetime)[ 1,datetime(2020-01-01), 2,datetime(2021-01-01) ]; let R = datatable(k:long, t:datetime)[ 1,datetime(2020-06-01), 3,datetime(2022-01-01) ]; L | join kind=leftouter R on k | extend diff = t1 - t | order by k asc
+let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, y:string)[ 3,"c" ]; let C = datatable(x:long, y:string)[ 4,"d" ]; A | union (B | union C) | order by x asc
+let A = datatable(x:long, y:long)[ 1,1, 2,2 ]; A | union A | union A | summarize n=count() by x | order by x asc
+let L = datatable(k:long, v:long)[ 1,1, 2,2, 3,3 ]; let R = datatable(k:long, v:long)[ 2,2, 3,3, 4,4 ]; L | join kind=leftanti R on k | union (R | join kind=leftanti L on k) | order by k asc, v asc
+let L = datatable(k:long, v:long)[ 1,10, 1,11, 2,20 ]; let R = datatable(k:long, w:long)[ 1,100, 1,101, 2,200 ]; L | join kind=innerunique R on k | summarize n=count() by k | order by k asc
+let L = datatable(k:long, v:long)[ 1,10, 1,11, 1,12 ]; let R = datatable(k:long, w:long)[ 1,100 ]; L | join kind=innerunique R on k | order by v asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; R | join kind=rightouter L on k | order by lv asc
+let L = datatable(id:long, k:long, lv:string)[ 10,1,"a", 11,2,"b", 12,3,"c" ]; let R = datatable(k:long, id:long, rv:string)[ 1,99,"x", 2,98,"y" ]; L | join kind=leftouter R on k | project id, id1, k, lv, rv | order by id asc
+let L = datatable(k:long, v:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, v:string)[ 1,"x", 2,"y", 3,"z" ]; L | join kind=inner R on k | project-away v1 | order by k asc
+let L = datatable(k:long, v:string)[ 1,"a", 2,"b" ]; let R = datatable(k:long, v:string)[ 1,"x", 2,"y" ]; L | join kind=inner R on k | project-rename rv = v1, lv = v | order by k asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b" ]; let R = datatable(rk:long, rv:string)[ 1,"x", 3,"z" ]; L | join kind=fullouter R on $left.k == $right.rk | project k, rk, lv, rv | order by lv asc, rv asc
+let L = datatable(k:long, v:long)[ 1,5, 2,15, 3,25 ]; let R = datatable(lo:long, hi:long, label:string)[ 0,10,"low", 10,20,"mid", 20,30,"high" ]; L | extend bucket = case(v<10,"low", v<20,"mid","high") | join kind=inner (R | project label, bucket=label) on bucket | order by k asc
+let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(y:string, x:long)[ "c",3, "d",4 ]; let C = datatable(x:long, y:string, z:bool)[ 5,"e",true ]; union A, B, C | order by x asc
+let L = datatable(k:long, d:dynamic)[ 1,dynamic({"n":5}), 2,dynamic({"n":10}) ]; let R = datatable(k:long, d:dynamic)[ 1,dynamic([1,2]), 2,dynamic([3,4]) ]; L | join kind=inner R on k | project k, ln=d.n, rarr=d1 | order by k asc
+let L = datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ]; let R = datatable(k:long, w:long)[ 1,100, 2,200 ]; L | join kind=leftouter R on k | extend tot = v + coalesce(w, 0) | summarize sum(tot) | project sum_tot
+let A = datatable(k:long, v:long)[ 1,10, 2,20 ]; let B = datatable(k:long, v:long)[ 1,100, 3,300 ]; let C = datatable(k:long, v:long)[ 2,2000, 3,3000 ]; union withsource=t A, B, C | summarize total=sum(v), n=count() by k | order by k asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 1,"x", 2,"y", 3,"z" ]; L | where k > 1 | join kind=inner (R | where k < 3) on k | order by k asc

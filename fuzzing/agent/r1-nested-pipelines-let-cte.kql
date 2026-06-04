@@ -1,0 +1,45 @@
+let a = datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ]; let b = a | where v > 10; let c = b | summarize s = sum(v) by k; c | project k, s | order by k asc
+let base = datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1, 7,100,3.25 ]; let pos = base | where i >= 0; let scaled = pos | extend r2 = r * 2; scaled | project i, r, r2 | order by i asc
+datatable(id:long, name:string, score:real)[ 1,"a",1.5, 2,"b",2.5, 3,"c",3.5 ] | extend score = score + 100 | extend score = score * 2 | project name, score | order by score asc
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | summarize count() by k | project count_, k | order by k asc
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | summarize count() by k | order by count_ desc, k asc
+print x = 1 | extend ["select"] = 5 | extend ["from"] = 10 | project ["from"], ["select"], x
+datatable(["select"]:long, ["from"]:long)[ 1,2, 3,4 ] | where ["select"] < ["from"] | project ["from"], ["select"] | order by ["from"] asc
+datatable(["order"]:long, ["group"]:long, ["table"]:long)[ 5,6,7, 1,2,3 ] | extend ["value"] = ["order"] + ["group"] | project ["value"], ["table"], ["order"] | order by ["value"] asc
+datatable(["count"]:long, ["table"]:string)[ 1,"x", 2,"y" ] | summarize sum(["count"]) by ["table"] | order by ["table"] asc
+let t1 = datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ]; let t2 = t1 | extend doubled = v * 2; let t3 = t2 | where doubled > 20; let t4 = t3 | summarize total = sum(doubled) by k; t4 | order by k asc
+datatable(a:long, b:long)[ 1,2, 3,4, 5,6 ] | extend c = a + b | extend d = c * c | extend e = d - a | where e > 10 | project a, e | order by a asc
+datatable(x:long)[ 1, 2, 3, 4, 5 ] | where x > 1 | where x < 5 | where x != 3 | order by x asc
+datatable(x:long)[ 1, 2, 3, 4, 5 ] | where x > 3 | where x < 2 | order by x asc
+let m = materialize(datatable(k:long, v:long)[ 1,10, 2,20, 2,30 ] | summarize s = sum(v) by k); m | join kind=inner m on k | project k, s, s1 | order by k asc
+let src = materialize(datatable(i:int)[ 1, 2, 3, 4 ]); src | summarize c = count() | extend total = c
+datatable(i:int)[ 1, 2, 3 ] | summarize Column1 = count() | project Column1
+datatable(i:int, name:string)[ 1,"a", 2,"b" ] | project Column1 = i, Column2 = name | order by Column1 asc
+print 1, 2, 3
+print a = 1, 2, b = 3
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30 ] | summarize sum(v), count() by k | order by k asc
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30 ] | summarize sum(v), avg(v), min(v), max(v) by k | order by k asc
+datatable(x:long)[ 1, 2, 3 ] | as T | where x > 1 | project x | order by x asc
+datatable(x:long)[ 5, 3, 1, 4, 2 ] | sort by x asc | extend rn = row_number() | project rn, x
+datatable(x:long)[ 5, 3, 1, 4, 2 ] | sort by x desc | take 3 | sort by x asc
+let nums = datatable(n:long)[ 1, 2, 3, 4, 5, 6 ]; let evens = nums | where n % 2 == 0; let odds = nums | where n % 2 == 1; evens | union odds | sort by n asc
+datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ] | join kind=leftouter (datatable(k:long, w:long)[ 1,100, 3,300 ]) on k | project k, v, w | order by k asc
+datatable(g:string, v:long)[ "a",1, "a",2, "b",3 ] | summarize mv = make_list(v) by g | order by g asc
+datatable(g:string, v:long)[ "a",1, "a",2, "b",3 ] | summarize mv = make_set(v) by g | mv-expand mv | order by g asc, mv asc
+datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic([10,20,30]) ] | mv-expand d | project d
+datatable(x:long, y:long)[ 1,2, 3,4 ] | extend x = y | extend y = x | project x, y | order by x asc
+datatable(x:long)[ 1, 2, 3 ] | summarize c = count() by x | summarize cc = count() | project cc
+datatable(x:long, g:string)[ 1,"a", 2,"a", 3,"b" ] | summarize s = sum(x) by g | where s > 2 | extend label = strcat("g_", g) | project label, s | order by s asc
+let f = datatable(id:long, p:long)[ 1,0, 2,1, 3,1, 4,2 ]; f | join kind=inner (f | project pid = id, pname = p) on $left.p == $right.pid | project id, p, pname | order by id asc
+datatable(t:datetime, span:timespan)[ datetime(2007-01-01),1d, datetime(2020-06-15 13:45:00),2h ] | extend e = t + span | project t, e, span | order by t asc
+datatable(s:string)[ "a", "b", "c" ] | extend idx = row_number() | where idx > 1 | project idx, s
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | distinct k, v | order by k asc, v asc
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | summarize by k, v | order by k asc, v asc
+let agg = datatable(k:long, v:long)[ 1,10, 2,20, 2,40 ] | summarize sum(v) by k; agg | where sum_v > 15 | project k, sum_v | order by k asc
+datatable(x:long)[ 3, 1, 2 ] | top 2 by x desc | project x
+datatable(x:long)[ 3, 1, 2 ] | top 2 by x asc | extend rank = row_number() | project rank, x
+datatable(a:long, b:long, c:long)[ 1,2,3, 4,5,6 ] | project c, a, b | project-reorder b, c, a | order by a asc
+datatable(a:long, b:long, c:long)[ 1,2,3, 4,5,6 ] | project-away b | order by a asc
+datatable(k:string, v:long)[ "x",1, "y",2, "x",3 ] | summarize total = sum(v), n = count() by k | extend avg = total / n | project k, avg, total, n | order by k asc
+let r = range x from 1 to 5 step 1; r | extend sq = x * x | where sq > 4 | summarize s = sum(sq) | project s
+datatable(["count_"]:long, v:long)[ 1,10, 2,20 ] | summarize count() by ["count_"] | order by ["count_"] asc

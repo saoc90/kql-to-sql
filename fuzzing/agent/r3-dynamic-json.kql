@@ -1,0 +1,45 @@
+print d = dynamic({"a":[{"b":[1,2]},{"b":[3,4,5]}]}) | mv-apply o = d.a on (mv-expand v = o.b to typeof(long) | summarize s = sum(v)) | summarize grand = sum(s)
+print d = dynamic([{"g":"x","n":[1,2]},{"g":"y","n":[3]},{"g":"x","n":[4,5,6]}]) | mv-expand o = d | mv-expand n = o.n to typeof(long) | summarize total = sum(n), cnt = count() by grp = tostring(o.g) | sort by grp asc
+print d = dynamic({"a":1,"b":2,"c":3}) | extend ks = bag_keys(d) | mv-apply k = ks on (extend pair = strcat(tostring(k), "=", tostring(d[tostring(k)]))) | summarize joined = make_list(pair)
+print s = '{"x": 1e3, "y": -2.5E-2, "z": 0.0000001}' | extend d = parse_json(s) | project x = todouble(d.x), y = todouble(d.y), z = todouble(d.z), sum = todouble(d.x) + todouble(d.y) + todouble(d.z)
+print d = dynamic({"arr":[10,20,30,40,50]}) | extend a = array_sum(d.arr), avg = array_sum(d.arr) / array_length(d.arr)
+print d = dynamic([1,2,3,4,5,6,7,8]) | extend parts = array_split(d, dynamic([2,5])) | extend p0 = parts[0], p1 = parts[1], p2 = parts[2], np = array_length(parts)
+print d = dynamic({"a":{"b":{"c":1}},"x":{"y":2}}) | extend paths = treepath(d) | mv-expand p = paths to typeof(string) | sort by p asc | summarize make_list(p)
+print a = dynamic([1,2,3,4]), b = dynamic([3,4,5,6]) | extend j = jaccard_index(a, b), o = array_length(set_intersect(a,b)), u = array_length(set_union(a,b))
+print d = dynamic([5,2,8,1,9,3]) | extend top3 = array_slice(array_sort_desc(d), 0, 2), bot2 = array_slice(array_sort_asc(d), 0, 1) | extend topsum = array_sum(top3)
+print d = dynamic({"vals":[1,2,3]}) | extend doubled = array_iff(dynamic([true,false,true]), d.vals, dynamic([0,0,0]))
+print d = dynamic([10,20,30]) | mv-expand with_itemindex=i x = d | extend cum = array_sum(array_slice(d, 0, i)) + toint(x) | project i, x = toint(x), cum
+datatable(d:dynamic)[ dynamic({"a":1,"b":2}), dynamic({"a":3,"b":4}), dynamic({"a":5,"b":6}) ] | summarize bags = make_list(d) | extend merged = bag_merge_force(bags)
+print d = dynamic({"a":1,"b":[2,3]}) | extend j1 = dynamic_to_json(d) | extend rt = parse_json(j1) | extend same = tostring(rt) == tostring(d), j2 = dynamic_to_json(rt) | project eq = j1 == j2, same
+print d = dynamic([{"id":1,"t":["a","b"]},{"id":2,"t":[]},{"id":3,"t":["c"]}]) | mv-expand o = d | mv-expand tag = o.t | summarize tags = make_list(tag) by id = toint(o.id) | sort by id asc
+print s = '{"k":"vé","arr":[1,2,"3\t"]}' | extend d = parse_json(s) | project k = tostring(d.k), klen = strlen(tostring(d.k)), a0 = d.arr[0], a2 = tostring(d.arr[2])
+print d = dynamic({"a":[1,2,3]}) | extend m = bag_merge(d, dynamic({"a":[4,5],"b":9})) | project ma = m.a, mb = m.b, malen = array_length(m.a)
+print d = dynamic([[1,2],[3,4],[5,6]]) | extend cols = array_concat(pack_array(d[0][0],d[1][0],d[2][0]), pack_array(d[0][1],d[1][1],d[2][1])) | extend colsum = array_sum(cols)
+print outer = dynamic([{"row":[1,2,3]},{"row":[4,5,6]}]) | mv-apply r = outer on (extend rsum = array_sum(r.row), rmax = array_length(r.row)) | summarize sum(rsum), sum(rmax)
+print d = dynamic({"a":1,"b":2,"c":3,"d":4,"e":5}) | extend ks = array_sort_desc(bag_keys(d)) | mv-expand k = ks to typeof(string) | extend v = toint(d[k]) | summarize vals = make_list(v), keys = make_list(k)
+print d = dynamic([null,null,null]) | extend al = array_length(d), s = array_sum(d), srt = array_sort_asc(d), idx = array_index_of(d, null)
+print a = dynamic([1,2,3]) | extend has2 = set_has_element(a, 2), has9 = set_has_element(a, 9), hasS = set_has_element(a, "2")
+print d = dynamic({"nested":[{"x":[{"y":1}]},{"x":[{"y":2},{"y":3}]}]}) | mv-expand l1 = d.nested | mv-expand l2 = l1.x | project y = toint(l2.y) | summarize sum(y)
+print d = dynamic({"a":1}) | extend big = repeat(d, 3) | mv-expand e = big | extend v = toint(e.a) | summarize sum(v), count()
+print d = dynamic([3,1,2]) | extend packed = pack("orig", d, "sorted", array_sort_asc(d), "len", array_length(d)) | project po = packed.orig, ps = packed.sorted, pl = toint(packed.len)
+print d = dynamic({"a":[1,2,3],"b":[4,5,6]}) | extend zipped = zip(d.a, d.b) | mv-expand z = zipped | project lhs = toint(z[0]), rhs = toint(z[1]), prod = toint(z[0]) * toint(z[1])
+datatable(d:dynamic)[ dynamic({"type":"A","v":1}), dynamic({"type":"B","v":2}), dynamic({"type":"A","v":3}) ] | evaluate bag_unpack(d) | summarize sum(v) by type | sort by type asc
+print d = dynamic({"matrix":[[1,2,3],[4,5,6]]}) | mv-apply row = d.matrix on (extend rs = array_sum(row)) | summarize total = sum(rs)
+print s = '[]' | extend e = parse_json(s) | extend al = array_length(e), s2 = array_sum(e), srt = array_sort_asc(e), keys = bag_keys(e)
+print d = dynamic({"items":[{"name":"a","qty":2},{"name":"b","qty":0},{"name":"c","qty":5}]}) | mv-expand it = d.items | where toint(it.qty) > 0 | summarize total = sum(toint(it.qty)), names = make_set(tostring(it.name))
+print d = dynamic([1,2,3,4,5]) | extend rev = array_reverse(d), rot = array_rotate_right(d, 2) | extend combined = array_concat(rev, rot), cl = array_length(combined), csum = array_sum(combined)
+print x = dynamic({"a":{"deep":{"val":99}}}) | extend rt1 = todynamic(tostring(x)) | extend rt2 = todynamic(tostring(rt1)) | project v0 = toint(x.a.deep.val), v2 = toint(rt2.a.deep.val), eq = tostring(x) == tostring(rt2)
+print d = dynamic({"a":1,"b":2}), e = dynamic({"b":3,"c":4}), f = dynamic({"c":5,"d":6}) | extend m = bag_merge(d, e, f) | extend ks = array_sort_asc(bag_keys(m)) | project ks, mb = toint(m.b), mc = toint(m.c)
+print arr = dynamic([{"k":1},{"k":2},{"k":3}]) | mv-expand with_itemindex=i e = arr | extend tagged = bag_merge(e, pack("idx", i)) | project ki = toint(tagged.k), idx = toint(tagged.idx)
+print d = dynamic([10,20,30,40]) | extend mid = array_slice(d, 1, 2) | mv-expand m = mid to typeof(long) | summarize ms = sum(m) | extend back = pack_array(ms)
+print s = '{"a":null,"b":[null,1,null],"c":{"d":null}}' | extend d = parse_json(s) | project an = isnull(d.a), b0 = isnull(d.b[0]), b1 = d.b[1], cd = isnull(d.c.d), blen = array_length(d.b)
+print d = dynamic({"groups":[{"g":"x","items":[1,2]},{"g":"y","items":[3,4,5]}]}) | mv-apply grp = d.groups on (extend gs = array_sum(grp.items), gn = tostring(grp.g)) | project gn, gs | sort by gn asc
+print d = dynamic([5,4,3,2,1]) | extend sorted = array_sort_asc(d) | extend isSorted = tostring(sorted) == tostring(array_sort_asc(sorted)), first = sorted[0], last = sorted[array_length(sorted)-1]
+print a = dynamic([1,2,3,4,5]) | extend evens = set_intersect(a, dynamic([2,4,6,8])), odds = set_difference(a, dynamic([2,4,6,8])) | extend allback = array_sort_asc(set_union(evens, odds)), eq = tostring(allback) == tostring(a)
+print d = dynamic({"a":[1,2],"b":[3,4],"c":[5,6]}) | extend ks = bag_keys(d) | mv-expand k = ks to typeof(string) | extend arr = d[k], s = array_sum(d[k]) | summarize grand = sum(s), allkeys = make_list(k)
+print d = dynamic([{"v":1},{"v":2},{"v":3},{"v":4}]) | mv-apply e = d on (where toint(e.v) % 2 == 0 | summarize evensum = sum(toint(e.v))) | project evensum
+print s = '{"deep":[[[1]],[[2],[3]]]}' | extend d = parse_json(s) | project l1 = array_length(d.deep), inner = d.deep[1], deepval = toint(d.deep[1][0][0]), deepval2 = toint(d.deep[1][1][0])
+print d = dynamic({"a":1,"b":"text","c":true,"d":[1,2],"e":{"f":3},"g":null}) | extend j = dynamic_to_json(d) | extend rt = parse_json(j) | project jt = j, dlen = array_length(bag_keys(d)), rtlen = array_length(bag_keys(rt))
+print d = dynamic([1.5, 2.5, 3.5]) | extend s = array_sum(d), srt = array_sort_desc(d) | mv-expand v = d to typeof(real) | summarize total = sum(v), maxv = max(v)
+print x = dynamic([[1,"a"],[2,"b"],[3,"c"]]) | mv-expand pair = x | project num = toint(pair[0]), letter = tostring(pair[1]) | summarize make_list(num), make_list(letter)
+datatable(d:dynamic, w:long)[ dynamic([1,2,3]),2, dynamic([4,5]),3 ] | mv-expand v = d to typeof(long) | extend weighted = v * w | summarize sum(weighted) by wt = w | sort by wt asc

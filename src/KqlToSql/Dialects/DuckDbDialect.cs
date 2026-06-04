@@ -47,7 +47,10 @@ public class DuckDbDialect : ISqlDialect
                     ? "NULL"
                     : args[0].Trim('\'', '"'),
             "isempty" => $"({args[0]} IS NULL OR CAST({args[0]} AS VARCHAR) = '')",
-            "isnotempty" or "isnotnull" => $"({args[0]} IS NOT NULL)",
+            // isnotempty is the negation of isempty (false for NULL *and* for ''); it is NOT the same
+            // as isnotnull, which only checks for NULL.
+            "isnotempty" => $"({args[0]} IS NOT NULL AND CAST({args[0]} AS VARCHAR) <> '')",
+            "isnotnull" => $"({args[0]} IS NOT NULL)",
             "isnull" => $"({args[0]} IS NULL)",
             "not" => $"NOT ({args[0]})",
             "strcat" => $"CONCAT({string.Join(", ", args)})",
@@ -84,11 +87,13 @@ public class DuckDbDialect : ISqlDialect
             "parse_json" or "todynamic" => IsArrayLikeText(args[0]) ? args[0] : $"CAST({args[0]} AS JSON)",
             "format_datetime" => $"STRFTIME({args[0]}, {TranslateDateTimeFormat(args[1])})",
             "startofday" => $"DATE_TRUNC('day', {args[0]})",
-            "startofweek" => $"DATE_TRUNC('week', {args[0]})",
+            // KQL weeks start on SUNDAY; DuckDB's DATE_TRUNC('week') starts on Monday. Shift the
+            // input forward a day before truncating and back a day after, so Sunday becomes the anchor.
+            "startofweek" => $"(DATE_TRUNC('week', {args[0]} + INTERVAL '1 day') - INTERVAL '1 day')",
             "startofmonth" => $"DATE_TRUNC('month', {args[0]})",
             "startofyear" => $"DATE_TRUNC('year', {args[0]})",
             "endofday" => $"DATE_TRUNC('day', {args[0]}) + INTERVAL '1 day' - INTERVAL '1 microsecond'",
-            "endofweek" => $"DATE_TRUNC('week', {args[0]}) + INTERVAL '7 days' - INTERVAL '1 microsecond'",
+            "endofweek" => $"(DATE_TRUNC('week', {args[0]} + INTERVAL '1 day') - INTERVAL '1 day') + INTERVAL '7 days' - INTERVAL '1 microsecond'",
             "endofmonth" => $"DATE_TRUNC('month', {args[0]}) + INTERVAL '1 month' - INTERVAL '1 microsecond'",
             "endofyear" => $"DATE_TRUNC('year', {args[0]}) + INTERVAL '1 year' - INTERVAL '1 microsecond'",
             "min_of" => $"LEAST({string.Join(", ", args)})",
@@ -115,9 +120,18 @@ public class DuckDbDialect : ISqlDialect
             "secondofminute" => $"EXTRACT(SECOND FROM {args[0]})",
             "make_datetime" when args.Length == 6 =>
                 $"MAKE_TIMESTAMP({args[0]}, {args[1]}, {args[2]}, {args[3]}, {args[4]}, {args[5]})",
+            // KQL make_datetime accepts year[,month[,day[,hour[,minute[,second]]]]]; missing trailing
+            // components default to their start value. DuckDB MAKE_TIMESTAMP needs all six.
+            "make_datetime" when args.Length is 3 or 4 or 5 =>
+                $"MAKE_TIMESTAMP({args[0]}, {args[1]}, {args[2]}, " +
+                $"{(args.Length > 3 ? args[3] : "0")}, {(args.Length > 4 ? args[4] : "0")}, 0)",
+            "make_datetime" when args.Length == 2 => $"MAKE_TIMESTAMP({args[0]}, {args[1]}, 1, 0, 0, 0)",
             "make_datetime" when args.Length == 1 => $"CAST({args[0]} AS TIMESTAMP)",
             "make_timespan" when args.Length == 3 =>
                 $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
+            // make_timespan(hours, minutes)
+            "make_timespan" when args.Length == 2 =>
+                $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute')",
             // TO_TIMESTAMP returns TIMESTAMP WITH TIME ZONE; KQL datetime is tz-agnostic and our
             // Timestamp columns are naive TIMESTAMP. Project to UTC wall-clock so comparisons don't
             // depend on the DuckDB session TimeZone (the ms/us/ns variants below are already naive).
@@ -134,7 +148,9 @@ public class DuckDbDialect : ISqlDialect
             "base64_decode_tostring" => $"CAST(FROM_BASE64({args[0]}) AS VARCHAR)",
             "translate" => $"TRANSLATE({args[0]}, {args[1]}, {args[2]})",
             "strcmp" => $"CASE WHEN {args[0]} < {args[1]} THEN -1 WHEN {args[0]} = {args[1]} THEN 0 ELSE 1 END",
-            "string_size" => $"OCTET_LENGTH({args[0]})",
+            // string_size = number of UTF-8 bytes. OCTET_LENGTH needs a BLOB; ENCODE() does the
+            // UTF-8 conversion (plain CAST AS BLOB rejects non-ASCII bytes).
+            "string_size" => $"OCTET_LENGTH(ENCODE(CAST({args[0]} AS VARCHAR)))",
             "repeat" => $"REPEAT({args[0]}, {args[1]})",
             "unicode" => $"UNICODE({args[0]})",
             "make_string" => $"CHR({args[0]})",
@@ -150,6 +166,9 @@ public class DuckDbDialect : ISqlDialect
             "hash_sha1" => $"SHA1({args[0]})",
 
             // Array/dynamic functions
+            // strcat_array(array, delimiter) joins array elements — a scalar (the aggregate map has a
+            // same-named string_agg for the aggregate form; this is the scalar array form).
+            "strcat_array" when args.Length == 2 => $"ARRAY_TO_STRING({args[0]}, {args[1]})",
             "array_length" => $"LEN({args[0]})",
             "array_index_of" => $"(LIST_POSITION({args[0]}, {args[1]}) - 1)",
             "array_sort_asc" => $"LIST_SORT({args[0]})",

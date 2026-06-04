@@ -1,0 +1,10 @@
+datatable(g:string, v:long)[ "a",1, "a",2, "b",3 ] | sort by g asc, v asc | serialize rk = row_rank_min(v), rd = row_rank_dense(v)
+datatable(x:long)[ 5,3,8 ] | sort by x desc | serialize cs = row_cumsum(x, false), rev = row_cumsum(1)
+datatable(g:long, x:long)[ 1,10, 1,20, 2,5 ] | sort by g asc, x asc | serialize first = iff(g != prev(g), x, long(null)), last = iff(g != next(g), x, long(null))
+datatable(x:long)[ 1,2,3 ] | sort by x asc | serialize p0 = prev(x, 0), n0 = next(x, 0)
+datatable(x:long)[ 1,2,3 ] | sort by x asc | serialize p3 = prev(x, 3, -1), n3 = next(x, 3, -1)
+datatable(t:datetime, v:long)[ datetime(2021-01-01),5, datetime(2021-01-02),15 ] | make-series s = sum(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-03) step 1d | extend tot = array_sum(s)
+datatable(t:datetime, v:long)[ datetime(2021-01-01),5, datetime(2021-01-02),15 ] | make-series s = sum(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-03) step 1d | extend mx = array_index_of(s, 15.0)
+datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","y",20, "b","x",30 ] | top-nested 2 of cat by Tot=sum(v) with others="REST", top-nested 1 of sub by SubTot=sum(v)
+datatable(cat:string, v:long)[ "a",10, "a",5, "b",20, "c",30 ] | top-nested 2 of cat by mv=sum(v) | order by mv desc
+datatable(id:long, name:string, sc:long)[ 1,"a",5, 2,"c",9, 3,"d",1 ] | top 2 by sc desc

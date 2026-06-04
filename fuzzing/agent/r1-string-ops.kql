@@ -1,0 +1,45 @@
+datatable(s:string)[ "hello world","helloworld","hello-world","HELLO","hi.world","world hello","a hello b" ] | where s has "hello" | project s
+datatable(s:string)[ "hello world","helloworld","hello-world","HELLO","hi.world" ] | where s has_cs "hello" | project s
+datatable(s:string)[ "hello world","helloworld","hello-world","HELLO" ] | where s !has "hello" | project s
+datatable(s:string)[ "foo.bar.baz","foo bar","foobar","BAR","x.bar.y" ] | where s has "bar" | project s
+datatable(s:string)[ "alpha-beta","alpha_beta","alpha beta","alphabeta" ] | where s has "alpha" | project s
+datatable(s:string)[ "The quick brown","quickbrown","brown quick" ] | where s contains "quick" | project s, has_q = s has "quick"
+datatable(s:string)[ "café","cafe","CAFÉ","Café","café" ] | where s =~ "café" | project s
+datatable(s:string)[ "café","cafe","CAFÉ","Café" ] | where s == "café" | project s
+datatable(s:string)[ "Straße","strasse","STRASSE","straße" ] | where s =~ "straße" | project s
+datatable(s:string)[ "emoji😀here","emojihere","😀","abc😀def" ] | where s contains "😀" | project s, len=strlen(s)
+datatable(s:string)[ "naïve","naive","NAÏVE" ] | where s has "naïve" | project s
+datatable(s:string)[ "Hello","HELLO","hello","hELLO" ] | where s in~ ("hello","world") | project s
+datatable(s:string)[ "Hello","HELLO","hello" ] | where s in ("hello","world") | project s
+datatable(s:string)[ "a1b2c3","abc","123","a1","9z9" ] | where s matches regex @"[a-z][0-9]" | project s
+datatable(s:string)[ "2020-01-15","not a date","1999-12-31","abc-de-fg" ] | where s matches regex @"^\d{4}-\d{2}-\d{2}$" | project s
+datatable(s:string)[ "O'Brien","D'Angelo","normal","it's" ] | where s contains "'" | project s, q=strcat(s,"!")
+datatable(s:string)[ "tab\there","newline","quote\"here","back\\slash" ] | project s, len=strlen(s), idx=indexof(s,"\\")
+datatable(s:string)[ "hello","world","kusto" ] | project orig=s, sub1=substring(s,1,3), subneg=substring(s,-2,2), suboor=substring(s,2,100)
+datatable(s:string)[ "hello","abc","" ] | project s, sub_neglen=substring(s,1,-1), sub_zero=substring(s,0,0), sub_big=substring(s,10,5)
+datatable(s:string)[ "a,b,c","x;y;z","single","a,,b","" ] | project s, parts=split(s,","), cnt=array_length(split(s,","))
+datatable(s:string)[ "a,b,c,d","one" ] | project p0=split(s,",")[0], p2=split(s,",")[2], p5=split(s,",")[5]
+datatable(s:string)[ "key=val","a=b=c","noequals","=leading","trailing=" ] | project s, kv=split(s,"=",0), kv2=split(s,"=",1)
+datatable(s:string)[ "  trim me  ","\ttabbed\t","nospace","   " ] | project s, t=trim(@"\s",s), tl=trimstart(@"\s",s), tr=trimend(@"\s",s)
+datatable(s:string)[ "xxabcxx","abc","xxx","" ] | project s, t=trim("x",s), tl=trim_start("x",s)
+datatable(s:string)[ "hello world hello","hello","world" ] | project s, c=countof(s,"hello"), cregex=countof(s,"l+","regex")
+datatable(s:string)[ "abcabcabc","aaa","xyz" ] | project s, i_first=indexof(s,"a"), i_from=indexof(s,"a",2), i_none=indexof(s,"z")
+datatable(s:string)[ "hello","WORLD","MiXeD" ] | project s, up=toupper(s), lo=tolower(s)
+datatable(s:string)[ "café","naïve","Über" ] | project s, up=toupper(s), lo=tolower(s)
+datatable(s:string)[ "a","b","c" ] | project cat=strcat(s,"-",s,"-",1,"-",true), catd=strcat_delim("|",s,s,"end")
+datatable(s:string)[ "one two three","a-b-c","x" ] | project s, repl=replace_string(s," ","_"), reg=replace_regex(s,@"(\w+)",@"[\1]")
+datatable(s:string)[ "aaa","aba","xyz" ] | project s, r=replace_string(s,"a",""), rr=replace_string(s,"","X")
+datatable(s:string)[ "2020-12-31T10:20:30","no match here","42-and-7" ] | project s, ext=extract(@"(\d+)-(\d+)",2,s), ext0=extract(@"(\d+)",0,s)
+datatable(s:string)[ "a1 b2 c3","no digits","x9" ] | project s, all=extract_all(@"([a-z])(\d)",s)
+datatable(s:string)[ "","  ","x",null ] | project s, e=isempty(s), ne=isnotempty(s), n=isnull(s)
+datatable(s:string)[ "","abc",null ] | extend marker = case(isempty(s),"EMPTY",isnull(s),"NULL","FULL") | project s, marker
+datatable(s:string)[ "café","ascii","😀","Straße" ] | project s, sl=strlen(s), ss=string_size(s)
+datatable(s:string)[ "a","ab","abc","" ] | where strlen(s) >= 2 | project s, l=strlen(s)
+datatable(s:string)[ "Hello World","FOO bar","mixed CASE" ] | where s hasprefix "hello" | project s
+datatable(s:string)[ "Hello World","hello there","say hello" ] | where s hassuffix "world" | project s
+datatable(s:string)[ "prefix_test","test_suffix","testing","con-test" ] | where s startswith "test" or s endswith "test" | project s
+datatable(s:string)[ "The cat sat","category","scatter","a cat" ] | where s has "cat" | project s, hp=hasprefix(s,"cat"), c=contains_cs("category","cat")
+datatable(s:string,n:long)[ "apple",1, "Apple",2, "APPLE",3, "banana",4 ] | summarize cnt=count() by lower=tolower(s) | project lower, cnt
+datatable(s:string)[ "a|b|c","x|y","|","||" ] | mv-expand part=split(s,"|") to typeof(string) | project part
+datatable(s:string)[ "hello\nworld","line1\r\nline2","tab\tsep" ] | project s, lines=split(s,"\n"), nl=indexof(s,"\n")
+datatable(s:string)[ "ПриветМир","Привет Мир","МИР привет" ] | where s has "привет" | project s, up=toupper(s)

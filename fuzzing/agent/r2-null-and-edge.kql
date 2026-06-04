@@ -1,0 +1,44 @@
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | extend nv=iif(k==2, long(null), v) | summarize s=sum(nv), av=avg(nv), mn=min(nv), mx=max(nv), c=count(), cv=count(nv), anyv=take_any(nv), sd=stdev(nv) by k | order by k asc
+datatable(g:string, x:long)[ "a",1, "a",long(null), "b",long(null), "b",long(null) ] | summarize s=sum(x), av=avg(x), c=count(), cx=count(x), mn=min(x), mx=max(x), arr=make_list(x), arrif=make_list_if(x, isnotnull(x)) by g | order by g asc
+datatable(x:long)[ 5, 10, 15, long(null), long(null) ] | summarize p=percentiles(x, 50), mn=min(x), mx=max(x), c=count(), cx=count(x)
+datatable(g:string, x:long)[ "a",long(null), "b",long(null) ] | summarize mn=min(x), mx=max(x), arg=arg_max(x, g), argn=arg_min(x, g) by g | order by g asc
+datatable(a:long, b:long)[ 1,1, 2,long(null), long(null),3, long(null),long(null) ] | join kind=inner (datatable(a:long, c:string)[ 1,"one", long(null),"nullkey" ]) on a | project a, b, c
+datatable(a:long, b:long)[ 1,1, 2,2, long(null),3 ] | join kind=leftouter (datatable(a:long, c:string)[ 1,"one", long(null),"nk" ]) on a | order by b asc | project a, b, c
+datatable(a:long)[ 1, long(null), 2 ] | join kind=fullouter (datatable(a:long)[ long(null), 2, 3 ]) on a | project left=a, right=a1 | order by left asc nulls last, right asc nulls last
+datatable(k:long)[ 1, 2, long(null) ] | lookup (datatable(k:long, name:string)[ 1,"x", long(null),"nullname" ]) on k | project k, name | order by k asc nulls first
+datatable(x:int)[ 1,2,3 ] | extend y=iif(x==2, int(null), x*10) | extend z=coalesce(y, -1) | summarize sz=sum(z), sy=sum(y), cny=countif(isnull(y))
+print a=iif(isnull(int(null)), iif(isempty(""), "both", "n"), "no"), b=case(isnull(real(null)), "c1", isempty("x"), "c2", "def"), c=coalesce(tostring(int(null)), tostring(dynamic(null)), "fallback")
+datatable(s:string)[ "a", "", "b", "" ] | extend n=tostring(dynamic(null)) | extend r1=isempty(n), r2=isempty(s), r3=isnull(n), r4=strcat(s, n, "Z") | project s, n, r1, r2, r3, r4
+datatable(x:long)[ 9223372036854775807, -9223372036854775808, 0 ] | extend p=x+1, m=x-1, d=x*2 | project x, p, m, d
+print a=int(2147483647)+int(1), b=int(-2147483648)-int(1), c=long(2147483647)+long(1), d=int(2147483647)*int(2)
+print a=todouble("nan")+1.0, b=todouble("inf")-todouble("inf"), c=todouble("inf")*0.0, d=todouble("nan")==todouble("nan"), e=todouble("inf")>1e308
+datatable(r:real)[ 1.0, 2.0, real(null) ] | extend x=iif(r>1.5, todouble("inf"), r) | summarize mn=min(x), mx=max(x), s=sum(x), av=avg(x), c=count(), cx=count(x)
+datatable(r:real)[ 1.0, 0.0, -1.0 ] | extend d=1.0/r, l=log(r), sq=sqrt(r) | project r, d, l, sq | order by r asc
+print d1=datetime(9999-12-31 23:59:59.9999999), d2=datetime(9999-12-31 23:59:59.9999999)+1tick, diff=datetime(9999-12-31)-datetime(0001-01-01)
+print a=datetime(2020-01-01)+timespan(null), b=datetime(null)+1d, c=datetime(2020-01-01)-datetime(null), d=isnull(datetime(null))
+datatable(t:datetime)[ datetime(2020-01-01), datetime(null), datetime(9999-12-31) ] | extend b=bin(t, 1d), wk=startofweek(t), age=now()-t | project t, b | order by t asc nulls last
+datatable(t:datetime, span:timespan)[ datetime(2020-01-01),1d, datetime(null),timespan(null) ] | extend e=t+span | project t, span, e | order by e asc nulls first
+print a=tolong("abc"), b=toint("12.5"), c=todouble(""), d=todatetime("not a date"), e=tobool("maybe"), f=toguid("xyz")
+print a=tostring(int(null)), b=tostring(real(null)), c=tostring(datetime(null)), d=tostring(bool(null)), e=tostring(long(null)), f=tostring(dynamic(null))
+datatable(x:int)[ 1, 2, 3 ] | extend s=tostring(x), back=toint(tostring(x)+"0"), bad=toint("x"+tostring(x)) | project x, s, back, bad
+print a=tolong(2147483648.9), b=toint(2147483647.0), c=tolong(-0.0), d=toint(true), e=todouble(false)
+datatable(d:dynamic)[ dynamic(null), dynamic({"a":null}), dynamic({"a":{"b":null}}), dynamic([null,1,null]) ] | extend va=d.a, vab=d.a.b, idx0=d[0], al=array_length(d), t=gettype(d) | project t, va, vab, idx0, al
+datatable(d:dynamic)[ dynamic({"k":1}), dynamic(null), dynamic([1,2,3]) ] | mv-expand d | project d
+datatable(d:dynamic)[ dynamic([]), dynamic(null), dynamic([1,2]) ] | mv-expand x=d | summarize c=count(), cx=count(x)
+datatable(d:dynamic)[ dynamic([1,null,3]), dynamic(null) ] | extend s=array_sum(d), l=array_length(d), srt=array_sort_asc(d) | project s, l, srt
+print a=parse_json("null"), b=parse_json("[]"), c=parse_json("{}"), d=parse_json(""), e=parse_json("not json"), f=isnull(parse_json("null"))
+datatable(x:int)[ ] | extend y=x+1, z=tostring(x) | summarize s=sum(y), mx=max(z), c=count(), arr=make_list(x) by z | order by z asc
+datatable(x:int)[ ] | join kind=inner (datatable(x:int)[ 1,2 ]) on x | project x
+datatable(x:int)[ 1,2 ] | join kind=leftouter (datatable(x:int)[ ]) on x | project x | order by x asc
+datatable(x:int)[ ] | union (datatable(x:int)[ ]) | summarize c=count()
+datatable(x:int)[ 1,2,3 ] | where false | top 5 by x asc | project x
+datatable(x:int)[ 1,2,3 ] | where x > 100 | summarize mn=min(x), mx=max(x), s=sum(x), av=avg(x), c=count() by bin(x, 10)
+datatable(x:long)[ 1, 2, 3 ] | extend y=iif(x==2, long(null), x) | summarize dc=dcount(y), arr=make_set(y), sl=make_list(y) | project arr_has_null=array_length(arr), sl
+datatable(s:string)[ "abc", "", "x" ] | extend sub1=substring(s, 2, 10), sub2=substring(s, -2, 5), idx=indexof(s, ""), rep=replace_string(s, "", "_") | project s, sub1, sub2, idx, rep
+print a=strcat_array(dynamic([1,null,3]), "-"), b=split("a,,b", ","), c=split("", ","), d=array_length(split("", ",")), e=strcat_array(dynamic([]), ",")
+datatable(x:int)[ 1, 2, 3 ] | extend big=strrep("ab", 50) | extend sl=strlen(big), sub=substring(big, 95, 20) | summarize mx=max(sl), s=take_any(sub)
+datatable(x:long)[ 5, 3, 8, long(null), 1, long(null) ] | top 3 by x desc nulls first | project x
+datatable(x:long)[ 5, 3, 8, long(null), 1 ] | sort by x desc | extend rn=row_number() | project rn, x
+datatable(g:string, x:long)[ "a",3, "a",long(null), "a",1, "b",long(null) ] | sort by g asc, x asc nulls last | extend rn=row_number(), rng=row_number(1, g != prev(g)) | project g, x, rn
+range x from 1 to 5 step 1 | extend y=iif(x % 2 == 0, long(null), x) | make-series s=sum(y) default=long(null) on x from 1 to 6 step 1
+datatable(k:long, v:long)[ 1,10, 1,long(null), 2,long(null) ] | summarize m=make_bag(pack(tostring(k), v)) | project m

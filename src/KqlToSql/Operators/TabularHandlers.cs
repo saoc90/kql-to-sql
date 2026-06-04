@@ -278,14 +278,18 @@ internal class TabularHandlers : OperatorHandlerBase
             {
                 var expr = ConvertOrderExpression(oe.Expression);
                 var dir = oe.Ordering?.ToString().Trim().ToUpperInvariant() ?? "ASC";
-                orderings.Add($"{expr} {dir}");
+                orderings.Add($"{expr} {WithNulls(dir)}");
             }
             else
             {
                 var expr = ConvertOrderExpression(se.Element);
-                orderings.Add($"{expr} DESC");
+                orderings.Add($"{expr} {WithNulls("DESC")}");
             }
         }
+
+        // KQL orders nulls first on ASC and last on DESC; DuckDB's defaults are the opposite, so
+        // make the null placement explicit to match Kusto.
+        static string WithNulls(string dir) => dir == "ASC" ? "ASC NULLS FIRST" : "DESC NULLS LAST";
 
         // Wrap in a subquery if:
         //   (a) leftSql has a trailing ORDER BY (e.g. from | top) — prevents invalid double ORDER BY, or

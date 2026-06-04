@@ -19,7 +19,9 @@
     <Project Path="tests/KqlToSql.Tests/KqlToSql.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/KqlToSql.DifferentialTests/KqlToSql.DifferentialTests.csproj" />
     <Project Path="tests/KqlToSql.DuckDbExtension.Tests/KqlToSql.DuckDbExtension.Tests.csproj" />
+    <Project Path="tests/KqlToSql.Fuzzer/KqlToSql.Fuzzer.csproj" />
     <Project Path="tests/KqlToSql.IntegrationTests/KqlToSql.IntegrationTests.csproj" />
     <Project Path="tests/KustoApi.Tests/KustoApi.Tests.csproj" />
   </Folder>

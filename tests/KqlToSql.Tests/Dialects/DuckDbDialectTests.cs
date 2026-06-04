@@ -188,10 +188,10 @@ public class DuckDbDialectTests
     }
 
     [Fact]
-    public void DuckDb_Has_Uses_Ilike()
+    public void DuckDb_Has_UsesTermRegex()
     {
         var sql = _converter.Convert("StormEvents | where State has 'tex'");
-        Assert.Contains("ILIKE", sql);
+        Assert.Contains("regexp_matches", sql);
     }
 
     [Fact]

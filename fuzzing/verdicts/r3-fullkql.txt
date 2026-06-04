@@ -1,0 +1,94 @@
+#00 SqlExecError
+let L = datatable(k:long, v:string, w:string)[ 1,"a","p", 2,"b","q", 3,"c","r" ]; let R = datatable(k:long, v:string, w:string)[ 2,"x","m", 3,"y","n", 4,"z","o" ]; L | join kind=fullouter R on k | project k, k1, v, v1, w, w1 | order by k asc, k1 asc
+
+#01 SqlExecError
+let L = datatable(k:long, v:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, v:string)[ 2,"x", 3,"y" ]; L | join kind=leftouter R on k | extend combo = strcat(v, "|", v1) | order by k asc
+
+#02 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c", 4,"d" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y" ]; L | join kind=leftouter R on k | summarize cnt = countif(isempty(rv)), cntnull = countif(isnull(rv))
+
+#03 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c", 4,"d" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y" ]; L | join kind=leftouter R on k | extend flag = iff(rv == "", "empty", iff(isnull(rv), "null", rv)) | order by k asc
+
+#06 MismatchRows
+let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, z:string)[ 3,"c", 4,"d" ]; A | union B | project x, y, z | order by x asc
+
+#07 MismatchRows
+let A = datatable(x:long, s:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, s:string)[ 2,"c", 3,"d" ]; let C = datatable(x:long, s:string)[ 3,"e", 4,"f" ]; union withsource=src A, B, C | summarize n=count(), vals=make_set(s) by src | order by src asc
+
+#08 MismatchRows
+let A = datatable(x:long, s:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, s:string)[ 2,"c" ]; union withsource=src A, B | where src has "B" | order by x asc
+
+#09 MismatchRows
+let A = datatable(x:long, y:long)[ 1,10, 2,20 ]; let B = datatable(x:long, y:long)[ 3,30 ]; union withsource=tbl kind=outer A, B | extend src2 = tbl | project x, y, src2 | order by x asc
+
+#10 SqlExecError
+let L = datatable(k:long, v:string)[ 1,"a", 1,"b", 2,"c" ]; let R = datatable(k:long, v:string)[ 1,"x", 1,"y", 2,"z" ]; L | join kind=inner R on k | project k, v, v1 | order by v asc, v1 asc
+
+#13 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", long(null),"n1", long(null),"n2" ]; let R = datatable(k:long, rv:string)[ 1,"x", long(null),"m1", long(null),"m2" ]; L | join kind=inner R on k | order by lv asc, rv asc
+
+#14 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", long(null),"n" ]; let R = datatable(k:long, rv:string)[ long(null),"m", 2,"y" ]; L | join kind=rightouter R on k | project k, k1, lv, rv | order by rv asc
+
+#15 MismatchRows
+let L = datatable(a:long, b:string, lv:string)[ 1,"p","l1", 2,"q","l2", 3,"r","l3" ]; let R = datatable(a:long, b:string, rv:string)[ 1,"p","r1", 2,"x","r2", 3,"r","r3" ]; L | join kind=fullouter R on a, b | project a, a1, b, b1, lv, rv | order by lv asc, rv asc
+
+#19 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 1,"x", 3,"z", 5,"w" ]; L | lookup kind=leftouter R on k | extend tag = iff(isnull(rv), "miss", "hit") | order by k asc
+
+#20 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, lv:string)[ 1,"x", 3,"z" ]; L | lookup R on k | order by k asc
+
+#22 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 1,"x", 1,"x2", 3,"z" ]; L | lookup kind=leftouter R on k | order by k asc, rv asc
+
+#24 SqlExecError
+let L = datatable(k:long, v:string)[ 1,"a", 2,"b" ]; let R = datatable(k:long, v:string)[ 1,"x", 2,"y" ]; let M = datatable(k:long, v:string)[ 1,"p", 2,"q" ]; L | join kind=inner R on k | join kind=inner M on k | project k, v, v1, v2 | order by k asc
+
+#26 MismatchRows
+let A = datatable(x:long, y:string, z:long)[ 1,"a",100 ]; let B = datatable(x:long, y:string)[ 2,"b" ]; let C = datatable(x:long)[ 3 ]; union A, B, C | project x, y, z | order by x asc
+
+#28 SqlExecError
+let L = datatable(k:long, v:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, v:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=fullouter R on k | where isnull(v) or isnull(v1) | project k, k1, v, v1 | order by k asc, k1 asc
+
+#29 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=fullouter R on k | summarize leftonly=countif(isnull(rv)), rightonly=countif(isnull(lv)), both=countif(isnotnull(lv) and isnotnull(rv))
+
+#31 MismatchRows
+let L = datatable(k:string, lv:long)[ "café",1, "café",2 ]; let R = datatable(k:string, rv:long)[ "café",10 ]; L | join kind=leftouter R on k | order by lv asc
+
+#33 MismatchOrder
+let L = datatable(k:long, v:long)[ 1,10, 2,20 ]; let R = datatable(k:long, w:long)[ 1,100, 3,300 ]; L | join kind=fullouter R on k | union (L | join kind=fullouter R on k) | order by k asc, k1 asc
+
+#34 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=leftanti R on k | union (L | join kind=rightanti R on k) | project k, lv, rv | order by k asc
+
+#35 SqlExecError
+let L = datatable(k:long, v:bool)[ 1,true, 2,false, 3,true ]; let R = datatable(k:long, v:bool)[ 1,false, 2,false, 4,true ]; L | join kind=fullouter R on k | project k, k1, v, v1 | order by k asc, k1 asc
+
+#36 SqlExecError
+let L = datatable(k:long, t:datetime)[ 1,datetime(2020-01-01), 2,datetime(2021-01-01) ]; let R = datatable(k:long, t:datetime)[ 1,datetime(2019-06-01), 3,datetime(2022-01-01) ]; L | join kind=fullouter R on k | project k, k1, t, t1, diff = t - t1 | order by k asc, k1 asc
+
+#37 SqlExecError
+let L = datatable(k:long, sp:timespan)[ 1,1h, 2,2h ]; let R = datatable(k:long, sp:timespan)[ 1,30m, 3,3h ]; L | join kind=leftouter R on k | project k, sp, sp1, total = sp + sp1 | order by k asc
+
+#38 SqlExecError
+let L = datatable(k:guid, lv:string)[ guid(11111111-1111-1111-1111-111111111111),"a", guid(22222222-2222-2222-2222-222222222222),"b" ]; let R = datatable(k:guid, rv:string)[ guid(11111111-1111-1111-1111-111111111111),"x" ]; L | join kind=leftouter R on k | order by lv asc
+
+#39 SqlExecError
+let L = datatable(k:long, v:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, v:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=leftouter R on k | project-rename rightval = v1 | extend leftval = v | project k, leftval, rightval | order by k asc
+
+#40 SqlExecError
+let L = datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ]; let R = datatable(k:long, v:long)[ 2,200, 3,300, 4,400 ]; L | join kind=fullouter R on k | project-away v1 | order by k asc
+
+#41 MismatchRows
+let L = datatable(k:long, lv:long)[ 1,10, 2,20, 3,30 ]; let R = datatable(k:long, rv:long)[ 1,100, 2,200 ]; L | join kind=leftouter (R | extend rv = rv * 2) on k | summarize sum(rv) by k | order by k asc
+
+#42 MismatchRows
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c", 4,"d" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y" ]; L | join kind=leftouter R on k | extend len = strlen(rv) | order by k asc
+
+#44 SqlExecError
+let L = datatable(k:long, lv:dynamic)[ 1,dynamic({"n":1}), 2,dynamic({"n":2}) ]; let R = datatable(k:long, lv:dynamic)[ 1,dynamic([9,8]), 3,dynamic([7,6]) ]; L | join kind=fullouter R on k | project k, k1, leftd=lv, rightd=lv1 | order by k asc, k1 asc
+
+TOTAL BUGS: 31

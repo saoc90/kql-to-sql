@@ -1,0 +1,44 @@
+datatable(k:long, v:long, w:long)[ 1,10,100, 1,10,50, 1,20,200, 2,30,300, 2,30,150 ] | summarize arg_max(v, w), arg_min(v, w), arg_max(w, v) by k
+datatable(k:long, v:long, t:string)[ 1,long(null),"a", 1,20,"b", 2,long(null),"c", 2,long(null),"d" ] | summarize arg_max(v, t), arg_min(v, t) by k
+datatable(k:long, v:real)[ 1,1.5, 1,real(nan), 1,2.5, 2,real(nan) ] | summarize mx=max(v), mn=min(v), amx=arg_max(v, k), s=sum(v) by k
+datatable(g:string, v:long)[ "a",1, "a",2, "b",3, "b",4 ] | summarize sl=make_list(v), ss=make_set(v), sli=make_list(strcat("p", tostring(v))) by g | extend cnt=array_length(sl)
+datatable(k:long, v:dynamic)[ 1,dynamic({"a":1}), 1,dynamic({"a":2,"b":3}), 1,dynamic({"c":4}), 2,dynamic({"a":9}) ] | summarize bag=make_bag(v) by k
+datatable(k:long, v:dynamic)[ 1,dynamic({"x":1}), 1,dynamic(null), 1,dynamic({"y":2}), 2,dynamic(null) ] | summarize make_bag(v), make_list(v), make_list_with_nulls(v) by k
+datatable(x:long)[ 1,2,3,4,5 ] | where x > 100 | summarize s=sum(x), c=count(), mlist=make_list(x), mset=make_set(x), av=avg(x) by bin(x, 10)
+datatable(v:long)[ 1,2,3,4,5,6,7,8,9,10 ] | summarize sum(v), count() by g=iif(v % 2 == 0, "even", "odd") | order by g asc
+datatable(v:long, b:bool)[ 1,true, 2,false, 3,true, 4,false, 5,true ] | summarize countif(b), countif(not(b)), sumif(v, b), sumif(v, not b), avgif(v, b and v>1)
+datatable(v:int)[ int(null), int(null), int(null) ] | summarize sum(v), avg(v), min(v), max(v), count(), countif(isnull(v)), make_list(v), make_set(v)
+datatable(k:long, v:long)[ 1,10, 1,20, 1,30, 2,40 ] | summarize p=make_list(v), tot=sum(v) by k | where array_length(p) > 1 and tot > 50
+datatable(k:string, v:long)[ "a",1, "a",2, "b",3, "c",4, "c",5, "c",6 ] | summarize n=count(), s=sum(v), mx=max(v) by k | where n >= 2 | order by s desc
+datatable(x:real)[ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 ] | summarize stdev(x), stdevp(x), variance(x), variancep(x), avg(x), sum(x)
+datatable(x:long)[ 5 ] | summarize stdev(x), variance(x), stdevp(x), variancep(x)
+datatable(g:string, x:real)[ "a",1.5, "a",2.5, "a",3.5, "b",10.0 ] | summarize stdev(x), variance(x), sum(x), avg(x) by g
+datatable(t:datetime, v:long)[ datetime(2020-01-01 23:30:00),1, datetime(2020-01-02 00:30:00),2, datetime(2020-01-02 12:00:00),3 ] | summarize sum(v), count() by bin(t, 12h)
+datatable(t:datetime, v:long)[ datetime(2007-03-09),1, datetime(2007-03-11),2, datetime(2007-12-31),3, datetime(2008-01-01),4 ] | summarize sum(v) by bin(t, 30d)
+datatable(x:long)[ -7,-3,0,2,5,9,-1 ] | summarize count(), sum(x) by bin(x, 4)
+datatable(x:real)[ -2.5, -1.0, 0.0, 1.5, 3.0 ] | summarize count(), sum(x) by bin(x, 1.5)
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30 ] | summarize total=sum(v) by k | summarize gtot=sum(total), gmax=max(total), glist=make_list(total), gcnt=count()
+datatable(v:long)[ 1,2,3,4,5,6 ] | summarize a=avg(iif(v>3, v*1.0, v*0.5)), s=sum(iif(v>3, v, -v)), c=countif(iif(v>3, true, false))
+datatable(k:long, v:long)[ 1,5, 1,15, 1,25, 2,35 ] | summarize m=max(iif(v>10, v, long(null))), mn=min(iif(v>10, v, long(null))), cnt=countif(v>10) by k
+datatable(v:long)[ 1,2,3,4,5 ] | summarize nested=sum(iif(v>2, iif(v>4, v*100, v*10), v))
+datatable(g:long, v:long)[ 1,100, 1,200, 2,300, 2,400, 3,500 ] | summarize s=sum(v) by g | top 2 by s desc
+datatable(s:string, g:string)[ "z","a", "y","a", "x","b", "z","b", "y","b" ] | summarize ml=make_list(s), ms=make_set(s) by g | order by g asc
+datatable(v:long)[ 9223372036854775807, 1, 2 ] | summarize sum(v), max(v), min(v), avg(v)
+datatable(v:real)[ 1e300, 1e300, -1e300 ] | summarize sum(v), max(v), avg(v)
+datatable(b:bool, v:long)[ bool(null),1, true,2, false,3, bool(null),4 ] | summarize countif(b), countif(not(b)), countif(isnull(b)), sumif(v, b), count()
+datatable(k:long, v:long)[ 1,10, 2,20, 3,30, 4,40 ] | summarize take_any(v), take_any(k), count() by parity=k%2
+datatable(k:long, v:string)[ 1,"a", 1,"b", 2,"c" ] | summarize dl=make_list(v), strcat_g=make_set(v) by k | extend joined=strcat_array(dl, ",")
+datatable(x:long, y:long)[ 1,1, 1,1, 1,2, 2,1 ] | summarize c=count() by x, y | summarize subtotals=make_list(c), n=count() by x
+datatable(v:long)[ 1,2,3,4,5,6,7,8,9,10 ] | summarize loff=countif(v>=3 and v<=7), hi=sumif(v, v>5), lo=sumif(v, v<=5) | extend ratio=hi*1.0/lo
+datatable(k:string, v:long)[ "g","1", "g",2, "h",3 ] | summarize anyv=take_any(v), firstk=take_any(k) by k
+datatable(d:datetime, v:long)[ datetime(2020-01-01),5, datetime(2020-01-01),3, datetime(2020-02-01),7 ] | summarize amx=arg_max(v, d), amn=arg_min(v, d), maxd=max(d)
+datatable(k:long, a:long, b:long)[ 1,10,1, 1,10,2, 1,5,9, 2,20,3 ] | summarize arg_max(a, b, k), arg_min(a, b) by k
+datatable(v:decimal)[ decimal(1.1), decimal(2.2), decimal(3.3) ] | summarize sum(v), avg(v), min(v), max(v)
+datatable(g:long, v:long)[ 1,1, 1,2, 1,3, 2,10, 2,20 ] | summarize p25=percentile(v, 25), med=percentile(v, 50) by g | where med > 2
+datatable(v:long)[ 10,20,30,40,50 ] | summarize bins=make_list(v) by bin(v, 25) | order by bin_v asc
+datatable(s:string)[ "1","2","3","abc","4" ] | summarize sumlong=sum(tolong(s)), cnt=count(), nullcnt=countif(isnull(tolong(s)))
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,40, 3,50 ] | summarize mx=max(v), arg_max(v, k) by grp=k > 1 | order by grp asc
+datatable(x:long)[ 1,2,3,4,5 ] | summarize totals=sum(x), lst=make_list(x*x), setvals=make_set(x % 2)
+datatable(g:string, v:long)[ "a",3, "a",1, "a",2, "b",5, "b",4 ] | summarize sortedlist=make_list(v) by g | extend issorted=(sortedlist == array_sort_asc(sortedlist))
+datatable(v:long, w:real)[ 1,1.5, 2,2.5, 3,3.5 ] | summarize wsum=sum(v*w), wavg=avg(v*w), prod_list=make_list(v*w)
+datatable(k:long)[ 1,1,2,2,2,3 ] | summarize c=count() by k | summarize histo=make_bag(pack(tostring(k), c))

@@ -12,7 +12,7 @@ public class ExtendOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | extend TotalInjuries = InjuriesDirect + InjuriesIndirect | sort by TotalInjuries desc | take 1 | project State, EventType, TotalInjuries";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State, EventType, TotalInjuries FROM (SELECT *, InjuriesDirect + InjuriesIndirect AS TotalInjuries FROM StormEvents ORDER BY TotalInjuries DESC LIMIT 1)", sql);
+        Assert.Equal("SELECT State, EventType, TotalInjuries FROM (SELECT *, InjuriesDirect + InjuriesIndirect AS TotalInjuries FROM StormEvents ORDER BY TotalInjuries DESC NULLS LAST LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

@@ -1,0 +1,45 @@
+let a = datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ]; let b = a | summarize count() by k; let c = b | extend count_ = count_ * 2; c | join kind=inner (a) on k | project k, count_, v | sort by k asc, v asc
+let base = datatable(i:int, l:long)[ -5,-5, 0,0, 3,2147483648 ]; let step1 = base | extend ["select"] = i + 1; let step2 = step1 | extend ["from"] = l - 1; step2 | project ["select"], ["from"], i | sort by i asc
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | as T1 | summarize s = sum(v) by k | as T2 | extend doubled = s * 2 | join kind=leftouter (T1 | summarize c = count() by k) on k | project k, s, doubled, c | sort by k asc
+let nums = datatable(i:int)[ 1, 2, 3, 4, 5 ]; let evens = nums | where i % 2 == 0; let odds = nums | where i % 2 == 1; evens | union odds | summarize total = sum(i), cnt = count() | extend mean = total / cnt
+print x = 1 | extend y = x + 1 | extend x = y * 10 | extend z = x + y | project x, y, z
+datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", "O'Brien","x" ] | summarize Column1 = count() by tag | extend Column2 = Column1 + 1 | project Column1, tag, Column2 | sort by tag asc
+let m = materialize(datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ] | extend w = v * 2); m | join kind=inner (m | where w > 20) on k | project k, v, w, w1 | sort by k asc
+datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1, 7,100,3.25 ] | where i > -10 | where i > 0 | where i < 100 | where i != 3 | project i, l | sort by i asc
+datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1 ] | where i > 0 | where i < 0 | project i
+let t = datatable(t:datetime, span:timespan)[ datetime(2007-01-01),1d, datetime(2020-06-15 13:45:00),2h ]; let agg = t | summarize mx = max(t), mn = min(t); agg | extend diff = mx - mn | project diff, mx, mn
+datatable(id:long, name:string, score:real)[ 1,"a",1.5, 2,"b",2.5, 3,"c",3.5 ] | extend order = score * 10 | extend group = name | project group, order, id | sort by id asc
+let d = datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic([10,20,30]), dynamic({"x":{"y":1}}) ]; let e = d | extend a = d.a; let f = e | extend b0 = d.b[0]; f | project a, b0 | sort by a asc
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | summarize arg_max(v, *) by k | extend v = v + 1 | project k, v | sort by k asc
+print value = 5 | extend count = value + 1 | extend sum = count * 2 | extend avg = sum / count | project value, count, sum, avg
+let r0 = range x from 1 to 5 step 1; let r1 = r0 | extend y = x * x; let r2 = r1 | where y > 4; let r3 = r2 | summarize s = sum(y); r3 | extend label = "result"
+datatable(s:string)[ "a", "b", "c" ] | extend idx = row_number() | extend s = strcat(s, tostring(idx)) | project idx, s | sort by idx asc
+datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1, 7,100,3.25 ] | summarize by i, l | summarize cnt = count() by i | summarize total = sum(cnt) | extend final = total + 0
+let p = datatable(k:long)[ 1, 2, 3 ]; let q = p | extend k = k + 10; let s = q | extend k = k * 2; s | join kind=inner (p) on $left.k == $right.k | project k, k1
+datatable(id:long, name:string, score:real, active:bool, ts:datetime, cat:string)[ 1,"a",1.5,true,datetime(2020-01-01),"p", 2,"b",2.5,false,datetime(2021-06-01),"q" ] | project-away ts | project-rename label = name | extend label = strcat(label, "_x") | sort by id asc
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | summarize make_list(v) by k | mv-expand v = v_list to typeof(long) | summarize sum(v) by k | sort by k asc
+print a = 1, b = 2 | extend c = pack("x", a, "y", b) | mv-expand kind=array c | project c | sort by tostring(c) asc
+let base = datatable(i:int)[ 1, 2, 3 ]; let l1 = base | extend j = i + 1; let l2 = l1 | extend k = j + 1; let l3 = l2 | extend m = k + 1; let l4 = l3 | extend n = m + 1; l4 | project i, j, k, m, n | sort by i asc
+datatable(i:int, l:long)[ 1,100, 2,200, 3,300 ] | extend table = i | extend select = l | extend from = table + select | project table, select, from | sort by table asc
+datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ] | join kind=inner (datatable(k:long, w:long)[ 1,100, 2,200 ]) on k | join kind=leftouter (datatable(k:long, z:long)[ 1,1000 ]) on k | project k, v, w, z | sort by k asc
+let x = datatable(n:long)[ 5, 10, 15 ]; let y = x | summarize total = sum(n); let z = toscalar(y); x | extend frac = n * 100 / z | project n, frac | sort by n asc
+datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", "O'Brien","x" ] | summarize cnt = count() by tag | top 2 by cnt desc | extend rank = row_number() | project rank, tag, cnt
+print p = "hello" | project print_0 = p | extend print_0 = strcat(print_0, "!") | project print_0
+datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1, 7,100,3.25 ] | order by r desc | extend cum = row_cumsum(r) | project r, cum
+let s = datatable(g:string, v:long)[ "a",1, "a",2, "b",3, "b",4 ]; s | summarize total = sum(v), lst = make_list(v) by g | mv-apply x = lst to typeof(long) on (summarize mx = max(x)) | project g, total, mx | sort by g asc
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30 ] | partition by k (top 1 by v desc) | sort by k asc, v desc
+datatable(i:int)[ 1, 2, 3, 4 ] | extend grp = i % 2 | summarize cnt = count() by grp | join kind=fullouter (datatable(grp:long, label:string)[ 0,"even", 1,"odd" ]) on grp | project grp, cnt, label | sort by grp asc
+let f = datatable(v:long)[ 1, 2, 3, 4, 5 ]; f | summarize p = percentiles(v, 50) | extend tag = "median"
+datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ] | extend v = v + 1 | extend v = v * 2 | extend v = v - 5 | summarize sum(v) by k | sort by k asc
+print n = 10 | extend arr = range(1, n, 1) | mv-expand item = arr to typeof(long) | summarize cnt = count(), total = sum(item)
+let a = datatable(id:long, parent:long)[ 1,0, 2,1, 3,1, 4,2 ]; a | join kind=inner (a | project pid = id, pparent = parent) on $left.parent == $right.pid | project id, parent, pparent | sort by id asc
+datatable(s:string)[ "1", "2", "3" ] | extend num = toint(s) | summarize lst = make_list(num) | extend rev = array_reverse(lst) | project lst, rev
+datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1, 7,100,3.25 ] | summarize mn = min(i), mx = max(i), av = avg(r) | extend rng = mx - mn | extend scaled = av * rng
+let base = datatable(k:long, v:string)[ 1,"a", 2,"b", 3,"c" ]; let pivoted = base | summarize lst = make_list(v); pivoted | extend joined = strcat_array(lst, ",") | project joined
+datatable(id:long, name:string)[ 1,"a", 2,"b" ] | extend tags = pack_array(name, name) | mv-expand tag = tags | summarize cnt = count() by id | sort by id asc
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | distinct k, v | summarize cnt = count() by k | extend total = toscalar(datatable(x:long)[ 1, 2, 3 ] | summarize sum(x)) | sort by k asc
+print x = dynamic([1, 2, 3]) | mv-expand y = x to typeof(long) | extend y = y * 10 | summarize sum(y), make_list(y)
+let outer = datatable(k:long, v:long)[ 1,5, 2,10 ]; let inner = datatable(k:long, w:long)[ 1,7, 1,8, 2,9 ]; outer | join kind=inner (inner | summarize mw = max(w) by k) on k | extend gap = mw - v | project k, v, mw, gap | sort by k asc
+datatable(t:datetime)[ datetime(2020-01-01), datetime(2020-02-15), datetime(2020-03-20) ] | extend month = startofmonth(t) | summarize cnt = count() by month | order by month asc
+datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1, 7,100,3.25 ] | extend bucket = bin(r, 1.0) | summarize cnt = count(), avg_i = avg(i) by bucket | sort by bucket asc
+let z = datatable(k:long, v:long)[ 1,10, 2,20 ]; z | extend Column1 = k, Column2 = v | summarize Column1 = sum(Column1), Column2 = sum(Column2) | project Column1, Column2

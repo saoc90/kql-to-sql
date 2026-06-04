@@ -1,0 +1,45 @@
+datatable(s:string)[ "user=alice;role=admin;ttl=300", "user=bob;role=user;ttl=60" ] | parse kind=regex s with "user=" u:string ";role=" role:string ";ttl=" ttl:int | where ttl between (50 .. 100) | project u, role, ttl
+datatable(s:string)[ "a=1 b=2 c=3", "a=10 b=20 c=30" ] | parse s with "a=" a:int " b=" b:int " c=" c:int | extend total = a + b + c | where total > 6 | project total
+datatable(s:string)[ "2020-01-01T00:00:00Z ERR code=5", "2021-12-31T23:59:59Z OK code=0" ] | parse s with d:datetime " " level:string " code=" code:int | where d between (datetime(2020-01-01) .. datetime(2021-06-01)) | project level, code
+datatable(s:string)[ "IP=10.0.0.1 port=8080", "IP=192.168.1.1 port=443" ] | parse kind=regex s with "IP=" ip:string " port=" port:long | summarize c=count() by port | project port, c
+datatable(s:string)[ "level=ERROR module=auth latency=123ms", "level=WARN module=db latency=45ms" ] | parse s with "level=" lvl " module=" mod " latency=" lat:int "ms" | where lat > 50 and lvl has "ERR" | project mod, lat
+datatable(s:string)[ "  key  =  value  ", "x=y" ] | parse-kv s as (key:string, x:string) with (pair_delimiter=' ', kv_delimiter='=')
+datatable(s:string)[ "a:1,b:2,c:3", "a:4,b:5" ] | parse-kv s as (a:long, b:long, c:long) with (pair_delimiter=',', kv_delimiter=':') | extend missing = isnull(c) | project a, b, c, missing
+datatable(s:string)[ "[k1=v1][k2=v2]", "[k3=v3]" ] | parse-kv s as (k1:string, k2:string, k3:string) with (pair_delimiter='][', kv_delimiter='=')
+datatable(s:string)[ "name=\"John Smith\";city=\"New York\"" ] | parse-kv s as (name:string, city:string) with (pair_delimiter=';', kv_delimiter='=', quote='"')
+datatable(s:string)[ "field1=val1|field2=val2", "field1=onlyone" ] | parse-kv s as (field1:string, field2:string) with (pair_delimiter='|', kv_delimiter='=') | where isempty(field2)
+datatable(s:string, n:long)[ "alpha apple",1, "beta banana",2, "gamma grape",3 ] | search "a*" | project s
+datatable(s:string, tag:string)[ "alpha","x", "Beta","y", "café","z", "delta","x" ] | where * has "café"
+datatable(s:string, n:long)[ "error",1, "warn",2, "info",3 ] | search not("error") | project s
+datatable(s:string, code:long)[ "ok",200, "fail",500, "redirect",301 ] | search code >= 300 and s !contains "redirect"
+datatable(a:string, b:string)[ "hello","world", "foo","bar" ] | search "hello" or "bar" | project a, b
+datatable(s:string, tag:string)[ "alpha","x", "Beta","y" ] | search kind=case_sensitive "alpha" or "Beta"
+datatable(s:string)[ "The Quick Brown Fox", "lazy dog sleeps" ] | search "quick" and "brown" and "fox"
+datatable(s:string, n:int)[ "abc",1, "def",2 ] | search s has "ab"
+datatable(s:string)[ "10.5", "abc", "20", "-3.14" ] | search "10*"
+datatable(host:string, env:string)[ "web01","prod", "db02","dev", "web03","prod" ] | search "web*" and env == "prod" | project host
+datatable(i:int, j:long, r:real)[ 1,100,1.5, 5,500,5.5, 10,1000,10.5 ] | where i between (1 .. 5) and j !between (100 .. 400) and r > 4.0 | project i, j, r
+datatable(t:datetime)[ datetime(2020-01-01), datetime(2020-07-01), datetime(2021-01-01), datetime(2021-07-01) ] | where t between (datetime(2020-06-01) .. (datetime(2020-06-01)+200d)) | project t
+datatable(x:real)[ 1.0, 2.5, 3.0, 4.5 ] | where x between (1.0 .. 3.0) or not(x !between (4.0 .. 5.0)) | project x
+datatable(i:long)[ 1,2,3,4,5,6,7,8,9,10 ] | where not(i between (3 .. 7)) and not(i in (1, 10)) | project i
+datatable(a:int, b:int)[ 1,5, 2,6, 3,7 ] | where (a between (1 .. 2)) != (b between (6 .. 7)) | project a, b
+datatable(s:string)[ " kv1 = 11 ; kv2 = 22 " ] | parse-kv s as (kv1:int, kv2:int) with (pair_delimiter=';', kv_delimiter='=')
+datatable(s:string)[ "first second third fourth" ] | parse s with w1:string " " w2:string " " w3:string " " w4:string | project w1, w2, w3, w4
+datatable(s:string)[ "AAA111BBB", "CCC222DDD" ] | parse kind=regex s with pre:string @"[0-9]{3}" post:string | project pre, post
+datatable(s:string)[ "GET /api/users 200 15ms", "POST /api/login 401 5ms" ] | parse s with verb:string " " path:string " " status:int " " ms:int "ms" | where status between (400 .. 499) | project verb, path, status
+datatable(s:string)[ "tag:urgent;tag:billing;owner:sam" ] | parse-kv s as (tag:string, owner:string) with (pair_delimiter=';', kv_delimiter=':')
+datatable(s:string, n:long)[ "Order #1001 shipped",1001, "Order #1002 pending",1002 ] | parse s with "Order #" id:long " " state:string | where id == n and state == "shipped" | project id, state
+datatable(s:string)[ "key=value=extra", "a=b" ] | parse-kv s as (key:string, a:string) with (pair_delimiter=' ', kv_delimiter='=')
+datatable(s:string, p:int)[ "café résumé",1, "naive façade",2 ] | search "café" or "façade" | project p
+datatable(s:string)[ "x1y2z3", "a9b8c7" ] | parse kind=regex s with c1:string n1:long c2:string n2:long c3:string n3:long | project n1, n2, n3
+datatable(s:string)[ "2021-03-14 pi day", "2021-12-25 holiday" ] | parse s with dt:datetime " " label:string | extend yr = datetime_part("year", dt) | where yr == 2021 | summarize cnt=count() by yr
+datatable(s:string, level:string)[ "disk full","CRITICAL", "low memory","WARNING", "ok","INFO" ] | search "full" or "memory" | where level in~ ("critical", "warning") | project s
+datatable(v:long)[ -100, -50, 0, 50, 100 ] | where v between (-75 .. -25) or v between (25 .. 75) | project v
+datatable(s:string)[ "a==b", "c=d=e" ] | parse-kv s as (a:string, c:string) with (pair_delimiter=' ', kv_delimiter='=')
+datatable(s:string)[ "ERROR: timeout after 30s on host srv-7" ] | parse kind=regex s with "ERROR: " msg:string " after " secs:int "s on host " host:string | project msg, secs, host
+datatable(s:string, n:long)[ "true positive",1, "false negative",0 ] | search "true" or "false" | where n == 1 | project s
+datatable(a:string, b:long, c:real)[ "needle",42,3.14, "haystack",7,2.71 ] | search "needle" or 42 or 2.71 | project a
+datatable(s:string)[ "k1=1;k2=2;k1=3" ] | parse-kv s as (k1:int, k2:int) with (pair_delimiter=';', kv_delimiter='=')
+datatable(s:string)[ "from=a@x.com to=b@y.com subj=hi" ] | parse s with "from=" from:string " to=" to:string " subj=" subj:string | project from, to, subj
+datatable(s:string, num:int)[ "match123",123, "nomatch",456 ] | where s startswith "match" and num between (100 .. 200) | search "match*" | project s, num
+datatable(s:string)[ "ratio=3/4 pct=75%", "ratio=1/2 pct=50%" ] | parse kind=regex s with "ratio=" num:int "/" den:int " pct=" pct:int "%" | where pct between (60 .. 80) | project num, den, pct

@@ -25,7 +25,9 @@ public class PGliteDialect : ISqlDialect
             "now" => "NOW()",
             "pack_array" => $"ARRAY[{string.Join(", ", args)}]",
             "isempty" => $"({args[0]} IS NULL OR CAST({args[0]} AS TEXT) = '')",
-            "isnotempty" or "isnotnull" => $"({args[0]} IS NOT NULL)",
+            // isnotempty is the negation of isempty (false for NULL and ''); not the same as isnotnull.
+            "isnotempty" => $"({args[0]} IS NOT NULL AND CAST({args[0]} AS TEXT) <> '')",
+            "isnotnull" => $"({args[0]} IS NOT NULL)",
             "isnull" => $"({args[0]} IS NULL)",
             "not" => $"NOT ({args[0]})",
             "strcat" => $"CONCAT({string.Join(", ", args)})",
@@ -59,11 +61,12 @@ public class PGliteDialect : ISqlDialect
             "parse_json" or "todynamic" => $"CAST({args[0]} AS JSONB)",
             "format_datetime" => $"TO_CHAR({args[0]}, {args[1]})",
             "startofday" => $"DATE_TRUNC('day', {args[0]})",
-            "startofweek" => $"DATE_TRUNC('week', {args[0]})",
+            // KQL weeks start on Sunday; Postgres DATE_TRUNC('week') starts on Monday. Shift ±1 day.
+            "startofweek" => $"(DATE_TRUNC('week', {args[0]} + INTERVAL '1 day') - INTERVAL '1 day')",
             "startofmonth" => $"DATE_TRUNC('month', {args[0]})",
             "startofyear" => $"DATE_TRUNC('year', {args[0]})",
             "endofday" => $"DATE_TRUNC('day', {args[0]}) + INTERVAL '1 day' - INTERVAL '1 microsecond'",
-            "endofweek" => $"DATE_TRUNC('week', {args[0]}) + INTERVAL '7 days' - INTERVAL '1 microsecond'",
+            "endofweek" => $"(DATE_TRUNC('week', {args[0]} + INTERVAL '1 day') - INTERVAL '1 day') + INTERVAL '7 days' - INTERVAL '1 microsecond'",
             "endofmonth" => $"DATE_TRUNC('month', {args[0]}) + INTERVAL '1 month' - INTERVAL '1 microsecond'",
             "endofyear" => $"DATE_TRUNC('year', {args[0]}) + INTERVAL '1 year' - INTERVAL '1 microsecond'",
             "min_of" => $"LEAST({string.Join(", ", args)})",
@@ -87,9 +90,15 @@ public class PGliteDialect : ISqlDialect
             "secondofminute" => $"EXTRACT(SECOND FROM {args[0]})",
             "make_datetime" when args.Length == 6 =>
                 $"MAKE_TIMESTAMP({args[0]}, {args[1]}, {args[2]}, {args[3]}, {args[4]}, {args[5]})",
+            "make_datetime" when args.Length is 3 or 4 or 5 =>
+                $"MAKE_TIMESTAMP({args[0]}, {args[1]}, {args[2]}, " +
+                $"{(args.Length > 3 ? args[3] : "0")}, {(args.Length > 4 ? args[4] : "0")}, 0)",
+            "make_datetime" when args.Length == 2 => $"MAKE_TIMESTAMP({args[0]}, {args[1]}, 1, 0, 0, 0)",
             "make_datetime" when args.Length == 1 => $"CAST({args[0]} AS TIMESTAMP)",
             "make_timespan" when args.Length == 3 =>
                 $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
+            "make_timespan" when args.Length == 2 =>
+                $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute')",
             // to_timestamp returns timestamptz; KQL datetime is tz-agnostic → project to UTC wall-clock.
             "unixtime_seconds_todatetime" => $"(TO_TIMESTAMP({args[0]}) AT TIME ZONE 'UTC')",
             "unixtime_milliseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000)",
@@ -118,6 +127,7 @@ public class PGliteDialect : ISqlDialect
             "hash_sha1" => $"ENCODE(DIGEST(CAST({args[0]} AS BYTEA), 'sha1'), 'hex')",
 
             // Array/dynamic functions
+            "strcat_array" when args.Length == 2 => $"ARRAY_TO_STRING({args[0]}, {args[1]})",
             "array_length" => $"ARRAY_LENGTH({args[0]}, 1)",
             "array_index_of" => $"(ARRAY_POSITION({args[0]}, {args[1]}) - 1)",
             "array_sort_asc" => $"(SELECT ARRAY_AGG(x ORDER BY x) FROM UNNEST({args[0]}) x)",

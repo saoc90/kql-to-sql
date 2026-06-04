@@ -685,10 +685,10 @@ public class PGliteDialectTests
     }
 
     [Fact]
-    public void PGlite_Has_Uses_Ilike()
+    public void PGlite_Has_UsesTermRegex()
     {
         var sql = _converter.Convert("StormEvents | where STATE has 'tex'");
-        Assert.Contains("ILIKE", sql);
+        Assert.Contains("regexp_matches", sql);
     }
 
     [Fact]

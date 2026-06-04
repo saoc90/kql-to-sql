@@ -373,10 +373,12 @@ internal class AdvancedHandlers : OperatorHandlerBase
             }
         }
 
-        // Single-column case: simple unnest
+        // Single-column case: simple unnest.
+        // Wrap leftSql as a derived table with a single fresh alias. (ExtractFromAsRelation can return
+        // a relation that already carries its own alias — e.g. `(VALUES ...) AS t(d)` for a datatable —
+        // which would produce an invalid double alias `... AS t(d) AS t`.)
         string sourceAlias = "t";
-        var fromSql = ExtractFromAsRelation(leftSql);
-        var aliasedFrom = $"{fromSql} AS {sourceAlias}";
+        var aliasedFrom = $"({leftSql}) AS {sourceAlias}";
 
         if (columns.Count == 1)
         {
@@ -623,7 +625,39 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
     internal string ApplyGetSchema(string leftSql)
     {
-        return $"DESCRIBE SELECT * FROM ({leftSql}) LIMIT 0";
+        // Kusto getschema returns one row per column with exactly these columns:
+        //   ColumnName | ColumnOrdinal (0-based) | DataType (CLR name) | ColumnType (KQL name)
+        // DuckDB's DESCRIBE has a different shape, so wrap it and map the DuckDB type onto KQL/CLR types.
+        const string ctCase =
+            "CASE " +
+            "WHEN column_type IN ('BIGINT','HUGEINT','UBIGINT','UHUGEINT') THEN 'long' " +
+            "WHEN column_type IN ('INTEGER','SMALLINT','TINYINT','UINTEGER','USMALLINT','UTINYINT') THEN 'int' " +
+            "WHEN column_type IN ('DOUBLE','FLOAT','REAL') THEN 'real' " +
+            "WHEN column_type LIKE 'DECIMAL%' THEN 'decimal' " +
+            "WHEN column_type IN ('VARCHAR','TEXT','CHAR','BLOB') THEN 'string' " +
+            "WHEN column_type = 'BOOLEAN' THEN 'bool' " +
+            "WHEN column_type LIKE 'TIMESTAMP%' OR column_type = 'DATE' THEN 'datetime' " +
+            "WHEN column_type LIKE 'INTERVAL%' OR column_type LIKE 'TIME%' THEN 'timespan' " +
+            "WHEN column_type = 'JSON' THEN 'dynamic' " +
+            "WHEN column_type = 'UUID' THEN 'guid' " +
+            "WHEN column_type LIKE '%[]' OR column_type LIKE 'STRUCT%' OR column_type LIKE 'MAP%' OR column_type LIKE 'LIST%' THEN 'dynamic' " +
+            "ELSE 'string' END";
+        const string dtCase =
+            "CASE \"ColumnType\" " +
+            "WHEN 'long' THEN 'System.Int64' WHEN 'int' THEN 'System.Int32' " +
+            "WHEN 'real' THEN 'System.Double' WHEN 'decimal' THEN 'System.Data.SqlTypes.SqlDecimal' " +
+            "WHEN 'string' THEN 'System.String' WHEN 'bool' THEN 'System.SByte' " +
+            "WHEN 'datetime' THEN 'System.DateTime' WHEN 'timespan' THEN 'System.TimeSpan' " +
+            "WHEN 'dynamic' THEN 'System.Object' WHEN 'guid' THEN 'System.Guid' " +
+            "ELSE 'System.String' END";
+
+        var inner =
+            $"SELECT column_name AS \"ColumnName\", " +
+            $"CAST(ROW_NUMBER() OVER () - 1 AS BIGINT) AS \"ColumnOrdinal\", " +
+            $"{ctCase} AS \"ColumnType\" " +
+            $"FROM (DESCRIBE SELECT * FROM ({leftSql}) LIMIT 0)";
+
+        return $"SELECT \"ColumnName\", \"ColumnOrdinal\", {dtCase} AS \"DataType\", \"ColumnType\" FROM ({inner})";
     }
 
     internal string ConvertRange(RangeOperator range)
@@ -659,6 +693,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
     internal string ConvertDataTable(DataTableExpression dt)
     {
         var columnNames = new List<string>();
+        // SQL type to force per column (null = let DuckDB infer). A KQL `long` literal that fits in
+        // int32 would otherwise be inferred as INTEGER, breaking long arithmetic (overflow) and
+        // getschema; pin it to BIGINT so the declared schema is honored.
+        var colCastTypes = new List<string?>();
         foreach (var col in dt.Schema.Columns)
         {
             if (col.Element is NameAndTypeDeclaration nat)
@@ -668,7 +706,32 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 // Propagate KQL timespan columns so downstream sum/divide hit the epoch-ms path.
                 var typeName = nat.Type?.ToString().Trim();
                 if (string.Equals(typeName, "timespan", StringComparison.OrdinalIgnoreCase))
+                {
                     Expr.MarkIntervalColumn(cname);
+                    colCastTypes.Add(null);
+                }
+                // Propagate integer columns so '/' and '%' use KQL's truncating/Euclidean semantics.
+                else if (string.Equals(typeName, "long", StringComparison.OrdinalIgnoreCase))
+                {
+                    Expr.MarkIntegerColumn(cname);
+                    colCastTypes.Add("BIGINT");
+                }
+                else if (string.Equals(typeName, "int", StringComparison.OrdinalIgnoreCase))
+                {
+                    Expr.MarkIntegerColumn(cname);
+                    colCastTypes.Add(null);
+                }
+                // KQL real == double. DuckDB infers decimal-looking literals (1.5) as DECIMAL, which
+                // diverges in getschema (decimal vs real) and in division precision; pin to DOUBLE.
+                else if (string.Equals(typeName, "real", StringComparison.OrdinalIgnoreCase)
+                      || string.Equals(typeName, "double", StringComparison.OrdinalIgnoreCase))
+                {
+                    colCastTypes.Add("DOUBLE");
+                }
+                else
+                {
+                    colCastTypes.Add(null);
+                }
             }
         }
 
@@ -684,6 +747,8 @@ internal class AdvancedHandlers : OperatorHandlerBase
             for (int k = 0; k < colCount; k++) columnNames.Add($"col{k}");
         }
 
+        string? CastType(int j) => j < colCastTypes.Count ? colCastTypes[j] : null;
+
         var rows = new List<string>();
 
         for (int i = 0; i < values.Count; i += colCount)
@@ -691,7 +756,9 @@ internal class AdvancedHandlers : OperatorHandlerBase
             var rowValues = new List<string>();
             for (int j = 0; j < colCount && (i + j) < values.Count; j++)
             {
-                rowValues.Add(Expr.ConvertLiteralValue(values[i + j].Element));
+                var v = Expr.ConvertLiteralValue(values[i + j].Element);
+                var ct = CastType(j);
+                rowValues.Add(ct is null ? v : $"CAST({v} AS {ct})");
             }
             rows.Add($"({string.Join(", ", rowValues)})");
         }
@@ -699,7 +766,11 @@ internal class AdvancedHandlers : OperatorHandlerBase
         // Empty datatable: DuckDB rejects 'VALUES ) AS t(col)'. Emit a typed empty SELECT instead.
         if (rows.Count == 0)
         {
-            var cols = string.Join(", ", columnNames.Select(n => $"NULL AS {n}"));
+            var cols = string.Join(", ", columnNames.Select((n, j) =>
+            {
+                var ct = CastType(j);
+                return ct is null ? $"NULL AS {n}" : $"CAST(NULL AS {ct}) AS {n}";
+            }));
             return $"SELECT {cols} WHERE 1 = 0";
         }
 

@@ -130,7 +130,7 @@ internal class ExpressionSqlBuilder
             BinaryExpression bin when bin.Kind == SyntaxKind.DivideExpression =>
                 ConvertDivide(bin, leftAlias, rightAlias),
             BinaryExpression bin when bin.Kind == SyntaxKind.ModuloExpression =>
-                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} % {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+                ConvertModulo(bin, leftAlias, rightAlias),
             BinaryExpression bin when bin.Kind == SyntaxKind.AndExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} AND {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.OrExpression =>
@@ -139,17 +139,17 @@ internal class ExpressionSqlBuilder
                 TryConvertRegexToLike(bin, leftAlias, rightAlias)
                 ?? $"REGEXP_MATCHES({ConvertExpression(bin.Left, leftAlias, rightAlias)}, {ConvertExpression(bin.Right, leftAlias, rightAlias)})",
             BinaryExpression bin when bin.Kind == SyntaxKind.HasExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "term", false),
             BinaryExpression bin when bin.Kind == SyntaxKind.HasCsExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "term", true),
             BinaryExpression bin when bin.Kind == SyntaxKind.ContainsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
             BinaryExpression bin when bin.Kind == SyntaxKind.ContainsCsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "%", true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotHasExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false, true),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "term", false, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotHasCsExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true, true),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "term", true, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotContainsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "%", false, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotContainsCsExpression =>
@@ -171,21 +171,21 @@ internal class ExpressionSqlBuilder
             BinaryExpression bin when bin.Kind == SyntaxKind.NotEndsWithCsExpression =>
                 ConvertLike(bin, leftAlias, rightAlias, "%", "", true, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.HasPrefixExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "prefix", false),
             BinaryExpression bin when bin.Kind == SyntaxKind.HasPrefixCsExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "prefix", true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotHasPrefixExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false, true),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "prefix", false, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotHasPrefixCsExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true, true),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "prefix", true, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.HasSuffixExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "suffix", false),
             BinaryExpression bin when bin.Kind == SyntaxKind.HasSuffixCsExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "suffix", true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotHasSuffixExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", false, true),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "suffix", false, true),
             BinaryExpression bin when bin.Kind == SyntaxKind.NotHasSuffixCsExpression =>
-                ConvertLike(bin, leftAlias, rightAlias, "%", "%", true, true),
+                ConvertHasTerm(bin, leftAlias, rightAlias, "suffix", true, true),
             HasAnyExpression hae =>
                 ConvertHasAny(hae, leftAlias, rightAlias, false),
             HasAllExpression hae =>
@@ -320,62 +320,77 @@ internal class ExpressionSqlBuilder
 
     private string ConvertDynamic(DynamicExpression de, string? leftAlias, string? rightAlias)
     {
-        // dynamic(["a","b"]) → LIST_VALUE('a', 'b') for DuckDB arrays
-        // dynamic(null) → NULL
-        var inner = de.GetDescendants<JsonArrayExpression>().FirstOrDefault();
-        if (inner != null)
+        // Inspect the DIRECT inner expression (not recursive descendants): a top-level object whose
+        // value happens to contain a nested array must NOT be misclassified as an array.
+        var inner = de.Expression;
+
+        // dynamic([...]) of pure scalars → native DuckDB LIST so array functions (LEN/LIST_*) work.
+        // Arrays containing objects/arrays can't be a homogeneous LIST, so fall through to JSON.
+        if (inner is JsonArrayExpression arr && arr.Values.All(v => IsScalarJsonValue(v.Element)))
         {
-            var elements = inner.Values
-                .Select(v => ConvertExpression(v.Element, leftAlias, rightAlias))
-                .ToArray();
+            var elements = arr.Values.Select(v => ConvertExpression(v.Element, leftAlias, rightAlias));
             return $"LIST_VALUE({string.Join(", ", elements)})";
         }
 
-        // dynamic({key:val}) → strict JSON object with double-quoted keys/string values
-        var obj = de.GetDescendants<JsonObjectExpression>().FirstOrDefault();
-        if (obj != null)
-        {
-            var pairs = Enumerable.Range(0, obj.Pairs.Count)
-                .Select(i => obj.Pairs[i].Element)
-                .Select(p =>
-                {
-                    var key = p.Name.ValueText.Replace("\\", "\\\\").Replace("\"", "\\\"");
-                    var val = ConvertDynamicValue(p.Value);
-                    return $"\"{key}\":{val}";
-                });
-            return $"'{{{string.Join(",", pairs)}}}'::JSON";
-        }
-
-        // dynamic(null)
-        var text = de.ToString().Trim();
-        if (text.Contains("null", StringComparison.OrdinalIgnoreCase))
+        // dynamic(null) → SQL NULL
+        if (inner is null || (inner is LiteralExpression nl && nl.Kind == SyntaxKind.NullLiteralExpression))
             return "NULL";
 
-        return $"'{text}'::JSON";
+        // Everything else (objects, nested/complex arrays, scalars like dynamic(1)/dynamic("x")) →
+        // a recursively-serialized JSON value.
+        var json = DynamicToJson(inner);
+        return $"'{json.Replace("'", "''")}'::JSON";
     }
 
-    // Serialize a dynamic({}) dict value as JSON-compatible text (no SQL expressions).
-    private static string ConvertDynamicValue(Expression expr)
+    private static bool IsScalarJsonValue(Expression e) =>
+        e is LiteralExpression ||
+        (e is PrefixUnaryExpression pu && pu.Expression is LiteralExpression);
+
+    /// <summary>Recursively serialize a dynamic literal's syntax to a JSON string (no SQL expressions),
+    /// handling nested objects, arrays, and scalar literals at every level.</summary>
+    private static string DynamicToJson(Expression expr)
     {
-        if (expr is LiteralExpression lit)
+        switch (expr)
         {
-            if (lit.Kind == SyntaxKind.NullLiteralExpression) return "null";
-            if (lit.Kind == SyntaxKind.BooleanLiteralExpression)
-                return lit.LiteralValue is true ? "true" : "false";
-            if (lit.Kind is SyntaxKind.LongLiteralExpression or SyntaxKind.IntLiteralExpression
-                    or SyntaxKind.RealLiteralExpression or SyntaxKind.DecimalLiteralExpression)
-                return System.Convert.ToString(lit.LiteralValue, CultureInfo.InvariantCulture) ?? "null";
-            if (lit.Kind == SyntaxKind.StringLiteralExpression && lit.LiteralValue is string sv)
+            case JsonObjectExpression obj:
             {
-                var escaped = sv.Replace("\\", "\\\\").Replace("\"", "\\\"");
-                return $"\"{escaped}\"";
+                var pairs = Enumerable.Range(0, obj.Pairs.Count)
+                    .Select(i => obj.Pairs[i].Element)
+                    .Select(p => $"{JsonString(p.Name.ValueText)}:{DynamicToJson(p.Value)}");
+                return "{" + string.Join(",", pairs) + "}";
             }
-            // Timespan, DateTime, or any other literal: wrap raw text as JSON string
-            var raw = lit.ToString().Trim().Trim('"', '\'');
-            return $"\"{raw.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
+            case JsonArrayExpression arr:
+                return "[" + string.Join(",", arr.Values.Select(v => DynamicToJson(v.Element))) + "]";
+            case ParenthesizedExpression pe:
+                return DynamicToJson(pe.Expression);
+            case PrefixUnaryExpression pu when pu.Expression is LiteralExpression:
+            {
+                var op = pu.Operator.Text;
+                return op + DynamicToJson(pu.Expression);
+            }
+            case LiteralExpression lit:
+                return LiteralToJson(lit);
+            default:
+                return "null";
         }
-        return "null";
     }
+
+    private static string LiteralToJson(LiteralExpression lit)
+    {
+        if (lit.Kind == SyntaxKind.NullLiteralExpression) return "null";
+        if (lit.Kind == SyntaxKind.BooleanLiteralExpression)
+            return lit.LiteralValue is true ? "true" : "false";
+        if (lit.Kind is SyntaxKind.LongLiteralExpression or SyntaxKind.IntLiteralExpression
+                or SyntaxKind.RealLiteralExpression or SyntaxKind.DecimalLiteralExpression)
+            return System.Convert.ToString(lit.LiteralValue, CultureInfo.InvariantCulture) ?? "null";
+        if (lit.Kind == SyntaxKind.StringLiteralExpression && lit.LiteralValue is string sv)
+            return JsonString(sv);
+        // Timespan, datetime, or anything else: render as a JSON string of the raw text.
+        return JsonString(lit.ToString().Trim().Trim('"', '\''));
+    }
+
+    private static string JsonString(string s) =>
+        "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
     private static readonly HashSet<string> DuckDbReservedWords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -441,6 +456,12 @@ internal class ExpressionSqlBuilder
     private static string ConvertTimespanLiteral(LiteralExpression lit)
     {
         var text = lit.ToString().Trim();
+        // KQL 'tick' = 100ns. DuckDB INTERVAL has no 'tick' unit (and is µs-resolution), so express
+        // N ticks as N/10 microseconds. (Sub-µs values round to 0µs, within comparison tolerance.)
+        var tickMatch = System.Text.RegularExpressions.Regex.Match(
+            text, @"^(-?\d+(?:\.\d+)?)\s*ticks?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (tickMatch.Success)
+            return $"(({tickMatch.Groups[1].Value} / 10.0) * INTERVAL '1 microsecond')";
         if (TryParseTimespan(text, out var ms))
         {
             return $"({ms} * INTERVAL '1 millisecond')";
@@ -992,6 +1013,48 @@ internal class ExpressionSqlBuilder
         return $"{left} {like} {pattern}";
     }
 
+    /// <summary>
+    /// KQL term operators (has/has_cs, hasprefix, hassuffix) match whole TERMS — maximal runs of
+    /// word characters — not arbitrary substrings (unlike contains/startswith/endswith). Translate to
+    /// a regex with word boundaries:  has → \bterm\b,  hasprefix → \bterm,  hassuffix → term\b.
+    /// Case-insensitivity is expressed with the inline (?i) flag. Falls back to substring LIKE only
+    /// when the right side is not a literal (a static regex can't be built from a runtime value).
+    /// </summary>
+    private string ConvertHasTerm(BinaryExpression bin, string? leftAlias, string? rightAlias,
+        string kind, bool caseSensitive, bool negated = false)
+    {
+        if (bin.Right is not LiteralExpression lit)
+        {
+            // Non-literal RHS: keep the previous substring approximation.
+            return ConvertLike(bin, leftAlias, rightAlias, "%", "%", caseSensitive, negated);
+        }
+
+        var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
+        var term = RegexEscape(lit.ToString().Trim().Trim('\'', '"'));
+        var body = kind switch
+        {
+            "prefix" => $"\\b{term}",
+            "suffix" => $"{term}\\b",
+            _ => $"\\b{term}\\b",
+        };
+        var pattern = (caseSensitive ? "" : "(?i)") + body;
+        var sqlPattern = "'" + pattern.Replace("'", "''") + "'";
+        var test = $"regexp_matches(CAST({left} AS VARCHAR), {sqlPattern})";
+        return negated ? $"NOT {test}" : test;
+    }
+
+    /// <summary>Escape RE2 metacharacters so a literal term is matched verbatim inside a regex.</summary>
+    private static string RegexEscape(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length + 8);
+        foreach (var c in s)
+        {
+            if (".^$*+?()[]{}|\\".IndexOf(c) >= 0) sb.Append('\\');
+            sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
     private string ConvertNumericOrOtherLiteral(LiteralExpression lit)
     {
         // KQL typed numeric/bool literals — int(N), long(N), double(N), bool(X) — parse as a LiteralExpression
@@ -1033,6 +1096,20 @@ internal class ExpressionSqlBuilder
         else if (lit.Kind is SyntaxKind.RealLiteralExpression
                     or SyntaxKind.DecimalLiteralExpression)
         {
+            // Special IEEE values: real(nan)/real(+inf)/real(-inf). The bareword NaN/Infinity is not
+            // valid SQL; DuckDB/Postgres accept the quoted-cast form. Detect via the parsed value and
+            // (as a fallback) the literal text, since some forms don't round-trip through LiteralValue.
+            if (lit.LiteralValue is double dv)
+            {
+                if (double.IsNaN(dv)) return "CAST('nan' AS DOUBLE)";
+                if (double.IsPositiveInfinity(dv)) return "CAST('inf' AS DOUBLE)";
+                if (double.IsNegativeInfinity(dv)) return "CAST('-inf' AS DOUBLE)";
+            }
+            var lower = lit.ToString().Trim().ToLowerInvariant();
+            if (lower.Contains("nan")) return "CAST('nan' AS DOUBLE)";
+            if (lower.Contains("-inf")) return "CAST('-inf' AS DOUBLE)";
+            if (lower.Contains("inf")) return "CAST('inf' AS DOUBLE)";
+
             // Preserve real-ness: a real literal like 10.0 must not render as "10" — an engine whose
             // '/' integer-divides (e.g. Postgres) would then treat 10.0/4 as integer division. Append
             // ".0" when the value renders as a plain integer so it stays a real/decimal in SQL.
@@ -1319,6 +1396,20 @@ internal class ExpressionSqlBuilder
             return $"CAST(TRUNC(CAST({left} AS DOUBLE) / NULLIF({right}, 0)) AS BIGINT)";
 
         return $"{left} / {right}";
+    }
+
+    /// <summary>
+    /// KQL modulo is the Euclidean remainder: the result is always in [0, |divisor|), so
+    /// -5 % 3 == 1 (not -2 as SQL '%' gives). Rewrite integer modulo as ((a % b) + |b|) % |b|.
+    /// Real/unknown operands keep the engine's native '%'.
+    /// </summary>
+    private string ConvertModulo(BinaryExpression bin, string? leftAlias, string? rightAlias)
+    {
+        var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
+        var right = ConvertExpression(bin.Right, leftAlias, rightAlias);
+        if (IsIntegerKqlExpr(bin.Left) && IsIntegerKqlExpr(bin.Right))
+            return $"((({left}) % NULLIF({right}, 0)) + ABS({right})) % NULLIF({right}, 0)";
+        return $"{left} % {right}";
     }
 
     /// <summary>True when an expression is statically a KQL integer (long/int): integer literals,

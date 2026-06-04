@@ -14,11 +14,11 @@ public class ScalarFunctionImprovementTests
     }
 
     [Fact]
-    public void IsNotEmpty_MapsToIsNotNull()
+    public void IsNotEmpty_ChecksNullAndEmpty()
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("T | where isnotempty(State)");
-        Assert.Equal("SELECT * FROM T WHERE (State IS NOT NULL)", sql);
+        Assert.Equal("SELECT * FROM T WHERE (State IS NOT NULL AND CAST(State AS VARCHAR) <> '')", sql);
     }
 
     [Fact]

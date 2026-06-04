@@ -1,0 +1,47 @@
+datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic([10,20,30]), dynamic({"x":{"y":1}}) ] | extend al = array_length(d)
+datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic({"x":{"y":1}}) ] | extend bk = bag_keys(d)
+datatable(d:dynamic)[ dynamic([1,2,3,4,5]) ] | extend sl = array_slice(d, 1, 3)
+datatable(d:dynamic)[ dynamic([3,1,2]) ] | extend so = array_sort_asc(d)
+datatable(d:dynamic)[ dynamic([1,2]), dynamic([3,4]) ] | extend cc = array_concat(d, dynamic([99]))
+print d = dynamic({"a":{"b":{"c":42}}}) | extend v = d.a.b.c
+print d = dynamic({"a":1,"b":2}) | extend m = bag_merge(d, dynamic({"b":3,"c":4}))
+print a = dynamic([1,2]), b = dynamic([2,3,4]) | extend u = set_union(a, b)
+datatable(d:dynamic)[ dynamic({"k":[10,20,30]}) ] | mv-expand x = d.k
+datatable(d:dynamic)[ dynamic([1,2,3]), dynamic([4,5]) ] | mv-expand v = d to typeof(long)
+print d = dynamic({}) | extend e = array_length(d), keys = bag_keys(d)
+print d = dynamic([]) | extend e = array_length(d)
+print d = dynamic(null) | extend al = array_length(d), idx = d[0], prop = d.foo
+print d = dynamic([1, "two", 3.5, true, null]) | extend al = array_length(d), first = d[0], second = d[1]
+print s = '{"a":1,"nested":{"deep":[true,false]}}' | extend d = parse_json(s) | extend val = d.nested.deep[0]
+print s = '[1,2,3]' | extend d = parse_json(s) | extend len = array_length(d)
+print d = dynamic({"a":1}) | extend rt = todynamic(tostring(d))
+print d = dynamic([1,2,3]) | extend j = dynamic_to_json(d)
+print d = dynamic({"b":2,"a":1}) | extend j = dynamic_to_json(d)
+datatable(d:dynamic)[ dynamic({"x":1}), dynamic({"y":2}) ] | mv-apply k = bag_keys(d) on (extend kk = k)
+print d = dynamic({"arr":[{"id":1},{"id":2}]}) | mv-expand item = d.arr | extend i = item.id
+print x = parse_json("null") | extend t = gettype(x), isn = isnull(x)
+print x = parse_json('"hello"') | extend t = gettype(x)
+print x = parse_json("123") | extend t = gettype(x), v = x
+print x = parse_json("true") | extend t = gettype(x)
+datatable(d:dynamic)[ dynamic([5,3,8,1]) ] | extend asc = array_sort_asc(d), desc = array_sort_desc(d)
+print d = dynamic({"a":[1,2],"b":[3,4]}) | extend ka = d["a"], k0 = d["a"][0]
+print a = dynamic([1,2,3]), b = dynamic([3,4,5]) | extend inter = set_intersect(a, b), diff = set_difference(a, b)
+datatable(d:dynamic)[ dynamic({"tags":["red","green","blue"]}) ] | mv-expand tag = d.tags | summarize cnt = count() by tostring(tag)
+print d = dynamic([[1,2],[3,4]]) | extend inner = d[0], el = d[0][1]
+print d = dynamic({"n":3.14,"i":7,"s":"text","b":true,"nil":null}) | extend dn = d.n, di = d.i, ds = d.s, db = d.b
+print d = dynamic({"items":[10,20,30,40]}) | extend sl = array_slice(d.items, 1, 2)
+print d = dynamic([1,2,3,4,5]) | extend rev = array_reverse(d), tail2 = array_slice(d, -2, -1)
+print arr = dynamic([1,2,3]) | mv-expand arr | extend sq = arr * arr
+print d = dynamic({"a":1,"b":[1,{"c":2}]}) | extend deep = d.b[1].c
+print d = pack("name", "alice", "age", 30) | extend n = d.name, a = d.age
+print d = pack_array(1, 2, 3, 4) | extend al = array_length(d), s = d[2]
+datatable(d:dynamic)[ dynamic({"a":1,"b":2,"c":3}) ] | evaluate bag_unpack(d)
+datatable(d:dynamic)[ dynamic({"x":1,"y":2}), dynamic({"x":3,"y":4}) ] | evaluate bag_unpack(d)
+print d = dynamic({"a":1}) | extend missing = d.nonexistent, missingidx = d.a[5]
+print d = dynamic([1,2,3]) | extend oob = d[10], neg = d[-1]
+print d = dynamic({"empty_arr":[],"empty_obj":{}}) | extend ea = array_length(d.empty_arr), eo = bag_keys(d.empty_obj)
+print a = dynamic([1,2]), b = dynamic(null) | extend m = bag_merge(dynamic({"k":1}), dynamic(null)), c = array_concat(a, b)
+print s = '{"unicode":"café","emoji":"x"}' | extend d = parse_json(s) | extend u = d.unicode
+print d = dynamic([{"v":3},{"v":1},{"v":2}]) | mv-expand d | extend val = d.v | summarize mn = min(toint(val)), mx = max(toint(val))
+print d = dynamic({"a":1,"b":2}) | extend keys = bag_keys(d) | mv-expand keys | extend kv = d[tostring(keys)]
+print x = parse_json('{"a": [1,2,3], "b": {"c": [4,5]}}') | extend flat = array_concat(x.a, x.b.c)

@@ -1,0 +1,36 @@
+{
+  "total": 1677,
+  "confirmedBugCandidates": 720,
+  "byOutcome": {
+    "Match": 792,
+    "KustoError": 135,
+    "MismatchRows": 452,
+    "SkippedNondeterministic": 30,
+    "SqlExecError": 235,
+    "MismatchOrder": 4,
+    "MismatchColumns": 19,
+    "TranslateError": 10
+  },
+  "byFamily": {
+    "probe": 3,
+    "aggregation": 46,
+    "datetime-timespan": 74,
+    "dynamic-json": 104,
+    "joins-lookup-union": 69,
+    "nested-pipelines-let-cte": 40,
+    "null-and-edge": 57,
+    "parse-search": 63,
+    "string-ops": 85,
+    "type-casts-coercion": 102,
+    "window-series-scan": 77
+  },
+  "bySeverity": {
+    "high": 481,
+    "highest": 235,
+    "medium": 4
+  },
+  "subVerdicts": {
+    "NAME_MISMATCH": 53,
+    "TYPE_MISMATCH": 161
+  }
+}

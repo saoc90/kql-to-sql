@@ -1,0 +1,50 @@
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=inner R on k
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=leftouter R on k
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=rightouter R on k
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=fullouter R on k
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=leftsemi R on k
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=rightsemi R on k
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=leftanti R on k
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=rightanti R on k
+let L = datatable(k:long, v:long)[ 1,10, 1,11, 2,20 ]; let R = datatable(k:long, w:long)[ 1,100, 1,101, 3,300 ]; L | join kind=inner R on k | order by v asc, w asc
+let L = datatable(k:long, v:long)[ 1,10, 1,11, 2,20 ]; let R = datatable(k:long, w:long)[ 1,100, 1,101, 3,300 ]; L | join kind=innerunique R on k | order by v asc, w asc
+let L = datatable(k:long, v:long)[ 1,10, 1,11, 1,12 ]; let R = datatable(k:long, w:long)[ 1,100, 1,101 ]; L | join kind=innerunique R on k | order by v asc, w asc
+let L = datatable(a:long, b:long, lv:string)[ 1,1,"p", 1,2,"q", 2,2,"r" ]; let R = datatable(a:long, b:long, rv:string)[ 1,2,"x", 2,2,"y", 9,9,"z" ]; L | join kind=inner R on a, b
+let L = datatable(a:long, b:long, lv:string)[ 1,1,"p", 1,2,"q", 2,2,"r" ]; let R = datatable(a:long, b:long, rv:string)[ 1,2,"x", 2,2,"y", 9,9,"z" ]; L | join kind=leftouter R on a, b | order by lv asc
+let L = datatable(k:long, c:string)[ 1,"L1", 2,"L2", 3,"L3" ]; let R = datatable(k:long, c:string)[ 1,"R1", 2,"R2", 4,"R4" ]; L | join kind=inner R on k
+let L = datatable(k:long, c:string)[ 1,"L1", 2,"L2", 3,"L3" ]; let R = datatable(k:long, c:string)[ 1,"R1", 2,"R2", 4,"R4" ]; L | join kind=leftouter R on k | order by k asc
+let L = datatable(k:long, c:string)[ 1,"L1", 2,"L2" ]; let R = datatable(k:long, c:string)[ 1,"R1", 2,"R2" ]; L | join kind=fullouter R on k | project k, c, c1, k1
+let L = datatable(lk:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(rk:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=inner R on $left.lk == $right.rk
+let L = datatable(lk:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(rk:long, rv:string)[ 2,"x", 3,"y", 4,"z" ]; L | join kind=leftouter R on $left.lk == $right.rk | order by lk asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", int(null),"n" ]; let R = datatable(k:long, rv:string)[ 1,"x", int(null),"m", 2,"y" ]; L | join kind=inner R on k | order by lv asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", long(null),"n" ]; let R = datatable(k:long, rv:string)[ 1,"x", long(null),"m" ]; L | join kind=leftouter R on k | order by lv asc
+let L = datatable(s:string, lv:long)[ "alpha",1, "Beta",2, "",3 ]; let R = datatable(s:string, rv:long)[ "alpha",10, "",30, "gamma",40 ]; L | join kind=inner R on s | order by lv asc
+let L = datatable(s:string, lv:long)[ "café",1, "O'Brien",2, "x",3 ]; let R = datatable(s:string, rv:long)[ "café",10, "x",30 ]; L | join kind=leftouter R on s | order by lv asc
+let A = datatable(k:long, a:long)[ 1,1, 2,2 ]; let B = datatable(k:long, b:long)[ 1,10, 2,20 ]; let C = datatable(k:long, c:long)[ 1,100, 2,200 ]; A | join kind=inner B on k | join kind=inner C on k
+let L = datatable(k:long)[ 1, 2, 3 ]; let R = datatable(k:long)[ 4, 5, 6 ]; L | join kind=inner R on k
+let L = datatable(k:long)[ 1, 2, 3 ]; let R = datatable(k:long)[ 4, 5, 6 ]; L | join kind=leftanti R on k
+let L = datatable(k:long)[ 1, 2, 3 ]; let R = datatable(k:long)[ 1, 2, 3 ]; L | join kind=leftanti R on k
+let L = datatable(k:long, v:real)[ 1,1.5, 2,2.5 ]; let R = datatable(k:long, v:real)[ 1,9.5, 3,3.5 ]; L | join kind=fullouter R on k | extend kk = coalesce(k, k1) | order by kk asc
+let D = datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ]; let R = datatable(k:long, w:long)[ 1,1, 2,2 ]; D | join kind=leftouter R on k | order by v asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b" ]; let R = datatable(k:long, rv:string)[ 1,"x", 2,"y" ]; L | lookup R on k
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 1,"x", 3,"z" ]; L | lookup kind=leftouter R on k | order by k asc
+let L = datatable(k:long, lv:string)[ 1,"a", 2,"b", 3,"c" ]; let R = datatable(k:long, rv:string)[ 1,"x", 1,"x2", 3,"z" ]; L | lookup R on k | order by k asc
+let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, y:string)[ 3,"c", 4,"d" ]; A | union B | order by x asc
+let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, y:string)[ 3,"c", 4,"d" ]; union withsource=src A, B | order by x asc
+let A = datatable(x:long, y:string)[ 1,"a" ]; let B = datatable(z:long, w:string)[ 9,"q" ]; A | union B
+let A = datatable(x:long, y:string)[ 1,"a" ]; let B = datatable(x:long, w:real)[ 1,1.5 ]; A | union kind=outer B
+let A = datatable(x:long)[ 1, 2 ]; let B = datatable(x:long)[ 2, 3 ]; A | union kind=inner B
+let A = datatable(x:long, y:long)[ 1,1, 2,2 ]; let B = datatable(x:long, y:long)[ 2,2, 3,3 ]; A | union B | summarize c = count() by x | order by x asc
+let A = datatable(x:long)[ 1, 2, 2 ]; let B = datatable(x:long)[ 2, 3 ]; union withsource=tbl A, B | summarize n = count() by tbl | order by tbl asc
+let L = datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ]; let R = datatable(k:long, v:long)[ 1,100, 2,200 ]; L | join kind=leftouter R on k | extend total = v + v1 | order by k asc
+let L = datatable(k:long, ts:datetime)[ 1,datetime(2020-01-01), 2,datetime(2021-06-15) ]; let R = datatable(k:long, ts:datetime)[ 1,datetime(1999-12-31), 3,datetime(2022-01-01) ]; L | join kind=fullouter R on k | order by k asc
+let L = datatable(k:long, b:bool)[ 1,true, 2,false ]; let R = datatable(k:long, b:bool)[ 1,false, 3,true ]; L | join kind=leftouter R on k | order by k asc
+let L = datatable(k:long)[ 1, 1, 2 ]; let R = datatable(k:long)[ 1, 1, 3 ]; L | join kind=inner R on k
+let L = datatable(k:long)[ 1, 1, 2 ]; let R = datatable(k:long)[ 1, 1, 3 ]; L | join kind=innerunique R on k
+let L = datatable(k:long, lv:long)[ 1,10, 2,20 ]; let M = datatable(k:long, mv:long)[ 1,100, 2,200 ]; let R = datatable(k:long, rv:long)[ 1,1000 ]; L | join kind=inner M on k | join kind=leftouter R on k | order by lv asc
+let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(y:string, x:long)[ "c",3, "d",4 ]; A | union B | order by x asc
+let L = datatable(k:long, dyn:dynamic)[ 1,dynamic({"a":1}), 2,dynamic([1,2]) ]; let R = datatable(k:long, rv:long)[ 1,99 ]; L | join kind=leftouter R on k | order by k asc
+let L = datatable(k:string, lv:long)[ "1",1, "2",2 ]; let R = datatable(k:long, rv:long)[ 1,10, 2,20 ]; L | extend kk = tolong(k) | join kind=inner R on $left.kk == $right.k | order by lv asc
+let L = datatable(k:long, v:long)[ 1,5, 2,6 ]; let R = datatable(k:long, v:long)[ 1,7, 2,8 ]; let X = datatable(k:long, v:long)[ 1,9 ]; L | join kind=inner R on k | join kind=leftanti X on k | order by v asc
+let L = datatable(k:long, lv:string)[ 5,"a", 6,"b" ]; let R = datatable(k:long, rv:string)[ 7,"x", 8,"y" ]; L | join kind=fullouter R on k | project lk = k, rk = k1, lv, rv | order by lv asc, rv asc
+let A = datatable(x:long, y:string)[ 1,"a" ]; let B = datatable(x:long, y:string)[ 2,"b" ]; let C = datatable(x:long, y:string)[ 3,"c" ]; union A, B, C | order by x asc

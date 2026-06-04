@@ -16,7 +16,7 @@ public class HasOperatorTests
 | where event_count > 1
 | project State, event_count";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE State ILIKE '%New%' AND event_count > 1", sql);
+        Assert.Equal(@"SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE regexp_matches(CAST(State AS VARCHAR), '(?i)\bNew\b') AND event_count > 1", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -36,7 +36,7 @@ public class HasOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | where State has_cs 'new'";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT * FROM StormEvents WHERE State LIKE '%new%'", sql);
+        Assert.Equal(@"SELECT * FROM StormEvents WHERE regexp_matches(CAST(State AS VARCHAR), '\bnew\b')", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -54,7 +54,7 @@ public class HasOperatorTests
 | where State !has ""New""
 | project State";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE State NOT ILIKE '%New%'", sql);
+        Assert.Equal(@"SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE NOT regexp_matches(CAST(State AS VARCHAR), '(?i)\bNew\b')", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -77,7 +77,7 @@ public class HasOperatorTests
 | where State !has_cs ""New""
 | project State";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE State NOT LIKE '%New%'", sql);
+        Assert.Equal(@"SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE NOT regexp_matches(CAST(State AS VARCHAR), '\bNew\b')", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

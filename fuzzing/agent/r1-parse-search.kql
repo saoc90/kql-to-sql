@@ -1,0 +1,45 @@
+datatable(s:string)[ "name=alice age=30", "name=bob age=25", "garbage" ] | parse s with "name=" name " age=" age:int | project name, age
+datatable(s:string)[ "id:7 val:foo", "id:8 val:bar" ] | parse kind=simple s with "id:" id:long " val:" val:string | project id, val
+datatable(s:string)[ "abc123def", "xyz999" ] | parse kind=regex s with letters:string @"\d+" rest:string | project letters, rest
+datatable(s:string)[ "2020-01-02 ERROR something", "2021-05-06 WARN other" ] | parse s with d:datetime " " level:string " " msg:string | project d, level, msg
+datatable(s:string)[ "key1=v1;key2=v2;key3=v3" ] | parse-kv s as (key1:string, key2:string, key3:string) with (pair_delimiter=';', kv_delimiter='=')
+datatable(s:string)[ "a=1, b=2, c=3" ] | parse-kv s as (a:long, b:long, c:long) with (pair_delimiter=',', kv_delimiter='=')
+datatable(s:string)[ "x:10|y:20|z:30" ] | parse-kv s as (x:int, y:int, z:int) with (pair_delimiter='|', kv_delimiter=':')
+datatable(s:string)[ "no delimiters here" ] | parse-kv s as (foo:string) with (pair_delimiter=';', kv_delimiter='=')
+datatable(s:string)[ "[level=err] msg", "[level=warn] hi" ] | parse s with "[level=" lvl "] " body | project lvl, body
+datatable(s:string)[ "USER=root HOME=/root", "USER=guest HOME=/home/guest" ] | parse s with "USER=" u " HOME=" h | project u, h
+datatable(s:string)[ "ABCdef", "123XYZ" ] | parse kind=regex s with @"[A-Z]+" mid:string @"[a-z]*" | project mid
+datatable(s:string)[ "prefix-42-suffix" ] | parse kind=regex s with "prefix-" n:int "-suffix"
+datatable(s:string)[ "  spaced  out  text  " ] | parse s with "  " a "  " b "  " c | project a, b, c
+datatable(s:string)[ "alpha","beta","gamma","delta" ] | search "a"
+datatable(s:string, tag:string)[ "alpha","x", "Beta","y", "café","z" ] | search "beta"
+datatable(s:string, tag:string)[ "alpha","x", "Beta","y", "café","z" ] | search kind=case_sensitive "Beta"
+datatable(s:string, n:long)[ "hello",1, "world",2 ] | search "1"
+datatable(s:string, n:long)[ "hello",100, "world",200 ] | search n == 100
+datatable(s:string)[ "the quick brown", "fox jumps over" ] | search "quick" or "jumps"
+datatable(s:string)[ "error in module", "ok status" ] | search "error" and "module"
+datatable(s:string)[ "apple pie", "banana split" ] | search "apple" | where s contains "pie"
+datatable(s:string)[ "foo bar baz" ] | search s:"bar"
+datatable(a:string, b:string)[ "match","nomatch", "x","y" ] | search "match"
+datatable(i:int)[ 1,5,10,15,20 ] | where i between (5 .. 15)
+datatable(i:int)[ 1,5,10,15,20 ] | where i !between (5 .. 15)
+datatable(r:real)[ -2.5,0.0,2.5,5.0,7.5 ] | where r between (0.0 .. 5.0)
+datatable(l:long)[ 100,200,300,400 ] | where l between (150 .. 350)
+datatable(t:datetime)[ datetime(2020-01-01), datetime(2020-06-15), datetime(2021-01-01) ] | where t between (datetime(2020-01-01) .. datetime(2020-12-31))
+datatable(t:datetime)[ datetime(2020-01-01), datetime(2020-06-15), datetime(2021-01-01) ] | where t !between (datetime(2020-01-01) .. datetime(2020-12-31))
+datatable(i:int)[ 1,2,3,4,5,6,7,8,9,10 ] | where i between (3 .. 7) and i != 5
+datatable(i:int, j:int)[ 1,10, 2,20, 3,30 ] | where (i > 1 and j < 30) or i == 1
+datatable(i:int)[ 1,2,3,4,5 ] | where not(i > 2)
+datatable(i:int, s:string)[ 1,"a", 2,"b", 3,"c" ] | where i > 1 and (s == "b" or s == "c") and not(i == 3)
+datatable(b:bool, i:int)[ true,1, false,2, true,3 ] | where b and i > 1 or not b
+datatable(i:int)[ 1,2,3,4,5 ] | where i in (1, 3, 5)
+datatable(s:string)[ "a","b","c","d" ] | where s in ("a", "c")
+datatable(i:int)[ 1,2,3 ] | where i between (1.5 .. 2.5)
+datatable(t:datetime, span:timespan)[ datetime(2020-01-01),1d, datetime(2020-01-05),2d ] | where t between (datetime(2020-01-01) .. (datetime(2020-01-01)+5d))
+datatable(s:string)[ "Hello World", "HELLO", "hello" ] | search "hello"
+datatable(s:string)[ "abc", "ABC", "AbC" ] | search kind=case_sensitive "ABC"
+datatable(s:string)[ "tom cat", "jerry mouse" ] | parse s with first:string " " second:string | where second has "cat"
+datatable(s:string)[ "v1.2.3", "v4.5.6" ] | parse kind=regex s with "v" major:int "." minor:int "." patch:int | project major, minor, patch
+datatable(s:string)[ "k1=val with spaces;k2=another val" ] | parse-kv s as (k1:string, k2:string) with (pair_delimiter=';', kv_delimiter='=')
+datatable(x:long, y:long, z:long)[ 1,2,3, 4,5,6, 7,8,9 ] | where x between (1 .. 4) or z !between (3 .. 6)
+datatable(s:string)[ "a1b2c3" ] | parse kind=regex s with @"[a-z]" d1:int @"[a-z]" d2:int @"[a-z]" d3:int | project d1, d2, d3

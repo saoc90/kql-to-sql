@@ -1,0 +1,45 @@
+datatable(s:string)[ "a.b.c","a-b-c","a_b_c","a/b/c","a:b:c" ] | extend h_b = s has "b", hp_b = hasprefix(s,"a"), hs_c = hassuffix(s,"c") | where h_b | project s, h_b, hp_b, hs_c
+datatable(s:string)[ "foo.bar","foo bar","foo/bar","foo\\bar","foobar" ] | summarize n=count() by has_bar = (s has "bar") | order by has_bar asc
+datatable(s:string)[ "word1 word2","word1.word2","word1,word2","word1;word2","word1+word2" ] | where s has "word1" and s has "word2" | project s
+datatable(s:string)[ "12.34.56","12-34-56","12 34 56","123456" ] | where s has "34" | project s, ctn = s contains "34"
+datatable(s:string)[ "The.Quick.Brown","quick brown fox","BROWN-quick" ] | where s has_cs "Quick" | project s
+datatable(s:string)[ "tag=value","tag==value","tag = value","tagvalue" ] | where s has "tag" and s has "value" | project s
+datatable(s:string)[ "café résumé","cafe resume","CAFÉ RÉSUMÉ","Café Résumé" ] | where s has "café" | project s, eq = s =~ "café résumé"
+datatable(s:string)[ "naïve","naive","NAÏVE","Naïve" ] | summarize c=count() by tolower(s) | order by tolower_s asc
+datatable(s:string)[ "Müller","muller","MÜLLER","Mueller" ] | where s in~ ("müller","mueller") | project s
+datatable(s:string)[ "Ångström","angstrom","ÅNGSTRÖM" ] | project s, up=toupper(s), lo=tolower(s), len=strlen(s), bytes=string_size(s)
+datatable(s:string)[ "á","á","Á" ] | project s, len=strlen(s), bytes=string_size(s), eq_precomposed = s == "á"
+datatable(s:string)[ "👨‍👩‍👧","😀😀","🇺🇸","a😀b" ] | project s, len=strlen(s), bytes=string_size(s), sub=substring(s,0,1)
+datatable(s:string)[ "Hello\tWorld","Hello World","Hello\nWorld" ] | where s has "Hello" and s has "World" | project s, sp = s contains " "
+datatable(s:string)[ "key:\"val\"","key:'val'","key:val" ] | project s, ext=extract(@"key:.?(\w+)",1,s), cnt=countof(s,"val")
+datatable(s:string)[ "a''b","a'b'c","'start","end'","''" ] | project s, c=countof(s,"'"), i=indexof(s,"'"), i2=indexof(s,"'",2)
+datatable(s:string)[ "back\\slash","double\\\\slash","none" ] | project s, len=strlen(s), idx=indexof(s,"\\"), cnt=countof(s,@"\\")
+datatable(s:string)[ "line1\r\nline2\r\nline3","one\ntwo","solo" ] | project s, parts=split(s,"\r\n"), n=array_length(split(s,"\r\n"))
+datatable(s:string)[ "aXbXcXd","XX","Xstart","endX","X" ] | project s, parts=split(s,"X"), first=split(s,"X")[0], last=split(s,"X")[-1]
+datatable(s:string)[ "a,b,,c,","",",",",," ] | project s, n=array_length(split(s,",")), p_last=split(s,",")[3]
+datatable(s:string)[ "abcabc","aaaa","" ] | project s, r1=replace_string(s,"a","XY"), r2=replace_string(s,"","_"), r3=replace_string(s,"abc","")
+datatable(s:string)[ "one two three","wordword","   " ] | project s, rr=replace_regex(s,@"\s+","-"), rr2=replace_regex(s,@"(\w)(\w)",@"\2\1")
+datatable(s:string)[ "2020-01-02 03:04","a1b2c3d4","nope" ] | project s, all=extract_all(@"(\d+)",s), all2=extract_all(@"(\d)(\d)",dynamic([1,2]),s)
+datatable(s:string)[ "aaa","aXaXa","a" ] | project s, ea=extract_all(@"a",s), n=array_length(extract_all(@"a",s))
+datatable(s:string)[ "hello","HELLO","Hello" ] | project s, sub_neg=substring(s,-3,2), sub_negstart=substring(s,-100,3), sub_zerolen=substring(s,2,0)
+datatable(s:string)[ "abcdef","xy","" ] | project s, sm1=substring(s,3), sm2=substring(s,-2), sm3=substring(s,100)
+datatable(s:string,n:int)[ "abcdef",2, "xy",-1, "",3 ] | project s, dyn=substring(s,n,n+1)
+datatable(s:string)[ "  pad  ","\t\tx\t\t","yyy","" ] | project s, t=trim(@"\s",s), ts=trim(" ",s), tcustom=trim("y",s)
+datatable(s:string)[ "xxhelloxx","__world__","midxxmid" ] | project s, ts=trim_start("x",s), te=trim_end("_",s), full=trim(@"[x_]",s)
+datatable(s:string)[ "Hello","World" ] | project base=s, cat=strcat(s,"-",strlen(s),"-",toupper(s)), cd=strcat_delim(":",s,strlen(s),toupper(s))
+datatable(s:string)[ "a","b" ] | project cat_null=strcat(s,"-",tostring(int(null)),"-end"), cat_empty=strcat("",s,"")
+datatable(s:string)[ "ABC","abc","AbC" ] | where s !in~ ("abc") | project s
+datatable(s:string)[ "red","green","blue","RED","Green" ] | where s in~ ("RED","BLUE") | project s, idx=indexof(strcat("|red|green|blue|"),strcat("|",tolower(s),"|"))
+datatable(s:string)[ "cat","category","scatter","cats","a cat" ] | extend term = s has "cat", pre = s hasprefix "cat", sub = s contains "cat" | project s, term, pre, sub
+datatable(s:string)[ "end.","end ","end","ending","the end" ] | where s hassuffix "end" | project s, es = s endswith "end"
+datatable(s:string)[ "100%done","50% off","%start","end%" ] | where s contains "%" | project s, e=extract(@"(\d+)%",1,s)
+datatable(s:string)[ "a_b","a%b","a\\b","a[b]" ] | where s contains "%" or s contains "_" | project s
+datatable(s:string)[ "100%off_now","no_specials","%_pct" ] | project s, r=replace_string(s,"%","PCT"), r2=replace_string(s,"_","UND")
+datatable(s:string)[ "PATTERN%MATCH","under_score","plain" ] | where s startswith_cs "PATTERN" or s contains_cs "score" | project s
+datatable(s:string)[ "Hello World Hello","aaa bbb aaa","one" ] | project s, c=countof(s,"Hello"), cl=countof(s,"l","regex"), ci=countof(tolower(s),"hello")
+datatable(s:string)[ "ABCabc123","mixedCASE","UPPER" ] | project s, eq_lower = (s == tolower(s)), eq_upper = (s == toupper(s)), eqi = s =~ tolower(s)
+datatable(s:string)[ "","x",null ] | extend e=isempty(s), ne=isnotempty(s), iif=iif(isempty(s),"E","F"), coal=coalesce(s,"DEFAULT") | project s, e, ne, iif, coal
+datatable(s:string)[ "abc","","   ",null ] | summarize n=count() by isempty(s) | order by isempty_s asc
+datatable(s:string)[ "Привет мир","ПРИВЕТ","привет","МИР" ] | where s has "мир" or s has_cs "ПРИВЕТ" | project s, up=toupper(s), lo=tolower(s)
+datatable(s:string)[ "café","café","CAFÉ" ] | summarize n=count() by g=(s =~ "café") | order by g asc
+datatable(s:string)[ "a.b","a..b","..","a.","b" ] | mv-expand part=split(s,".") to typeof(string) | summarize parts=count() by s | order by s asc

@@ -1,0 +1,45 @@
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | sort by k asc, v asc | serialize rn = row_number()
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | sort by k asc, v desc | serialize rn = row_number(100)
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | sort by k asc | serialize rn = row_number(1, k != prev(k))
+datatable(g:string, v:long)[ "a",1, "a",2, "b",5, "b",7, "b",9 ] | sort by g asc, v asc | serialize p = prev(v), n = next(v)
+datatable(g:string, v:long)[ "a",1, "a",2, "b",5, "b",7, "b",9 ] | sort by g asc, v asc | serialize p2 = prev(v, 2), n2 = next(v, 2)
+datatable(g:string, v:long)[ "a",1, "a",2, "b",5, "b",7 ] | sort by g asc, v asc | serialize p = prev(v, 1, -999), n = next(v, 1, -999)
+datatable(x:long)[ 5, 3, 8, 1, 9, 2 ] | sort by x asc | serialize cs = row_cumsum(x)
+datatable(x:long)[ 5, 3, 8, 1, 9, 2 ] | sort by x asc | serialize cs = row_cumsum(x, false)
+datatable(g:string, x:long)[ "a",5, "a",3, "b",8, "b",1, "b",9 ] | sort by g asc, x asc | serialize cs = row_cumsum(x, g != prev(g))
+datatable(x:real)[ 5.5, 3.25, 8.0, 1.1 ] | sort by x asc | serialize cs = row_cumsum(x)
+datatable(s:long)[ 10, 10, 20, 20, 20, 5 ] | sort by s desc | serialize rd = row_rank_dense(s)
+datatable(s:long)[ 10, 10, 20, 20, 20, 5 ] | sort by s asc | serialize rm = row_rank_min(s)
+datatable(s:long)[ 10, 10, 20, 20, 20, 5 ] | sort by s desc | serialize rd = row_rank_dense(s), rm = row_rank_min(s)
+datatable(g:string, s:long)[ "a",10, "a",10, "a",20, "b",5, "b",5 ] | sort by g asc, s asc | serialize rd = row_rank_dense(s, g != prev(g))
+datatable(t:long, v:long)[ 1,5, 2,0, 3,0, 4,7, 5,0 ] | sort by t asc | scan declare (cum:long=0) with (step s: true => cum = cum + v;)
+datatable(t:long, v:long)[ 1,5, 2,0, 3,0, 4,7, 5,0 ] | sort by t asc | scan declare (ff:long=0) with (step s: v != 0 => ff = v;)
+datatable(t:long, v:long)[ 1,5, 2,3, 3,99, 4,7, 5,2 ] | sort by t asc | scan declare (cum:long=0) with (step s: true => cum = iff(v == 99, 0, cum + v);)
+datatable(g:string, t:long, v:long)[ "a",1,5, "a",2,3, "b",1,8, "b",2,1 ] | sort by g asc, t asc | scan declare (cum:long=0) with (step s: true => cum = iff(g != prev(g), v, cum + v);)
+datatable(t:datetime, v:real)[ datetime(2020-01-01),1.0, datetime(2020-01-02),0.0, datetime(2020-01-03),0.0, datetime(2020-01-04),4.0 ] | sort by t asc | scan declare (ff:real=0.0) with (step s: v != 0.0 => ff = v;)
+datatable(x:long)[ 1, 2, 3, 4, 5 ] | make-series total = sum(x) default = 0 on x from 1 to 5 step 1
+datatable(t:datetime, v:long)[ datetime(2020-01-01),10, datetime(2020-01-03),30 ] | make-series s = sum(v) default = 0 on t from datetime(2020-01-01) to datetime(2020-01-05) step 1d
+datatable(t:datetime, v:long, g:string)[ datetime(2020-01-01),10,"a", datetime(2020-01-02),20,"b", datetime(2020-01-03),30,"a" ] | make-series s = sum(v) default = 0 on t from datetime(2020-01-01) to datetime(2020-01-04) step 1d by g
+datatable(t:datetime, v:long)[ datetime(2020-01-01),10, datetime(2020-01-02),20, datetime(2020-01-04),40 ] | make-series avg(v) default = 0 on t step 1d
+datatable(t:datetime, v:long)[ datetime(2020-01-01 00:00),10, datetime(2020-01-01 02:00),20, datetime(2020-01-01 05:00),50 ] | make-series mx = max(v), mn = min(v) default = 0 on t from datetime(2020-01-01) to datetime(2020-01-01 06:00) step 1h
+datatable(t:datetime, v:real)[ datetime(2020-01-01),1.5, datetime(2020-01-03),3.5 ] | make-series a = avg(v) default = 0.0 on t from datetime(2020-01-01) to datetime(2020-01-05) step 1d by ='all'
+datatable(t:datetime)[ datetime(2020-01-01), datetime(2020-01-02), datetime(2020-01-02) ] | make-series c = count() default = 0 on t from datetime(2020-01-01) to datetime(2020-01-04) step 1d
+datatable(t:long, v:long)[ 0,1, 2,3, 4,5 ] | make-series s = sum(v) default = -1 on t from 0 to 6 step 2
+datatable(t:long, v:long, g:long)[ 0,1,100, 2,3,100, 4,5,200 ] | make-series s = sum(v) on t from 0 to 6 step 2 by g
+datatable(t:datetime, v:long)[ datetime(2020-01-01),10, datetime(2020-01-02),20, datetime(2020-01-03),30 ] | make-series s = sum(v) default = 0 on t from datetime(2020-01-01) to datetime(2020-01-04) step 1d | mv-expand s to typeof(long)
+datatable(t:datetime, v:long)[ datetime(2020-01-01),10, datetime(2020-01-02),20 ] | make-series s = sum(v) default = 0 on t from datetime(2020-01-01) to datetime(2020-01-03) step 1d | extend e = series_stats_dynamic(s)
+datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","y",20, "b","x",30, "b","z",5 ] | top-nested 2 of cat by sum(v), top-nested 1 of sub by sum(v)
+datatable(cat:string, v:long)[ "a",10, "b",20, "c",5, "d",30 ] | top-nested 2 of cat by sum(v) with others = "OTHER"
+datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","y",20, "b","x",30 ] | top-nested of cat by Tot=sum(v), top-nested of sub by Sub=sum(v)
+datatable(cat:string, v:long)[ "a",10, "a",5, "b",20 ] | top-nested 1 of cat by max(v)
+datatable(g:string, v:long)[ "a",1, "a",2, "b",3, "c",4, "c",5, "c",6 ] | top-hitters 2 of g by v
+datatable(g:string, v:long)[ "a",10, "b",20, "c",30, "d",1 ] | top-hitters 2 of g
+datatable(g:string)[ "a", "a", "a", "b", "c", "c" ] | sample-distinct 2 of g
+datatable(id:long, name:string)[ 1,"a", 1,"b", 2,"c", 3,"d", 3,"e" ] | top 2 of id by name
+datatable(x:long)[ 3, 1, 2 ] | serialize | extend rn = row_number()
+datatable(x:long)[ 10, 20, 30, 40 ] | sort by x asc | serialize cs = row_cumsum(x), rn = row_number(), p = prev(x), rd = row_rank_dense(x)
+datatable(g:long, x:long)[ 1,10, 1,20, 2,5, 2,5, 2,15 ] | sort by g asc, x asc | serialize delta = x - prev(x), reset = iff(g != prev(g), 1, 0)
+datatable(x:long)[ 100 ] | sort by x asc | serialize rn = row_number(), p = prev(x), n = next(x), cs = row_cumsum(x), rd = row_rank_dense(x)
+datatable(t:datetime, v:long)[ datetime(2020-01-01),5 ] | make-series s = sum(v) default = 0 on t from datetime(2020-01-01) to datetime(2020-01-01) step 1d
+datatable(t:long, v:long)[ 5,1, 1,1, 3,1, 2,1, 4,1 ] | sort by t asc | serialize gap = t - prev(t, 1, t) | where isnotnull(gap)
+datatable(t:long, st:string, v:long)[ 1,"open",5, 2,"run",3, 3,"run",2, 4,"close",1, 5,"open",9 ] | sort by t asc | scan declare (sess:long=0) with (step s: true => sess = iff(st == "open", sess + 1, sess);)

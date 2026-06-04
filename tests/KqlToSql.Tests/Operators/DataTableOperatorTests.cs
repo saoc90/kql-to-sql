@@ -34,7 +34,7 @@ public class DataTableOperatorTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("datatable(x:long) [1, 2, 3]");
-        Assert.Equal("SELECT * FROM (VALUES (1), (2), (3)) AS t(x)", sql);
+        Assert.Equal("SELECT * FROM (VALUES (CAST(1 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(3 AS BIGINT))) AS t(x)", sql);
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public class DataTableOperatorTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("datatable(Score:real) [1.5, 2.7, 3.14]");
-        Assert.Equal("SELECT * FROM (VALUES (1.5), (2.7), (3.14)) AS t(Score)", sql);
+        Assert.Equal("SELECT * FROM (VALUES (CAST(1.5 AS DOUBLE)), (CAST(2.7 AS DOUBLE)), (CAST(3.14 AS DOUBLE))) AS t(Score)", sql);
     }
 
     [Fact]

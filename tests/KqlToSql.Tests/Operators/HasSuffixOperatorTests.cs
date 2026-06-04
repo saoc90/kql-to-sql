@@ -15,7 +15,7 @@ public class HasSuffixOperatorTests
 | where State hassuffix ""A""
 | project State, event_count";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE State ILIKE '%A%'", sql);
+        Assert.Equal(@"SELECT State, event_count FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE regexp_matches(CAST(State AS VARCHAR), '(?i)A\b')", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -36,7 +36,7 @@ public class HasSuffixOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | where State hassuffix_cs 'a'";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT * FROM StormEvents WHERE State LIKE '%a%'", sql);
+        Assert.Equal(@"SELECT * FROM StormEvents WHERE regexp_matches(CAST(State AS VARCHAR), 'a\b')", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -54,7 +54,7 @@ public class HasSuffixOperatorTests
 | where State !hassuffix ""A""
 | project State";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE State NOT ILIKE '%A%'", sql);
+        Assert.Equal(@"SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE NOT regexp_matches(CAST(State AS VARCHAR), '(?i)A\b')", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -65,7 +65,10 @@ public class HasSuffixOperatorTests
         {
             states.Add(reader.GetString(0));
         }
-        Assert.DoesNotContain(states, s => s.Contains("A"));
+        // !hassuffix "A" excludes states whose final term ENDS WITH "a" (term semantics), not states
+        // merely containing the letter "A" anywhere — so e.g. TEXAS/KANSAS are correctly returned.
+        Assert.NotEmpty(states);
+        Assert.DoesNotContain(states, s => s.EndsWith("A", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -77,7 +80,7 @@ public class HasSuffixOperatorTests
 | where State !hassuffix_cs ""a""
 | project State";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE State NOT LIKE '%a%'", sql);
+        Assert.Equal(@"SELECT State FROM (SELECT State, COUNT(*) AS event_count FROM StormEvents GROUP BY ALL) WHERE NOT regexp_matches(CAST(State AS VARCHAR), 'a\b')", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

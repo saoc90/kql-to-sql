@@ -1,0 +1,45 @@
+datatable(s:string)[ "a.b-c_d/e","x y z","term1\tterm2","p|q|r" ] | extend toks = countof(s,@"\w+","regex") | project s, has_y = s has "y", hasprefix_a = hasprefix(s,"a"), terms = toks | order by s asc
+datatable(s:string)[ "co-op","co op","coop","CO-OP","Co-Op" ] | where s has "co" and s has "op" | project s, c=s contains "co-op", hc=s has_cs "co"
+datatable(s:string)[ "version=1.2.3","v1.2.3","1.2.3-rc","1_2_3" ] | where s has "1" and s has "3" and s !has "2.3" | project s
+datatable(s:string)[ "key:value;k2:v2","a=b&c=d","x;y;z" ] | mv-expand kv=split(s,";") to typeof(string) | extend pair=split(tostring(kv),":") | project s, kv=tostring(kv), k=tostring(pair[0]), v=tostring(pair[1]) | order by s asc, kv asc
+datatable(s:string)[ "café","café","cafe","CAFÉ" ] | project s, l=strlen(s), b=string_size(s), eqi=(s =~ "café"), idx=indexof(s,"é")
+datatable(s:string)[ "Ａｂｃ","abc","ＡＢＣ","ABC" ] | project s, lo=tolower(s), up=toupper(s), eq=(tolower(s) == "abc"), inn=(s in~ ("abc"))
+datatable(s:string)[ "𝓗ello","Hello","ℌello" ] | project s, l=strlen(s), b=string_size(s), sub=substring(s,0,2), rev=reverse(s)
+datatable(s:string)[ "  spaced  "," nbsp ","tab\ttab","plain" ] | project s, t=trim(@"\s",s), tlen=strlen(trim(@"\s",s)), hasws=(s matches regex @"\s")
+datatable(s:string)[ "abcABCabc","XYZxyz","123" ] | project s, ri=replace_regex(s,@"(?i)abc","#"), rg=replace_regex(s,@"([a-z])([A-Z])",@"\1_\2"), cnt=countof(s,@"[a-z]","regex")
+datatable(s:string)[ "a1b2c3","aXbYcZ","abc" ] | project s, ea=extract_all(@"([a-z])(\d)?",s), n=array_length(extract_all(@"([a-z])(\d)?",s))
+datatable(s:string)[ "first.second.third","onlyone","..","a..b" ] | project s, p0=split(s,".")[0], pneg=split(s,".")[-1], cnt=array_length(split(s,".")), joined=strcat_delim("/",tostring(split(s,".")[0]),tostring(split(s,".")[1]))
+datatable(s:string)[ "He said \"hi\"","tab\there","mix\"\t\"end" ] | project s, l=strlen(s), q=countof(s,"\""), idxq=indexof(s,"\""), idxt=indexof(s,"\t")
+datatable(s:string)[ "O'Brien's","it''s","''","a'b'c'd" ] | project s, c=countof(s,"'"), repl=replace_string(s,"'","''"), i3=indexof(s,"'",3)
+datatable(s:string)[ "ABCabc","aAbBcC","ZZZ" ] | extend hp_cs = hasprefix_cs(s,"ABC"), hs_cs=hassuffix_cs(s,"abc"), eqcs=(s == "ABCabc") | project s, hp_cs, hs_cs, eqcs
+datatable(s:string)[ "word boundary test","word","test word boundary","wordy" ] | where s has "word" and s hassuffix "test" | project s, ends=s endswith "test"
+datatable(s:string)[ "x","xx","xxx","xxxx" ] | project s, rep=replace_regex(s,@"x",strcat("y")), trimmed=trim_end("x",s), subneg=substring(s,strlen(s)-2,2)
+datatable(s:string)[ "100,200,300","1,2,3,","",",,," ] | mv-expand v=split(s,",") to typeof(string) | summarize total=sum(toint(v)), cnt=count() by s | order by s asc
+datatable(s:string)[ "Hello\\nWorld","Hello\nWorld","a\\tb","a\tb" ] | project s, l=strlen(s), hasnl=(s contains "\n"), hasbs=(s contains "\\"), cnt=countof(s,"\\")
+datatable(s:string,p:string)[ "alphabetagamma","beta", "ALPHABETA","BETA", "nomatch","zzz" ] | project s, idx=indexof(s,p), found=(s contains p), foundcs=(indexof(s,p) >= 0)
+datatable(s:string)[ "the cat","category","cats and dogs","scatter","cat" ] | summarize n=count() by has_cat=(s has "cat"), sub_cat=(s contains "cat") | order by has_cat asc, sub_cat asc
+datatable(s:string)[ "192.168.0.1","10.0.0.255","not.an.ip","1.2.3" ] | where s matches regex @"^\d{1,3}(\.\d{1,3}){3}$" | project s, parts=split(s,"."), oct0=toint(split(s,".")[0])
+datatable(s:string)[ "ababab","aaa","abc","" ] | project s, ra=replace_regex(s,@"(ab)+","X"), ea=extract_all(@"(a)(b)?",s), cnt=countof(s,"ab")
+datatable(s:string)[ "MixedСyrillic","plainascii","А核" ] | project s, l=strlen(s), b=string_size(s), up=toupper(s), lo=tolower(s), eqlen=(strlen(s) == string_size(s))
+datatable(s:string)[ "key=val","key==val","=onlyval","keyonly=" ] | extend parts=split(s,"=") | project s, k=tostring(parts[0]), v=tostring(parts[1]), npart=array_length(parts), isempty_k=isempty(tostring(parts[0]))
+datatable(s:string)[ "trailing   ","   leading","  both  ","none" ] | project s, te=trim_end(" ",s), ts=trim_start(" ",s), lente=strlen(trim_end(" ",s)), full=trim(" ",s)
+datatable(s:string)[ "a😀b😀c","😀😀","start😀","😀end" ] | project s, parts=split(s,"😀"), n=array_length(split(s,"😀")), first=tostring(split(s,"😀")[0])
+datatable(s:string)[ "ＡＢ１２","AB12","ＡＢ12" ] | where s matches regex @"\d" | project s, dig=extract_all(@"(\d)",s), l=strlen(s)
+datatable(s:string)[ "a\\b\\c","a\\\\b","\\","noslash" ] | project s, parts=split(s,@"\"), n=array_length(split(s,@"\")), cnt=countof(s,@"\")
+datatable(s:string)[ "RED green BLUE","red GREEN blue","mixed" ] | where s has "red" and s has_cs "green" | project s, contains_RED=(s contains_cs "RED")
+datatable(s:string)[ "abcdefghij","short","" ] | project s, mid=substring(s,3,4), tail=substring(s,strlen(s)-3), oor=substring(s,5,100), negpair=substring(s,-4,2)
+datatable(s:string)[ "x;y,z|w","a-b","single" ] | project s, sp=extract_all(@"([;,|-])",s), n=array_length(extract_all(@"([;,|-])",s)), repl=replace_regex(s,@"[;,|-]","_")
+datatable(s:string)[ "Hello World","HELLO WORLD","hello world" ] | summarize cnt=count() by g=tolower(s) | extend has_o=(g has "o"), wc=array_length(split(g," ")) | order by g asc
+datatable(s:string)[ "<tag>text</tag>","<br/>","plain text","<a href=\"x\">" ] | project s, inner=extract(@"<([a-z]+)",1,s), all=extract_all(@"<(/?[a-z]+)",s), cnt=countof(s,"<")
+datatable(s:string)[ "ＦＵＬＬ","full","Ｆull","FULL" ] | where s =~ "full" | project s, l=strlen(s), b=string_size(s)
+datatable(s:string)[ "1.5e3","-2.5","abc","3.14159" ] | extend num=toreal(s) | where isnotnull(num) | project s, num, isfin=(num == num), str=tostring(num)
+datatable(s:string)[ "term once","term term","no t e r m here","termterm" ] | where s has "term" | summarize c=count() by countof(s,"term") | order by countof_s asc
+datatable(s:string)[ "aaa​bbb","a\tb","a b","ab" ] | project s, l=strlen(s), b=string_size(s), nospace=replace_string(replace_string(s," ",""),"\t",""), hasspace=(s has " ")
+datatable(s:string)[ "café au lait","CAFÉ","decaf","cafeteria" ] | where s has "café" or s hasprefix "caf" | project s, hp=hasprefix(s,"café"), hs=hassuffix(s,"é")
+datatable(s:string)[ "{\"k\":\"v\"}","[1,2,3]","plain","{}" ] | project s, isjson=(s startswith "{" or s startswith "["), inner=extract(@"\{(.*)\}",1,s), l=strlen(s)
+datatable(s:string)[ "abcXYZabc","ABCxyzABC","mix" ] | project s, lo_has=(tolower(s) has "abc"), rep=replace_regex(tolower(s),@"abc","#"), eqi=(s =~ "abcxyzabc")
+datatable(s:string)[ "a,b;c,d;e","one;two","x" ] | project s, outer=split(s,";"), expand=array_length(split(s,";")), nested0=split(tostring(split(s,";")[0]),","), firstcell=tostring(split(tostring(split(s,";")[0]),",")[0])
+datatable(s:string)[ "naïveté","naivete","NAÏVETÉ","Naïveté" ] | where s in~ ("naïveté","naivete") | project s, up=toupper(s), revlen=strlen(reverse(s))
+datatable(s:string)[ "Hello, World!","привет, мир!","你好，世界！" ] | project s, words=array_length(split(s," ")), l=strlen(s), b=string_size(s), bg=(b > l)
+datatable(s:string)[ "prefix-MIDDLE-suffix","a-B-c","nodash" ] | project s, mid=extract(@"-([A-Za-z]+)-",1,s), parts=split(s,"-"), upmid=toupper(tostring(split(s,"-")[1]))
+datatable(s:string)[ "trim\tme\t","  pad  ","xxstripxx","" ] | project s, multi=trim(@"[\sx]",s), tslen=strlen(trim(@"[\sx]",s)), origlen=strlen(s), diff=(strlen(s) - strlen(trim(@"[\sx]",s)))

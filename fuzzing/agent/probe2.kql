@@ -1,0 +1,6 @@
+datatable(g:long, x:long)[ 1,10, 1,20, 2,5 ] | sort by g asc, x asc | serialize a = prev(x), b = next(x)
+datatable(g:long, x:long)[ 1,10, 1,20, 2,5 ] | sort by g asc, x asc | serialize first = iff(g != prev(g), x, long(null))
+datatable(g:long, x:long)[ 1,10, 1,20, 2,5 ] | sort by g asc, x asc | serialize last = iff(g != next(g), x, long(null))
+datatable(t:long, v:long)[ 1,5, 2,3 ] | sort by t asc | scan declare (w:long=0) with (step s: true => w = v + prev(w, 1, 0);)
+datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","y",20, "b","x",30 ] | top-nested 2 of cat by sum(v), top-nested 1 of sub by sum(v) with others="REST"
+datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","y",20, "b","x",30 ] | top-nested 2 of cat by sum(v) with others="REST", top-nested 1 of sub by sum(v)

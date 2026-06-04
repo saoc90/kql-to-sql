@@ -14,7 +14,7 @@ public class BugFixTests
 
         // Summarize result must be wrapped so ORDER BY doesn't reference ungrouped columns.
         Assert.StartsWith("SELECT * FROM (", sql);
-        Assert.EndsWith(") ORDER BY n DESC", sql);
+        Assert.EndsWith(") ORDER BY n DESC NULLS LAST", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -31,7 +31,7 @@ public class BugFixTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("StormEvents | sort by State");
-        Assert.Equal("SELECT * FROM StormEvents ORDER BY State DESC", sql);
+        Assert.Equal("SELECT * FROM StormEvents ORDER BY State DESC NULLS LAST", sql);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public class BugFixTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("StormEvents | sort by State asc");
-        Assert.Equal("SELECT * FROM StormEvents ORDER BY State ASC", sql);
+        Assert.Equal("SELECT * FROM StormEvents ORDER BY State ASC NULLS FIRST", sql);
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class BugFixTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("StormEvents | sort by State desc");
-        Assert.Equal("SELECT * FROM StormEvents ORDER BY State DESC", sql);
+        Assert.Equal("SELECT * FROM StormEvents ORDER BY State DESC NULLS LAST", sql);
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public class BugFixTests
         var kql = "StormEvents | summarize count() by EventType | order by c = count_ | render columnchart";
         var sql = converter.Convert(kql);
 
-        Assert.Equal("SELECT * FROM (SELECT EventType, COUNT(*) AS count_ FROM StormEvents GROUP BY ALL) ORDER BY count_ DESC", sql);
+        Assert.Equal("SELECT * FROM (SELECT EventType, COUNT(*) AS count_ FROM StormEvents GROUP BY ALL) ORDER BY count_ DESC NULLS LAST", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
