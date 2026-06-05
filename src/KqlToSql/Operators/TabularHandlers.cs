@@ -49,9 +49,31 @@ internal class TabularHandlers : OperatorHandlerBase
         return (inner, rewritten);
     }
 
+    /// <summary>Resolves the input column names of a filter by re-analyzing the query with the bound
+    /// semantic model (same technique as the search operator). Empty list if binding is unavailable.</summary>
+    private static List<string> ResolveStarColumns(FilterOperator filter)
+    {
+        try
+        {
+            var analyzed = KustoCode.ParseAndAnalyze(filter.Root.ToString());
+            var condText = filter.Condition.ToString();
+            var match = analyzed.Syntax.GetDescendants<FilterOperator>()
+                .FirstOrDefault(f => f.Condition.ToString() == condText);
+            if (match?.Parent is PipeExpression pipe &&
+                pipe.Expression.ResultType is Kusto.Language.Symbols.TableSymbol ts)
+                return ts.Columns.Select(c => c.Name).ToList();
+        }
+        catch { /* unbound source — fall back to no expansion */ }
+        return new List<string>();
+    }
+
     internal string ApplyFilter(string leftSql, FilterOperator filter)
     {
+        // `where * <op> rhs` expands over every input column — resolve them via the bound semantic model.
+        bool hasStar = filter.Condition.GetDescendants<StarExpression>().Count > 0;
+        if (hasStar) Expr.SetAllColumns(ResolveStarColumns(filter));
         var condition = Expr.ConvertExpression(filter.Condition);
+        if (hasStar) Expr.ClearAllColumns();
 
         // If condition contains window functions, hoist them into an inner subquery
         if (HoistWindowFunctions(leftSql, condition) is var hoisted && hoisted.HasValue)

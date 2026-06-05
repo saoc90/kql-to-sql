@@ -277,11 +277,18 @@ internal class AdvancedHandlers : OperatorHandlerBase
         bool inclusiveEnd;
         if (makeSeries.RangeClause is MakeSeriesFromToStepClause fromToStep)
         {
-            fromExpr = Expr.ConvertExpression(fromToStep.MakeSeriesFromClause.Expression);
-            toExpr = Expr.ConvertExpression(fromToStep.MakeSeriesToClause.Expression);
             stepNode = fromToStep.MakeSeriesStepClause.Expression;
             stepExpr = stepNode.ToString().Trim();
-            inclusiveEnd = false;
+            // `from`/`to` are optional; when omitted Kusto infers them from the data's min/max of the
+            // axis column. Emit scalar subqueries instead of dereferencing the (null) clauses.
+            fromExpr = fromToStep.MakeSeriesFromClause != null
+                ? Expr.ConvertExpression(fromToStep.MakeSeriesFromClause.Expression)
+                : $"(SELECT MIN({onExpr}) FROM ({leftSql}))";
+            toExpr = fromToStep.MakeSeriesToClause != null
+                ? Expr.ConvertExpression(fromToStep.MakeSeriesToClause.Expression)
+                : $"(SELECT MAX({onExpr}) FROM ({leftSql}))";
+            // Explicit from..to is end-exclusive; an inferred range must include the max bucket.
+            inclusiveEnd = fromToStep.MakeSeriesToClause == null;
         }
         else if (makeSeries.RangeClause is MakeSeriesInRangeClause inRange)
         {
@@ -596,7 +603,9 @@ internal class AdvancedHandlers : OperatorHandlerBase
         // one is given (e.g. `Cnt=count()` -> `Cnt`), otherwise `aggregated_<subject>`.
         string AggAliasFor(TopNestedClause c)
         {
-            if (c.ByExpression is SimpleNamedExpression named)
+            // `by <agg> asc|desc` wraps the aggregate in an OrderedExpression — unwrap to find the name.
+            var by = c.ByExpression is OrderedExpression obe ? obe.Expression : c.ByExpression;
+            if (by is SimpleNamedExpression named)
                 return Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(named.Name.SimpleName);
             return $"aggregated_{Expr.ConvertExpression(c.OfExpression)}";
         }
@@ -606,9 +615,17 @@ internal class AdvancedHandlers : OperatorHandlerBase
             if (topNested.Clauses[i].Element is not TopNestedClause clause)
                 continue;
 
-            var count = Expr.ConvertExpression(clause.Expression);
+            // Count (the N in `top-nested N of ...`) is optional; absent => no row limit (all values).
+            var count = clause.Expression != null ? Expr.ConvertExpression(clause.Expression) : null;
             var column = Expr.ConvertExpression(clause.OfExpression);
             var aggExpr = clause.ByExpression;
+            // `by <agg> asc|desc` controls the ranking direction (default DESC = "top").
+            var direction = "DESC";
+            if (aggExpr is OrderedExpression oe)
+            {
+                direction = string.Equals(oe.Ordering?.ToString().Trim(), "asc", StringComparison.OrdinalIgnoreCase) ? "ASC" : "DESC";
+                aggExpr = oe.Expression;
+            }
 
             string aggSql;
             if (aggExpr is SimpleNamedExpression sne && sne.Expression is FunctionCallExpression namedFce)
@@ -667,8 +684,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
             }
             var allSelectCols = groupColExprs.Concat(prevAggCols).Append($"{aggSql} AS {aggAlias}");
             var innerSelect = $"SELECT {string.Join(", ", allSelectCols)} FROM {sourceSql} GROUP BY {string.Join(", ", groupColExprs.Concat(prevAggCols))}";
-            var ranked = $"SELECT *, ROW_NUMBER() OVER ({partitionBy}ORDER BY {aggAlias} DESC) AS _rn{i} FROM ({innerSelect})";
-            prevFilteredSql = $"SELECT {string.Join(", ", selectColumns)} FROM ({ranked}) WHERE _rn{i} <= {count}";
+            var ranked = $"SELECT *, ROW_NUMBER() OVER ({partitionBy}ORDER BY {aggAlias} {direction}) AS _rn{i} FROM ({innerSelect})";
+            prevFilteredSql = count != null
+                ? $"SELECT {string.Join(", ", selectColumns)} FROM ({ranked}) WHERE _rn{i} <= {count}"
+                : $"SELECT {string.Join(", ", selectColumns)} FROM ({ranked})";
 
             prevGroupCols.Add(column);
         }

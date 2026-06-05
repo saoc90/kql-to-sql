@@ -62,6 +62,13 @@ internal class ExpressionSqlBuilder
     /// downstream `col / N` uses KQL integer (truncating) division instead of DuckDB real division.</summary>
     internal void MarkIntegerColumn(string name) => _integerColumns.Add(name);
 
+    // Input column names for the current operator, used to expand `where *` predicates over all
+    // columns. _starColumnOverride is the column substituted for '*' during a single expansion pass.
+    private List<string> _allColumns = new();
+    private string? _starColumnOverride;
+    internal void SetAllColumns(IEnumerable<string> cols) => _allColumns = cols.ToList();
+    internal void ClearAllColumns() => _allColumns = new();
+
     private Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.Expression?[] paramDefaults, Kusto.Language.Syntax.FunctionBody body)>? _userFunctions;
     /// <summary>Sets user-defined parameterized functions for inline expansion.</summary>
     internal void SetUserFunctions(Dictionary<string, (string[] paramNames, Kusto.Language.Syntax.Expression?[] paramDefaults, Kusto.Language.Syntax.FunctionBody body)> funcs) => _userFunctions = funcs;
@@ -121,6 +128,10 @@ internal class ExpressionSqlBuilder
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} >= {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.LessThanOrEqualExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} <= {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+            // `where * <op> rhs` — expand the predicate across all input columns (OR). The guard
+            // (_starColumnOverride == null) prevents infinite recursion during expansion.
+            BinaryExpression starBin when starBin.Left is StarExpression && _starColumnOverride == null && _allColumns.Count > 0 =>
+                ExpandStarPredicate(starBin, leftAlias, rightAlias),
             BinaryExpression bin when bin.Kind == SyntaxKind.AddExpression =>
                 $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} + {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
             BinaryExpression bin when bin.Kind == SyntaxKind.SubtractExpression =>
@@ -229,6 +240,8 @@ internal class ExpressionSqlBuilder
             BracketedExpression be => ConvertExpression(be.Expression, leftAlias, rightAlias),
             JsonArrayExpression jae => $"LIST_VALUE({string.Join(", ", jae.Values.Select(v => ConvertExpression(v.Element, leftAlias, rightAlias)))})",
             JsonObjectExpression joe => $"'{joe}'::JSON",
+            StarExpression => _starColumnOverride
+                ?? throw new NotSupportedException("'*' is only supported in arg_max/arg_min/take_any and 'where *' predicates"),
             _ => throw new NotSupportedException($"Unsupported expression {expr.Kind}")
         };
     }
@@ -1464,6 +1477,38 @@ internal class ExpressionSqlBuilder
             return $"CAST(TRUNC(CAST({left} AS DOUBLE) / NULLIF({right}, 0)) AS BIGINT)";
 
         return $"{left} / {right}";
+    }
+
+    /// <summary>
+    /// Expand a `* &lt;op&gt; rhs` predicate (where the left side is the wildcard) into an OR across all
+    /// input columns: <c>(c1 op rhs OR c2 op rhs OR …)</c>. Each column is substituted for '*' via
+    /// _starColumnOverride while re-converting the same binary node, so operator semantics (has/contains/
+    /// ==/…) are reused exactly.
+    /// </summary>
+    private string ExpandStarPredicate(BinaryExpression bin, string? leftAlias, string? rightAlias)
+    {
+        var saved = _starColumnOverride;
+        var parts = new List<string>();
+        foreach (var col in _allColumns)
+        {
+            // Cast to VARCHAR so string predicates (has/contains/…) apply uniformly to non-string
+            // columns, matching Kusto's `*` search-across-all-columns semantics.
+            _starColumnOverride = $"CAST({QuoteIdentifierIfReserved(col)} AS VARCHAR)";
+            parts.Add(ConvertExpression(bin, leftAlias, rightAlias));
+        }
+        _starColumnOverride = saved;
+        if (parts.Count == 0) return "FALSE";
+        // Negated predicates (`* !contains x`, `* != x`, …) mean "no column matches" = AND of the
+        // per-column negations (De Morgan); positive predicates mean "any column matches" = OR.
+        bool negated = bin.Kind is SyntaxKind.NotContainsExpression or SyntaxKind.NotContainsCsExpression
+            or SyntaxKind.NotHasExpression or SyntaxKind.NotHasCsExpression
+            or SyntaxKind.NotStartsWithExpression or SyntaxKind.NotStartsWithCsExpression
+            or SyntaxKind.NotEndsWithExpression or SyntaxKind.NotEndsWithCsExpression
+            or SyntaxKind.NotHasPrefixExpression or SyntaxKind.NotHasPrefixCsExpression
+            or SyntaxKind.NotHasSuffixExpression or SyntaxKind.NotHasSuffixCsExpression
+            or SyntaxKind.NotEqualExpression or SyntaxKind.BangTildeExpression;
+        var join = negated ? " AND " : " OR ";
+        return "(" + string.Join(join, parts) + ")";
     }
 
     /// <summary>

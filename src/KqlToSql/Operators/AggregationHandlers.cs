@@ -19,9 +19,17 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             .Select(e => ConvertByExpression(e.Element))
             .ToArray() ?? Array.Empty<(string Select, string Group)>();
 
-        if (summarize.Aggregates.Count == 1 &&
-            summarize.Aggregates[0].Element is Expression aggExpr &&
-            aggExpr is FunctionCallExpression fce &&
+        // The sole aggregate, with any `alias=` wrapper stripped (arg_max(k,*)/take_any(*) ignore the
+        // alias since * already projects every column).
+        FunctionCallExpression? solo = null;
+        if (summarize.Aggregates.Count == 1)
+        {
+            var el = summarize.Aggregates[0].Element;
+            if (el is SimpleNamedExpression solonamed) el = solonamed.Expression;
+            solo = el as FunctionCallExpression;
+        }
+
+        if (solo is { } fce &&
             (fce.IsAny(Aggregates.ArgMax, Aggregates.ArgMin, Aggregates.ArgMax_Deprecated, Aggregates.ArgMin_Deprecated)) &&
             fce.ArgumentList.Expressions.Count == 2 &&
             fce.ArgumentList.Expressions[1].Element is StarExpression)
@@ -44,9 +52,7 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         // columns (verified live). Same SELECT * + QUALIFY ROW_NUMBER() shape as arg_max(*),
         // but with no ORDER BY (any row qualifies). The explicit col arg in take_any(col, *) is
         // redundant once * is present, so it is ignored — * already projects every column.
-        if (summarize.Aggregates.Count == 1 &&
-            summarize.Aggregates[0].Element is Expression takeAnyExpr &&
-            takeAnyExpr is FunctionCallExpression takeFce &&
+        if (solo is { } takeFce &&
             takeFce.IsAny(Aggregates.TakeAny, Aggregates.TakeAnyIf) &&
             takeFce.ArgumentList.Expressions.Any(a => a.Element is StarExpression))
         {
