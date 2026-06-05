@@ -343,7 +343,10 @@ internal class ExpressionSqlBuilder
             // `dm[field]`) that resolved to a quoted SQL string literal — dict key, not array index.
             || indexExpr.TrimStart().StartsWith("'", StringComparison.Ordinal);
 
-        bool baseIsJson = IsJsonBaseExpr(baseExpr);
+        // The base is JSON when its SQL carries a JSON marker, OR it is a bare reference to a column
+        // tracked as JSON/dynamic (datatable dynamic column, parse_json/array result, mv-expand element).
+        bool baseIsJson = IsJsonBaseExpr(baseExpr)
+            || (ee.Expression is NameReference bnr && IsJsonColumn(bnr.SimpleName));
 
         // Base is a NameReference to a scalar CTE (e.g. `let mapJobToRecipe = view() { toscalar(...) }`).
         // The CTE can't be array-subscripted; the KQL semantics are JSON dict access. Inline a subquery

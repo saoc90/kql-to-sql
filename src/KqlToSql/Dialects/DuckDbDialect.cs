@@ -271,7 +271,7 @@ public class DuckDbDialect : ISqlDialect
             "set_intersect" => $"LIST_FILTER({args[0]}, x -> LIST_CONTAINS({args[1]}, x))",
             "set_union" => $"LIST_DISTINCT(LIST_CONCAT({args[0]}, {args[1]}))",
             "treepath" => $"JSON_KEYS({args[0]})",
-            "zip" => $"LIST_ZIP({string.Join(", ", args)})",
+            "zip" => BuildZip(args),
 
             // Bitwise functions
             "binary_and" => $"({args[0]} & {args[1]})",
@@ -313,7 +313,7 @@ public class DuckDbDialect : ISqlDialect
 
             // Array/set functions
             "set_has_element" => $"LIST_CONTAINS({args[0]}, {args[1]})",
-            "array_iff" => $"LIST_TRANSFORM(LIST_ZIP({args[0]}, {args[1]}, {args[2]}), x -> CASE WHEN x[1] THEN x[2] ELSE x[3] END)",
+            "array_iff" or "array_when" => BuildArrayIff(args),
             "array_rotate_left" => $"LIST_CONCAT(LIST_SLICE({args[0]}, {args[1]} + 1, LEN({args[0]})), LIST_SLICE({args[0]}, 1, {args[1]}))",
             "array_rotate_right" => $"LIST_CONCAT(LIST_SLICE({args[0]}, LEN({args[0]}) - {args[1]} + 1, LEN({args[0]})), LIST_SLICE({args[0]}, 1, LEN({args[0]}) - {args[1]}))",
             "array_split" when args.Length == 2 => $"[LIST_SLICE({args[0]}, 1, {args[1]}), LIST_SLICE({args[0]}, {args[1]} + 1, LEN({args[0]}))]",
@@ -603,6 +603,42 @@ public class DuckDbDialect : ISqlDialect
     /// converted to a native LIST&lt;JSON&gt; by extracting all elements with the '$[*]' wildcard path.</summary>
     private static string CoerceArr(string sql) =>
         IsJsonArg(sql) ? $"json_extract({sql}, '$[*]')" : sql;
+
+    /// <summary>zip(a, b, ...) → an array of tuples [[a0,b0,..],[a1,b1,..],..] (Kusto semantics), padded
+    /// to the longest input with nulls. DuckDB's LIST_ZIP yields STRUCTs (not position-indexable), so we
+    /// build position-indexed tuples instead. JSON inputs are coerced to LISTs and the result re-serialized.</summary>
+    private static string BuildZip(string[] args)
+    {
+        var arrs = args.Select(CoerceArr).ToArray();
+        var maxLen = "GREATEST(" + string.Join(", ", arrs.Select(a => $"LEN({a})")) + ")";
+        var tuple = "[" + string.Join(", ", arrs.Select(a => $"{a}[i]")) + "]";
+        // range(1, n+1) → 1..n (1-based); list[i] past the end is NULL in DuckDB, matching Kusto padding.
+        var body = $"LIST_TRANSFORM(range(1, {maxLen} + 1), lambda i: {tuple})";
+        return WrapArr(args.Any(IsJsonArg), body);
+    }
+
+    /// <summary>array_iff(condArr, whenTrueArr, whenFalse): pick whenTrue[i] where cond[i] is truthy,
+    /// else whenFalse. JSON inputs are coerced to LISTs first. whenFalse may be an array (zip 3-way) or
+    /// a scalar that broadcasts to every element. The result is re-serialized to JSON when any input was.</summary>
+    private static string BuildArrayIff(string[] args)
+    {
+        var cond = CoerceArr(args[0]);
+        var ifTrue = CoerceArr(args[1]);
+        bool anyJson = args.Any(IsJsonArg);
+        string body;
+        if (args.Length >= 3 && (IsJsonArg(args[2]) || IsArrayLikeText(args[2])))
+        {
+            var ifFalse = CoerceArr(args[2]);
+            body = $"LIST_TRANSFORM(LIST_ZIP({cond}, {ifTrue}, {ifFalse}), x -> CASE WHEN x[1] THEN x[2] ELSE x[3] END)";
+        }
+        else
+        {
+            // whenFalse is a scalar (or omitted → null) that applies to every position.
+            var elseVal = args.Length >= 3 ? args[2] : "NULL";
+            body = $"LIST_TRANSFORM(LIST_ZIP({cond}, {ifTrue}), x -> CASE WHEN x[1] THEN x[2] ELSE {elseVal} END)";
+        }
+        return WrapArr(anyJson, body);
+    }
 
     /// <summary>Re-serialize a LIST-producing array result as a JSON array (TO_JSON) when the input(s)
     /// were JSON — so the output matches the dynamic oracle's JSON serialization (unquoted numbers) and
