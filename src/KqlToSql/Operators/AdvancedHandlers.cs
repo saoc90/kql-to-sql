@@ -441,32 +441,36 @@ internal class AdvancedHandlers : OperatorHandlerBase
         // For a bare expression Kusto names the output as the innermost identifier (same rule
         // toreal/tostring/parse_json auto-naming uses) — treat that identifier as the column
         // being replaced in place so EXCLUDE picks it up.
-        var columns = new List<(string Name, string Source, bool ExcludeName)>();
+        var columns = new List<(string Name, string Source, bool ExcludeName, string? Cast)>();
         int fallbackIndex = 0;
         foreach (var se in mvExpand.Expressions)
         {
             if (se.Element is not MvExpandExpression mve)
                 throw new NotSupportedException("Unexpected mv-expand expression type");
 
+            // `mv-expand x = arr to typeof(long)` casts each expanded element to the declared type
+            // (the elements arrive as JSON when the source was navigated/parsed).
+            var cast = MvExpandCastType(mve);
+
             if (mve.Expression is SimpleNamedExpression sne)
             {
                 var name = sne.Name.SimpleName;
                 var sourceSql = Expr.ConvertExpression(sne.Expression);
-                columns.Add((name, sourceSql, false));
+                columns.Add((name, sourceSql, false, cast));
             }
             else if (mve.Expression is NameReference nr)
             {
                 var bare = nr.SimpleName;
-                columns.Add((bare, bare, true));
+                columns.Add((bare, bare, true, cast));
             }
             else
             {
                 var sourceSql = Expr.ConvertExpression(mve.Expression);
                 var innerName = TryGetInnerIdentifier(mve.Expression);
                 if (innerName != null)
-                    columns.Add((innerName, sourceSql, true));
+                    columns.Add((innerName, sourceSql, true, cast));
                 else
-                    columns.Add(($"col_{fallbackIndex++}", sourceSql, false));
+                    columns.Add(($"col_{fallbackIndex++}", sourceSql, false, cast));
             }
         }
 
@@ -479,7 +483,7 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
         if (columns.Count == 1)
         {
-            var (name, source, excludeName) = columns[0];
+            var (name, source, excludeName, cast) = columns[0];
             var unnestAlias = "u";
             var bareRef = source == name;
             var unnestSource = CoerceToUnnestable(
@@ -489,14 +493,15 @@ internal class AdvancedHandlers : OperatorHandlerBase
             var excludePart = excludeName
                 ? $"{sourceAlias}.{Dialect.SelectExclude(new[] { name })}"
                 : $"{sourceAlias}.*";
-            return $"SELECT {excludePart}, {unnestAlias}.value AS {name} FROM {aliasedFrom} {unnestClause}";
+            var valueExpr = cast != null ? $"CAST({unnestAlias}.value AS {cast})" : $"{unnestAlias}.value";
+            return $"SELECT {excludePart}, {valueExpr} AS {name} FROM {aliasedFrom} {unnestClause}";
         }
 
         // Multi-column: chain unnests, each as a separate CROSS JOIN
         var clauses = new List<string>();
         for (int i = 0; i < columns.Count; i++)
         {
-            var (name, source, _) = columns[i];
+            var (name, source, _, _) = columns[i];
             var bareRef = source == name;
             var unnestSource = CoerceToUnnestable(
                 bareRef ? $"{sourceAlias}.{name}" : source,
@@ -505,8 +510,31 @@ internal class AdvancedHandlers : OperatorHandlerBase
         }
         var existingNames = columns.Where(c => c.ExcludeName).Select(c => c.Name).ToArray();
         var excludeAll = existingNames.Length > 0 ? Dialect.SelectExclude(existingNames) : "*";
-        var selectCols = string.Join(", ", columns.Select((c, i) => $"u{i}.value AS {c.Name}"));
+        var selectCols = string.Join(", ", columns.Select((c, i) =>
+            c.Cast != null ? $"CAST(u{i}.value AS {c.Cast}) AS {c.Name}" : $"u{i}.value AS {c.Name}"));
         return $"SELECT {sourceAlias}.{excludeAll}, {selectCols} FROM {aliasedFrom} {string.Join(" ", clauses)}";
+    }
+
+    /// <summary>Maps an mv-expand `to typeof(T)` clause to the SQL cast type (null = no cast / dynamic).</summary>
+    private static string? MvExpandCastType(MvExpandExpression mve)
+    {
+        var t = mve.ToTypeOf?.TypeOf?.ToString();
+        if (string.IsNullOrEmpty(t)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(t, @"typeof\s*\(\s*(\w+)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return (m.Success ? m.Groups[1].Value.ToLowerInvariant() : null) switch
+        {
+            "long" => "BIGINT",
+            "int" => "INTEGER",
+            "real" or "double" => "DOUBLE",
+            "decimal" => "DECIMAL",
+            "string" => "VARCHAR",
+            "bool" or "boolean" => "BOOLEAN",
+            "datetime" => "TIMESTAMP",
+            "timespan" => "INTERVAL",
+            "guid" => "UUID",
+            _ => null,
+        };
     }
 
     internal string ApplyMvApply(string leftSql, MvApplyOperator mvApply)

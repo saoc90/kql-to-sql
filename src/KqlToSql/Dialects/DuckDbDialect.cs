@@ -84,7 +84,8 @@ public class DuckDbDialect : ISqlDialect
             // todynamic(X) parses a string as JSON. When X is already a list-producing expression
             // (LIST_VALUE(...), scalar subquery returning a LIST, etc), casting to JSON strips LIST
             // semantics and downstream LIST_FILTER/LIST_CONTAINS break. Pass through array-like sources.
-            "parse_json" or "todynamic" => IsArrayLikeText(args[0]) ? args[0] : $"CAST({args[0]} AS JSON)",
+            // TRY_CAST so invalid/empty JSON input yields NULL (Kusto's parse_json behavior) instead of raising.
+            "parse_json" or "todynamic" => IsArrayLikeText(args[0]) ? args[0] : $"TRY_CAST({args[0]} AS JSON)",
             "format_datetime" => $"STRFTIME({args[0]}, {TranslateDateTimeFormat(args[1])})",
             "startofday" => $"DATE_TRUNC('day', {args[0]})",
             // KQL weeks start on SUNDAY; DuckDB's DATE_TRUNC('week') starts on Monday. Shift the
@@ -103,12 +104,11 @@ public class DuckDbDialect : ISqlDialect
             "next" => $"LEAD({args[0]}) OVER ()",
 
             // Date/time functions
-            // KQL dayofweek() returns a *timespan* equal to the number of whole days since the
-            // preceding Sunday (Sunday=0d, Monday=1d, ... Saturday=6d), rendered as Kusto's
-            // timespan string: "00:00:00" for 0 days, "N.00:00:00" for N>0. DuckDB's
-            // EXTRACT(DOW) already uses the same 0=Sunday..6=Saturday numbering, so format it
-            // as that timespan literal to match the ground truth.
-            "dayofweek" => $"CASE WHEN EXTRACT(DOW FROM {args[0]}) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM {args[0]}) AS VARCHAR) || '.00:00:00' END",
+            // KQL dayofweek() returns a *timespan* = whole days since the preceding Sunday
+            // (Sunday=0d … Saturday=6d). EXTRACT(DOW) uses the same 0=Sunday numbering. Emit an
+            // INTERVAL (not a string) so the value compares as a timespan AND `dayofweek(t)/1d`
+            // works (interval ÷ interval → number).
+            "dayofweek" => $"(EXTRACT(DOW FROM {args[0]}) * INTERVAL '1 day')",
             "dayofmonth" => $"EXTRACT(DAY FROM {args[0]})",
             "dayofyear" => $"EXTRACT(DOY FROM {args[0]})",
             "getmonth" => $"EXTRACT(MONTH FROM {args[0]})",

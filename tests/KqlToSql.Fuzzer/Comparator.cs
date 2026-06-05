@@ -458,6 +458,7 @@ public static class Comparator
             "Out of Range Error", "Overflow in",
             "cannot take square root", "cannot take logarithm",
             "can't be cast because", // value-domain cast (e.g. -nan / out-of-range numeric)
+            "Date out of range",     // make_datetime(2020,13,1) — Kusto returns null, DuckDB raises
         };
         return markers.Any(m => err.Contains(m, StringComparison.OrdinalIgnoreCase));
     }
