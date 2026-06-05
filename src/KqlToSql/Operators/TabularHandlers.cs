@@ -329,14 +329,28 @@ internal class TabularHandlers : OperatorHandlerBase
 
     /// <summary>Returns true if 'AS name' appears at paren depth 0 in sql (outer SELECT level),
     /// meaning the column is visible from an enclosing FROM.</summary>
-    // Detects a column introduced via a relation-alias column list, e.g. a datatable's
-    // `... AS t(s)` / `... AS t(d, k)`. extend redefining such a column must EXCLUDE it (same as a
-    // top-level `AS name`) so it isn't emitted twice (which UNION BY NAME rejects as a duplicate).
+    // Detects a column introduced via a relation-alias column list at the OUTER level of leftSql,
+    // e.g. a datatable's `... AS t(s)` / `... AS t(d, k)`. extend redefining such a column must EXCLUDE
+    // it (same as a top-level `AS name`) so it isn't emitted twice (which UNION BY NAME rejects).
+    // Only depth-0 aliases count — a nested `AS t(k, v)` may be shadowed by an intermediate summarize,
+    // so its columns are NOT in the current output and must not be excluded.
     private static bool HasRelationAliasColumn(string sql, string name)
     {
         foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
                      sql, @"\bAS\s+""?\w+""?\s*\(([^()]*)\)"))
         {
+            // Compute paren depth at the match start; the relation alias must be at the top level.
+            int depth = 0;
+            bool inStr = false; char q = ' ';
+            for (int i = 0; i < m.Index; i++)
+            {
+                var c = sql[i];
+                if (inStr) { if (c == q) inStr = false; continue; }
+                if (c is '\'' or '"') { inStr = true; q = c; }
+                else if (c == '(') depth++;
+                else if (c == ')') depth--;
+            }
+            if (depth != 0) continue;
             foreach (var col in m.Groups[1].Value.Split(','))
                 if (col.Trim().Trim('"').Equals(name, StringComparison.OrdinalIgnoreCase))
                     return true;
