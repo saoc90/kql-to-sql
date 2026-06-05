@@ -302,21 +302,28 @@ internal class TabularHandlers : OperatorHandlerBase
         foreach (var se in sort.Expressions)
         {
             if (se.Element is OrderedExpression oe)
-            {
-                var expr = ConvertOrderExpression(oe.Expression);
-                var dir = oe.Ordering?.ToString().Trim().ToUpperInvariant() ?? "ASC";
-                orderings.Add($"{expr} {WithNulls(dir)}");
-            }
+                orderings.Add($"{ConvertOrderExpression(oe.Expression)} {OrderingSuffix(oe.Ordering)}");
             else
-            {
-                var expr = ConvertOrderExpression(se.Element);
-                orderings.Add($"{expr} {WithNulls("DESC")}");
-            }
+                // A bare sort key defaults to descending in KQL.
+                orderings.Add($"{ConvertOrderExpression(se.Element)} DESC NULLS LAST");
         }
 
-        // KQL orders nulls first on ASC and last on DESC; DuckDB's defaults are the opposite, so
-        // make the null placement explicit to match Kusto.
-        static string WithNulls(string dir) => dir == "ASC" ? "ASC NULLS FIRST" : "DESC NULLS LAST";
+        // Build "<ASC|DESC> NULLS <FIRST|LAST>" from the ordering clause. The direction lives in the
+        // AscOrDescKeyword token and the (optional) null placement in NullsClause.FirstOrLastKeyword —
+        // reading Ordering.ToString() instead conflates them ("asc nulls first" != "asc"), which used to
+        // flip `asc nulls first` to `DESC NULLS LAST`. KQL defaults: direction desc; nulls first on asc,
+        // last on desc; an explicit nulls clause overrides the default.
+        static string OrderingSuffix(Kusto.Language.Syntax.OrderingClause? ord)
+        {
+            var dirText = ord?.AscOrDescKeyword?.Text?.Trim();
+            bool asc = string.Equals(dirText, "asc", StringComparison.OrdinalIgnoreCase);
+            var dir = asc ? "ASC" : "DESC";
+            var nullsText = ord?.NullsClause?.FirstOrLastKeyword?.Text?.Trim();
+            string nulls = string.Equals(nullsText, "first", StringComparison.OrdinalIgnoreCase) ? "NULLS FIRST"
+                : string.Equals(nullsText, "last", StringComparison.OrdinalIgnoreCase) ? "NULLS LAST"
+                : asc ? "NULLS FIRST" : "NULLS LAST";
+            return $"{dir} {nulls}";
+        }
 
         // Wrap in a subquery if:
         //   (a) leftSql has a trailing ORDER BY (e.g. from | top) — prevents invalid double ORDER BY, or
