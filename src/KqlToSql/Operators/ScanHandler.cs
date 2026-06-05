@@ -44,10 +44,11 @@ internal sealed class ScanHandler : OperatorHandlerBase
 
         var step = scan.Steps[0];
 
-        // Only support `true` condition
-        if (step.Condition is not LiteralExpression lit ||
-            !lit.ToString().Trim().Equals("true", StringComparison.OrdinalIgnoreCase))
-            throw new NotSupportedException("scan with non-`true` step condition is not supported");
+        // A `true` condition fires every row; a non-`true` condition gates the assignment (rows where
+        // it is false carry the previous value). The conditional case is handled below as a guarded
+        // forward-fill, but only when the assignment RHS does not reference carried state.
+        bool conditionIsTrue = step.Condition is LiteralExpression lit &&
+            lit.ToString().Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
 
         // Extract declared columns, their defaults and (for the recursive path) their SQL types,
         // preserving declaration order.
@@ -87,6 +88,19 @@ internal sealed class ScanHandler : OperatorHandlerBase
 
         if (assignments.Count == 0)
             throw new NotSupportedException("scan step has no assignments");
+
+        // Conditional step (e.g. `step s: v != 0 => ff = v`): a single-step scan with a condition
+        // emits ONLY the rows where the condition held (verified against Kusto), applying the
+        // assignments to them. Expressible as a filtered projection when the RHS doesn't reference
+        // carried state (a conditional recurrence across matching rows can't be a plain window).
+        if (!conditionIsTrue)
+        {
+            if (assignments.Any(a => ContainsCarriedState(a.Value, stepName, declaredSet)))
+                throw new NotSupportedException("scan with a conditional step that references carried state is not supported");
+            var condSql = Expr.ConvertExpression(step.Condition);
+            var assignCols = assignments.Select(a => $"{Expr.ConvertExpression(a.Value)} AS {a.Col}");
+            return $"SELECT *, {string.Join(", ", assignCols)} FROM ({leftSql}) WHERE {condSql}";
+        }
 
         // Does any assignment read carried (step-prefixed) state? Only then is row-to-row carry needed.
         bool anyCarried = assignments.Any(a => ContainsCarriedState(a.Value, stepName, declaredSet));

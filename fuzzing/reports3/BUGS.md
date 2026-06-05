@@ -1,22 +1,21 @@
 # KQL→SQL Translator — Differential Fuzzing Findings
 
 Oracle: Kustainer (real Kusto). SUT: KqlToSqlConverter → DuckDB.
-Total verdicts: 1662. Bug candidates: 443.
+Total verdicts: 1662. Bug candidates: 441.
 
 ## Counts by outcome
 
 | Outcome | Count |
 |---|---|
-| Match | 1061 |
-| MismatchRows | 329 |
+| Match | 1063 |
+| MismatchRows | 330 |
 | KustoError | 127 |
 | SqlExecError | 97 |
 | SkippedNondeterministic | 31 |
-| MismatchOrder | 12 |
+| MismatchOrder | 11 |
 | MismatchColumns | 3 |
-| TranslateError | 2 |
 
-## Family: aggregation (32)
+## Family: aggregation (33)
 
 ### `agent-aggregation-0000` — SqlExecError (highest)
 
@@ -119,7 +118,7 @@ SELECT COALESCE(LIST(d) FILTER (WHERE d IS NOT NULL), []) AS list_d FROM (VALUES
 *Detail:* first differing row[0]: kusto=(1, {
   "a": 1,
   "b": 2
-}) duck=(2, {"{\u0022c\u0022:3}":1})
+}) duck=(1, {"{\u0022a\u0022:1}":1,"{\u0022b\u0022:2}":1})
 
 **KQL**
 ```kql
@@ -140,12 +139,12 @@ SELECT k, histogram(v) AS bag_v FROM (VALUES (CAST(1 AS BIGINT), '{"a":1}'::JSON
   "c": 3
 })
 - DuckDB: cols=[k:Int, bag_v:Unknown] rows=2
-    - (2, {"{\u0022c\u0022:3}":1})
     - (1, {"{\u0022a\u0022:1}":1,"{\u0022b\u0022:2}":1})
+    - (2, {"{\u0022c\u0022:3}":1})
 
 ### `agent-aggregation-0001` — MismatchRows (high)
 
-*Detail:* first differing row[1]: kusto=(2, null, 'c', null, 'c') duck=(2, null, null, null, null)
+*Detail:* first differing row[0]: kusto=(1, 20, 'b', 20, 'b') duck=(2, null, null, null, null)
 
 **KQL**
 ```kql
@@ -161,13 +160,13 @@ SELECT k, MAX(v) AS v, ARG_MAX(t, v) AS t, MIN(v) AS v1, ARG_MIN(t, v) AS t1 FRO
     - (1, 20, 'b', 20, 'b')
     - (2, null, 'c', null, 'c')
 - DuckDB: cols=[k:Int, v:Int, t:String, v1:Int, t1:String] rows=2
-    - (1, 20, 'b', 20, 'b')
     - (2, null, null, null, null)
+    - (1, 20, 'b', 20, 'b')
 
 ### `agent-aggregation-0002` — MismatchRows (high)
 
 *Sub-verdicts:* NAME_MISMATCH  
-*Detail:* first differing row[0]: kusto=(1, NaN, NaN, NaN, 1, NaN) duck=(2, NaN, NaN, NaN, 2, NaN)
+*Detail:* first differing row[0]: kusto=(1, NaN, NaN, NaN, 1, NaN) duck=(1, NaN, 1.5, NaN, 1, NaN)
 
 **KQL**
 ```kql
@@ -183,8 +182,8 @@ SELECT k, MAX(v) AS mx, MIN(v) AS mn, MAX(v) AS amx, ARG_MAX(k, v) AS k, COALESC
     - (1, NaN, NaN, NaN, 1, NaN)
     - (2, NaN, NaN, NaN, 2, NaN)
 - DuckDB: cols=[k:Int, mx:Real, mn:Real, amx:Real, k:Int, s:Real] rows=2
-    - (2, NaN, NaN, NaN, 2, NaN)
     - (1, NaN, 1.5, NaN, 1, NaN)
+    - (2, NaN, NaN, NaN, 2, NaN)
 
 ### `agent-aggregation-0004` — MismatchRows (high)
 
@@ -239,7 +238,7 @@ SELECT k, histogram(v) AS bag FROM (VALUES (CAST(1 AS BIGINT), '{"a":1}'::JSON),
   {
     "y": 2
   }
-]) duck=(2, null, [], [null])
+]) duck=(1, {"{\u0022x\u0022:1}":1,"{\u0022y\u0022:2}":1}, ["{\u0022x\u0022:1}","{\u0022y\u0022:2}"], ["{\u0022x\u0022:1}",null,"{\u0022y\u0022:2}"])
 
 **KQL**
 ```kql
@@ -278,8 +277,8 @@ SELECT k, histogram(v) AS bag_v, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), 
   null
 ])
 - DuckDB: cols=[k:Int, bag_v:Unknown, list_v:Unknown, list_v:Unknown] rows=2
-    - (2, null, [], [null])
     - (1, {"{\u0022x\u0022:1}":1,"{\u0022y\u0022:2}":1}, ["{\u0022x\u0022:1}","{\u0022y\u0022:2}"], ["{\u0022x\u0022:1}",null,"{\u0022y\u0022:2}"])
+    - (2, null, [], [null])
 
 ### `agent-aggregation-0013` — MismatchRows (high)
 
@@ -754,6 +753,31 @@ SELECT MIN(d) AS mn, MAX(d) AS mx, COUNT(*) AS cnt, max(d) - min(d) AS span, COA
 - DuckDB: cols=[mn:DateTime, mx:DateTime, cnt:Int, span:TimeSpan, ml:Unknown] rows=1
     - (2020-01-01T00:00:00.0000000Z, 2020-01-10T00:00:00.0000000Z, 3, 9.00:00:00, ["2020-01-01T00:00:00","2020-01-05T00:00:00","2020-01-10T00:00:00"])
 
+### `agent-aggregation-0027` — MismatchRows (high)
+
+*Detail:* first differing row[0]: kusto=(1000, 700, 2, [
+  200,
+  400
+]) duck=(1000, 700, 2, [400,200])
+
+**KQL**
+```kql
+datatable(g:long, v:long)[ 1,100, 1,200, 2,300, 2,400 ] | summarize tot=sum(v), amx=arg_max(v, g) by g | summarize gtot=sum(tot), maxgrp=arg_max(tot, g), allamx=make_list(amx)
+```
+**Generated SQL**
+```sql
+SELECT COALESCE(SUM(tot), 0) AS gtot, MAX(tot) AS maxgrp, ARG_MAX(g, tot) AS g, COALESCE(LIST(amx) FILTER (WHERE amx IS NOT NULL), []) AS allamx FROM (SELECT g, COALESCE(SUM(v), 0) AS tot, MAX(v) AS amx, ARG_MAX(g, v) AS g FROM (VALUES (CAST(1 AS BIGINT), CAST(100 AS BIGINT)), (CAST(1 AS BIGINT), CAST(200 AS BIGINT)), (CAST(2 AS BIGINT), CAST(300 AS BIGINT)), (CAST(2 AS BIGINT), CAST(400 AS BIGINT))) AS t(g, v) GROUP BY ALL)
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Dynamic] rows=1
+    - (1000, 700, 2, [
+  200,
+  400
+])
+- DuckDB: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Unknown] rows=1
+    - (1000, 700, 2, [400,200])
+
 ### `agent-aggregation-0029` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=([
@@ -763,7 +787,7 @@ SELECT MIN(d) AS mn, MAX(d) AS mx, COUNT(*) AS cnt, max(d) - min(d) AS span, COA
   1,
   2,
   1
-], 6, 3) duck=([[1,2,3],[1,2],[1]], 6, 3)
+], 6, 3) duck=([[1,2,3],[1],[1,2]], 6, 3)
 
 **KQL**
 ```kql
@@ -785,7 +809,7 @@ SELECT COALESCE(LIST("inner") FILTER (WHERE "inner" IS NOT NULL), []) AS outer_l
   1
 ], 6, 3)
 - DuckDB: cols=[outer_lists:Unknown, totcnt:Int, grps:Int] rows=1
-    - ([[1,2,3],[1,2],[1]], 6, 3)
+    - ([[1,2,3],[1],[1,2]], 6, 3)
 
 ### `agent-aggregation-0032` — MismatchRows (high)
 
@@ -852,7 +876,7 @@ SELECT MAX(x) AS mx, MIN(x) AS mn, COALESCE(AVG(x), 'nan'::DOUBLE) AS av, COALES
 ], [
   1,
   2
-]) duck=([1,2,3,4,5,6], [1,5,3,6,2,4])
+]) duck=([1,2,3,4,5,6], [5,4,1,3,6,2])
 
 **KQL**
 ```kql
@@ -874,7 +898,7 @@ SELECT COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS a, COALESCE(LIST(DI
   2
 ])
 - DuckDB: cols=[a:Unknown, b:Unknown] rows=1
-    - ([1,2,3,4,5,6], [1,5,3,6,2,4])
+    - ([1,2,3,4,5,6], [5,4,1,3,6,2])
 
 ### `agent-aggregation-0038` — MismatchRows (high)
 
@@ -963,7 +987,7 @@ SELECT * FROM (SELECT g, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS m
     "g": 3,
     "c": 2
   }
-]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}"])
+]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:1,\u0022c\u0022:2}"])
 
 **KQL**
 ```kql
@@ -995,7 +1019,7 @@ SELECT histogram(json_object(TRY_CAST(g AS TEXT), cnt)) AS bag, COALESCE(LIST(js
   }
 ])
 - DuckDB: cols=[bag:Unknown, histlist:Unknown] rows=1
-    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}"])
+    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:1,\u0022c\u0022:2}"])
 
 ## Family: datetime-timespan (49)
 
@@ -2623,7 +2647,7 @@ SELECT COALESCE(LIST(k) FILTER (WHERE k IS NOT NULL), []) AS list_k, COALESCE(LI
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
-- Kusto: cols=[list_k:Dynamic, list_d___obj_4867b96c-35c4-4f40-8d8a-e06eddadfc44:Dynamic] rows=1
+- Kusto: cols=[list_k:Dynamic, list_d___obj_98b907a0-0b22-4423-a34a-283263a16706:Dynamic] rows=1
     - ([
   "d",
   "c",
@@ -3692,7 +3716,7 @@ SELECT *, CASE WHEN TYPEOF(x) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEI
 
 ### `agent-dynamic-json-0028` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('red', 1) duck=('"red"', 1)
+*Detail:* first differing row[0]: kusto=('red', 1) duck=('"blue"', 1)
 
 **KQL**
 ```kql
@@ -3709,9 +3733,9 @@ SELECT TRY_CAST(tag AS TEXT) AS tag, COUNT(*) AS cnt FROM (SELECT t.*, u.value A
     - ('green', 1)
     - ('blue', 1)
 - DuckDB: cols=[tag:String, cnt:Int] rows=3
+    - ('"blue"', 1)
     - ('"red"', 1)
     - ('"green"', 1)
-    - ('"blue"', 1)
 
 ### `agent-dynamic-json-0029` — MismatchRows (high)
 
@@ -4689,7 +4713,7 @@ SELECT *, LIST_CONTAINS(a, 2) AS has2, LIST_CONTAINS(a, 9) AS has9, LIST_CONTAIN
 *Detail:* first differing row[0]: kusto=(7, [
   "a",
   "c"
-]) duck=(7, ["\u0022a\u0022","\u0022c\u0022"])
+]) duck=(7, ["\u0022c\u0022","\u0022a\u0022"])
 
 **KQL**
 ```kql
@@ -4707,7 +4731,7 @@ SELECT COALESCE(SUM(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') A
   "c"
 ])
 - DuckDB: cols=[total:Int, names:Unknown] rows=1
-    - (7, ["\u0022a\u0022","\u0022c\u0022"])
+    - (7, ["\u0022c\u0022","\u0022a\u0022"])
 
 ### `agent-dynamic-json-0031` — MismatchRows (high)
 
@@ -10622,7 +10646,7 @@ SELECT TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('abc' AS DOUBLE), TRY_CAST(TRY_
 - DuckDB: cols=[x:String, y:Int, z:Bool] rows=1
     - (null, null, null)
 
-## Family: window-series-scan (53)
+## Family: window-series-scan (50)
 
 ### `agent-window-series-scan-0029` — SqlExecError (highest)
 
@@ -11482,36 +11506,6 @@ SELECT *, DENSE_RANK() OVER (ORDER BY g ASC NULLS FIRST, s ASC NULLS FIRST) AS r
     - ('b', 5, 3)
     - ('b', 5, 3)
 
-### `agent-window-series-scan-0015` — TranslateError (high)
-
-*Detail:* scan with non-`true` step condition is not supported
-
-**KQL**
-```kql
-datatable(t:long, v:long)[ 1,5, 2,0, 3,0, 4,7, 5,0 ] | sort by t asc | scan declare (ff:long=0) with (step s: v != 0 => ff = v;)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:Int, v:Int, ff:Int] rows=2
-    - (1, 5, 5)
-    - (4, 7, 7)
-- DuckDB: ERROR — scan with non-`true` step condition is not supported
-
-### `agent-window-series-scan-0018` — TranslateError (high)
-
-*Detail:* scan with non-`true` step condition is not supported
-
-**KQL**
-```kql
-datatable(t:datetime, v:real)[ datetime(2020-01-01),1.0, datetime(2020-01-02),0.0, datetime(2020-01-03),0.0, datetime(2020-01-04),4.0 ] | sort by t asc | scan declare (ff:real=0.0) with (step s: v != 0.0 => ff = v;)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, v:Real, ff:Real] rows=2
-    - (2020-01-01T00:00:00.0000000Z, 1, 1)
-    - (2020-01-04T00:00:00.0000000Z, 4, 4)
-- DuckDB: ERROR — scan with non-`true` step condition is not supported
-
 ### `agent-window-series-scan-0028` — MismatchRows (high)
 
 *Sub-verdicts:* NAME_MISMATCH, TYPE_MISMATCH[t:Dynamic|Real]  
@@ -11555,7 +11549,7 @@ SELECT t.* EXCLUDE (s), u.value AS s FROM (SELECT LIST(COALESCE(s_val, 0) ORDER 
 ### `agent-window-series-scan-0032` — MismatchRows (high)
 
 *Sub-verdicts:* NAME_MISMATCH, TYPE_MISMATCH[Sub:Int|String]  
-*Detail:* first differing row[0]: kusto=('b', 30, 'x', 30) duck=('a', 30, 'y', 'y')
+*Detail:* first differing row[0]: kusto=('b', 30, 'x', 30) duck=('b', 30, 'x', 'x')
 
 **KQL**
 ```kql
@@ -11572,9 +11566,9 @@ SELECT cat, Tot, sub, Sub FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat OR
     - ('a', 30, 'y', 20)
     - ('a', 30, 'x', 10)
 - DuckDB: cols=[cat:String, Tot:Int, sub:String, sub:String] rows=3
+    - ('b', 30, 'x', 'x')
     - ('a', 30, 'y', 'y')
     - ('a', 30, 'x', 'x')
-    - ('b', 30, 'x', 'x')
 
 ### `agent-window-series-scan-0042` — MismatchRows (high)
 
@@ -12325,27 +12319,4 @@ SELECT * FROM (SELECT g, SUM(v) AS approximate_sum_v FROM (VALUES ('a', CAST(1 A
     - ('b', 3)
     - ('c', 15)
     - ('d', 15)
-
-### `agent-window-series-scan-0040` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","x",20, "a","y",5, "b","x",30 ] | top-nested 2 of cat by sum(v), top-nested 2 of sub by sum(v), top-nested 1 of v by sum(v)
-```
-**Generated SQL**
-```sql
-SELECT cat, aggregated_cat, sub, aggregated_sub, v, aggregated_v FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat, sub ORDER BY aggregated_v DESC) AS _rn2 FROM (SELECT _src.cat, _src.sub, _src.v, _prev.aggregated_cat, _prev.aggregated_sub, COALESCE(SUM(v), 0) AS aggregated_v FROM (SELECT * FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'x', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT))) AS t(cat, sub, v)) AS _src INNER JOIN (SELECT cat, aggregated_cat, sub, aggregated_sub FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat ORDER BY aggregated_sub DESC) AS _rn1 FROM (SELECT _src.cat, _src.sub, _prev.aggregated_cat, COALESCE(SUM(v), 0) AS aggregated_sub FROM (SELECT * FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'x', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT))) AS t(cat, sub, v)) AS _src INNER JOIN (SELECT cat, aggregated_cat FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY aggregated_cat DESC) AS _rn0 FROM (SELECT cat, COALESCE(SUM(v), 0) AS aggregated_cat FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'x', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT))) AS t(cat, sub, v) GROUP BY cat)) WHERE _rn0 <= 2) AS _prev ON _src.cat = _prev.cat GROUP BY _src.cat, _src.sub, _prev.aggregated_cat)) WHERE _rn1 <= 2) AS _prev ON _src.cat = _prev.cat AND _src.sub = _prev.sub GROUP BY _src.cat, _src.sub, _src.v, _prev.aggregated_cat, _prev.aggregated_sub)) WHERE _rn2 <= 1
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[cat:String, aggregated_cat:Int, sub:String, aggregated_sub:Int, v:Int, aggregated_v:Int] rows=3
-    - ('a', 35, 'x', 30, 20, 20)
-    - ('a', 35, 'y', 5, 5, 5)
-    - ('b', 30, 'x', 30, 30, 30)
-- DuckDB: cols=[cat:String, aggregated_cat:Int, sub:String, aggregated_sub:Int, v:Int, aggregated_v:Int] rows=3
-    - ('b', 30, 'x', 30, 30, 30)
-    - ('a', 35, 'x', 30, 20, 20)
-    - ('a', 35, 'y', 5, 5, 5)
 
