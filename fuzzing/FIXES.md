@@ -6,12 +6,25 @@ DuckDB) against a **real Kusto engine** (the Kustainer emulator over HTTP). 10 s
 (`datatable`/`print`/`range`, so both engines get identical input). See `tests/KqlToSql.Fuzzer`
 (harness + console driver) and `tests/KqlToSql.DifferentialTests` (xUnit, gated on Kustainer).
 
-**Headline (all fixes — direct + 5 sub-agent clusters):** 720 → **467** bug candidates;
-exact-MATCH 792 → **1038**; invalid-SQL errors (`SqlExecError`) 235 → **116**; column-shape
-mismatches 19 → **3**. Full machine-readable detail: `reports/` (original campaign) and
-`reports3/` (final post-fix). Each fixed root cause has a guardrail in
-`tests/KqlToSql.DifferentialTests/Regression/GeneratedRegressionTests.cs` (38 cases). The existing
-unit suite stays green (577) and the differential suite is 71 green.
+**Headline (all fixes — direct + 5 sub-agent clusters + never-throw pass):** 720 → **417** bug
+candidates; exact-MATCH 792 → **1066**; **`TranslateError` 10 → 0** (the translator never throws on
+valid KQL); invalid-SQL `SqlExecError` 235 → **72**; column-shape mismatches 19 → **3**.
+
+**Testing philosophy (per maintainer):** translation must never throw and never emit invalid SQL
+(`TranslateError`/`SqlExecError` are hard failures → driven down); engine-specific runtime differences
+are tolerated — `SkippedEngineError` (21: integer overflow, `sqrt(-1)`, `log(0)`, out-of-range casts —
+DuckDB raises where Kusto wraps / returns NaN/±inf) and set-aggregate (`make_set`/`make_bag`) element
+order (Kusto unspecified) are compared leniently.
+
+Full machine-readable detail: `reports/` (original campaign) and `reports3/` (final). Each fixed root
+cause has a guardrail in `tests/KqlToSql.DifferentialTests/Regression/GeneratedRegressionTests.cs`.
+Existing unit suite green (577); differential suite green.
+
+**Remaining `SqlExecError` (72)** cluster into two architectural themes plus a small tail: the dynamic
+**JSON-vs-LIST dual representation** (nested `mv-expand`, `sum`/`list_*` over navigated JSON, `bag_keys`
+index arithmetic — ~30) and **timespan arithmetic** (`dayofweek(t)/1d`, interval÷interval — ~10), plus
+the `series_*` plugin functions (6) and assorted singles. These need focused/architectural work, not
+mechanical fixes.
 
 ## Fixed (root cause, verified vs Kustainer, DuckDB + PGlite parity)
 
