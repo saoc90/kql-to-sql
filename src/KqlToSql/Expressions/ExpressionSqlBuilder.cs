@@ -55,12 +55,19 @@ internal class ExpressionSqlBuilder
     /// <summary>Returns true if the named column was previously marked as interval-typed.</summary>
     internal bool IsIntervalColumn(string name) => _intervalColumns.Contains(name);
     /// <summary>Clears interval column tracking — call once per top-level Convert() to avoid cross-query stale state.</summary>
-    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); _jsonColumns.Clear(); _dateTimeColumns.Clear(); }
+    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); _jsonColumns.Clear(); _dateTimeColumns.Clear(); _stringColumns.Clear(); }
 
     private readonly HashSet<string> _integerColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as KQL-integer-typed (e.g. a summarize count()/dcount() result) so a
     /// downstream `col / N` uses KQL integer (truncating) division instead of DuckDB real division.</summary>
     internal void MarkIntegerColumn(string name) => _integerColumns.Add(name);
+
+    private readonly HashSet<string> _stringColumns = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Records a column as string-typed (e.g. an mv-expand `to typeof(string)` result, often a
+    /// bag_keys key). A later `d[col]` then resolves as JSON key access, not numeric array indexing.</summary>
+    internal void MarkStringColumn(string name) => _stringColumns.Add(name);
+    /// <summary>Returns true if the named column was previously marked as string-typed.</summary>
+    internal bool IsStringColumn(string name) => _stringColumns.Contains(name);
 
     private readonly HashSet<string> _dateTimeColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as datetime-typed (from a datatable schema or extend) so that
@@ -329,6 +336,9 @@ internal class ExpressionSqlBuilder
             indexNode is LiteralExpression lit && lit.Kind == SyntaxKind.StringLiteralExpression
             || indexNode is CompoundStringLiteralExpression
             || indexNode is FunctionCallExpression fce && IsStringReturningFunction(fce)
+            // A column known to be string-typed (e.g. a bag_keys key from `mv-expand k ... to typeof(string)`)
+            // indexes a dynamic object by key, not an array by position.
+            || indexNode is NameReference inr && IsStringColumn(inr.SimpleName)
             // The index may be a string-typed variable (e.g. a `: string` function parameter like
             // `dm[field]`) that resolved to a quoted SQL string literal — dict key, not array index.
             || indexExpr.TrimStart().StartsWith("'", StringComparison.Ordinal);

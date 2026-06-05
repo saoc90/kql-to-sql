@@ -482,9 +482,14 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
         // An uncast mv-expand output stays *dynamic* in Kusto; when the source was JSON the element
         // is a JSON value, so mark the output column JSON for downstream coercion (chained mv-expand).
+        // A `to typeof(string)` output is a string (e.g. a bag_keys key) so `d[col]` is JSON key access.
         foreach (var c in columns)
+        {
             if (c.Cast == null && c.IsJson)
                 Expr.MarkJsonColumn(c.Name);
+            else if (c.Cast == "VARCHAR")
+                Expr.MarkStringColumn(c.Name);
+        }
 
         // Wrap leftSql as a derived table with a single fresh alias. (ExtractFromAsRelation can return
         // a relation that already carries its own alias — e.g. `(VALUES ...) AS t(d)` for a datatable —

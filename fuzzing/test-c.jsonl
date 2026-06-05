@@ -1,0 +1,4 @@
+{"Id":"c-0","Tier":2,"Family":"c","Kql":"print d = dynamic({\"x\":1,\"y\":2,\"z\":3}) | extend ks = bag_keys(d) | mv-expand k = ks to typeof(string) | extend val = toint(d[k]) | summarize sum(val)"}
+{"Id":"c-1","Tier":2,"Family":"c","Kql":"print d = dynamic({\"a\":1,\"b\":2,\"c\":3,\"d\":4}) | extend pairs = bag_keys(d) | mv-expand k = pairs to typeof(string) | order by k desc | summarize make_list(k), make_list(toint(d[k]))"}
+{"Id":"c-2","Tier":2,"Family":"c","Kql":"print d = dynamic({\"a\":1,\"b\":2,\"c\":3,\"d\":4,\"e\":5}) | extend ks = array_sort_desc(bag_keys(d)) | mv-expand k = ks to typeof(string) | extend v = toint(d[k]) | summarize vals = make_list(v), keys = make_list(k)"}
+{"Id":"c-3","Tier":2,"Family":"c","Kql":"print d = dynamic({\"a\":[1,2],\"b\":[3,4],\"c\":[5,6]}) | extend ks = bag_keys(d) | mv-expand k = ks to typeof(string) | extend arr = d[k], s = array_sum(d[k]) | summarize grand = sum(s), allkeys = make_list(k)"}
