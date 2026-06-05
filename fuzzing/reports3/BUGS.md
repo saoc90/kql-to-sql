@@ -1,22 +1,22 @@
 # KQL→SQL Translator — Differential Fuzzing Findings
 
 Oracle: Kustainer (real Kusto). SUT: KqlToSqlConverter → DuckDB.
-Total verdicts: 1662. Bug candidates: 418.
+Total verdicts: 1662. Bug candidates: 417.
 
 ## Counts by outcome
 
 | Outcome | Count |
 |---|---|
-| Match | 1068 |
-| MismatchRows | 328 |
+| Match | 1066 |
+| MismatchRows | 331 |
 | KustoError | 127 |
-| SqlExecError | 76 |
+| SqlExecError | 72 |
 | SkippedNondeterministic | 31 |
-| SkippedEngineError | 18 |
+| SkippedEngineError | 21 |
 | MismatchOrder | 11 |
 | MismatchColumns | 3 |
 
-## Family: aggregation (30)
+## Family: aggregation (31)
 
 ### `agent-aggregation-0013` — SqlExecError (highest)
 
@@ -100,7 +100,7 @@ SELECT COALESCE(LIST(d) FILTER (WHERE d IS NOT NULL), []) AS list_d FROM (VALUES
 *Detail:* first differing row[0]: kusto=(1, {
   "a": 1,
   "b": 2
-}) duck=(2, {"{\u0022c\u0022:3}":1})
+}) duck=(1, {"{\u0022a\u0022:1}":1,"{\u0022b\u0022:2}":1})
 
 **KQL**
 ```kql
@@ -121,8 +121,8 @@ SELECT k, histogram(v) AS bag_v FROM (VALUES (CAST(1 AS BIGINT), '{"a":1}'::JSON
   "c": 3
 })
 - DuckDB: cols=[k:Int, bag_v:Unknown] rows=2
-    - (2, {"{\u0022c\u0022:3}":1})
     - (1, {"{\u0022a\u0022:1}":1,"{\u0022b\u0022:2}":1})
+    - (2, {"{\u0022c\u0022:3}":1})
 
 ### `agent-aggregation-0001` — MismatchRows (high)
 
@@ -220,7 +220,7 @@ SELECT k, histogram(v) AS bag FROM (VALUES (CAST(1 AS BIGINT), '{"a":1}'::JSON),
   {
     "y": 2
   }
-]) duck=(1, {"{\u0022x\u0022:1}":1,"{\u0022y\u0022:2}":1}, ["{\u0022x\u0022:1}","{\u0022y\u0022:2}"], ["{\u0022x\u0022:1}",null,"{\u0022y\u0022:2}"])
+]) duck=(2, null, [], [null])
 
 **KQL**
 ```kql
@@ -259,8 +259,8 @@ SELECT k, histogram(v) AS bag_v, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), 
   null
 ])
 - DuckDB: cols=[k:Int, bag_v:Unknown, list_v:Unknown, list_v:Unknown] rows=2
-    - (1, {"{\u0022x\u0022:1}":1,"{\u0022y\u0022:2}":1}, ["{\u0022x\u0022:1}","{\u0022y\u0022:2}"], ["{\u0022x\u0022:1}",null,"{\u0022y\u0022:2}"])
     - (2, null, [], [null])
+    - (1, {"{\u0022x\u0022:1}":1,"{\u0022y\u0022:2}":1}, ["{\u0022x\u0022:1}","{\u0022y\u0022:2}"], ["{\u0022x\u0022:1}",null,"{\u0022y\u0022:2}"])
 
 ### `agent-aggregation-0013` — MismatchRows (high)
 
@@ -706,6 +706,31 @@ SELECT MIN(d) AS mn, MAX(d) AS mx, COUNT(*) AS cnt, max(d) - min(d) AS span, COA
 - DuckDB: cols=[mn:DateTime, mx:DateTime, cnt:Int, span:TimeSpan, ml:Unknown] rows=1
     - (2020-01-01T00:00:00.0000000Z, 2020-01-10T00:00:00.0000000Z, 3, 9.00:00:00, ["2020-01-01T00:00:00","2020-01-05T00:00:00","2020-01-10T00:00:00"])
 
+### `agent-aggregation-0027` — MismatchRows (high)
+
+*Detail:* first differing row[0]: kusto=(1000, 700, 2, [
+  200,
+  400
+]) duck=(1000, 700, 2, [400,200])
+
+**KQL**
+```kql
+datatable(g:long, v:long)[ 1,100, 1,200, 2,300, 2,400 ] | summarize tot=sum(v), amx=arg_max(v, g) by g | summarize gtot=sum(tot), maxgrp=arg_max(tot, g), allamx=make_list(amx)
+```
+**Generated SQL**
+```sql
+SELECT COALESCE(SUM(tot), 0) AS gtot, MAX(tot) AS maxgrp, ARG_MAX(g, tot) AS g, COALESCE(LIST(amx) FILTER (WHERE amx IS NOT NULL), []) AS allamx FROM (SELECT g, COALESCE(SUM(v), 0) AS tot, MAX(v) AS amx, ARG_MAX(g, v) AS g FROM (VALUES (CAST(1 AS BIGINT), CAST(100 AS BIGINT)), (CAST(1 AS BIGINT), CAST(200 AS BIGINT)), (CAST(2 AS BIGINT), CAST(300 AS BIGINT)), (CAST(2 AS BIGINT), CAST(400 AS BIGINT))) AS t(g, v) GROUP BY ALL)
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Dynamic] rows=1
+    - (1000, 700, 2, [
+  200,
+  400
+])
+- DuckDB: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Unknown] rows=1
+    - (1000, 700, 2, [400,200])
+
 ### `agent-aggregation-0029` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=([
@@ -715,7 +740,7 @@ SELECT MIN(d) AS mn, MAX(d) AS mx, COUNT(*) AS cnt, max(d) - min(d) AS span, COA
   1,
   2,
   1
-], 6, 3) duck=([[1,2],[1,2,3],[1]], 6, 3)
+], 6, 3) duck=([[1,2,3],[1],[1,2]], 6, 3)
 
 **KQL**
 ```kql
@@ -737,7 +762,7 @@ SELECT COALESCE(LIST("inner") FILTER (WHERE "inner" IS NOT NULL), []) AS outer_l
   1
 ], 6, 3)
 - DuckDB: cols=[outer_lists:Unknown, totcnt:Int, grps:Int] rows=1
-    - ([[1,2],[1,2,3],[1]], 6, 3)
+    - ([[1,2,3],[1],[1,2]], 6, 3)
 
 ### `agent-aggregation-0032` — MismatchRows (high)
 
@@ -804,7 +829,7 @@ SELECT MAX(x) AS mx, MIN(x) AS mn, COALESCE(AVG(x), 'nan'::DOUBLE) AS av, COALES
 ], [
   1,
   2
-]) duck=([1,2,3,4,5,6], [5,3,6,1,2,4])
+]) duck=([1,2,3,4,5,6], [3,6,5,2,1,4])
 
 **KQL**
 ```kql
@@ -826,7 +851,7 @@ SELECT COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS a, COALESCE(LIST(DI
   2
 ])
 - DuckDB: cols=[a:Unknown, b:Unknown] rows=1
-    - ([1,2,3,4,5,6], [5,3,6,1,2,4])
+    - ([1,2,3,4,5,6], [3,6,5,2,1,4])
 
 ### `agent-aggregation-0038` — MismatchRows (high)
 
@@ -915,7 +940,7 @@ SELECT * FROM (SELECT g, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS m
     "g": 3,
     "c": 2
   }
-]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}"])
+]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}"])
 
 **KQL**
 ```kql
@@ -947,33 +972,9 @@ SELECT histogram(json_object(TRY_CAST(g AS TEXT), cnt)) AS bag, COALESCE(LIST(js
   }
 ])
 - DuckDB: cols=[bag:Unknown, histlist:Unknown] rows=1
-    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}"])
+    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}"])
 
-## Family: datetime-timespan (45)
-
-### `agent-datetime-timespan-0036` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Could not convert string 'time(1.02:03:04.5670000)' to INTERVAL
-
-LINE 1: SELECT (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1000000) < 0 THEN '-' ELSE...
-                                                        ^
-
-**KQL**
-```kql
-print ft = format_timespan(time(1.02:03:04.5670000), 'dd.hh:mm:ss.fffffff')
-```
-**Generated SQL**
-```sql
-SELECT (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1000000) < 0 THEN '-' ELSE '' END || LPAD(CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR), 2, '0') || '.' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1000000)), 86400000000) / 3600000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1000000)), 3600000000) / 60000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1000000)), 60000000) / 1000000) AS BIGINT) AS VARCHAR), 2, '0') || '.' || (LPAD(CAST(CAST(FLOOR(CAST(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1000000)), 1000000) AS BIGINT) / 1) AS BIGINT) AS VARCHAR), 6, '0') || '0')) AS ft
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ft:String] rows=1
-    - ('01.02:03:04.5670000')
-- DuckDB: ERROR — Conversion Error: Could not convert string 'time(1.02:03:04.5670000)' to INTERVAL
-
-LINE 1: SELECT (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1000000) < 0 THEN '-' ELSE...
-                                                        ^
+## Family: datetime-timespan (42)
 
 ### `agent-datetime-timespan-0002` — SqlExecError (highest)
 
@@ -1015,30 +1016,6 @@ SELECT *, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, 
 
 LINE 1: ...' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS wd, EXTRACT(WEEK...
                                                                           ^
-
-### `agent-datetime-timespan-0018` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Could not convert string 'time(0.00:00:00.0000001)' to INTERVAL
-
-LINE 1: ...), 3, '0')) AS ft, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(0.00:00:00.0000001)')) * 1000000) < 0 THEN '-' ELSE...
-                                                                       ^
-
-**KQL**
-```kql
-print ft = format_timespan(1d + 2h + 3m + 4s + 5ms, 'd:hh:mm:ss.fff'), ft2 = format_timespan(time(0.00:00:00.0000001), 'fffffff')
-```
-**Generated SQL**
-```sql
-SELECT (CASE WHEN (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000) < 0 THEN '-' ELSE '' END || CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR) || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)), 86400000000) / 3600000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)), 3600000000) / 60000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)), 60000000) / 1000000) AS BIGINT) AS VARCHAR), 2, '0') || '.' || LPAD(CAST(CAST(FLOOR(CAST(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)), 1000000) AS BIGINT) / 1000) AS BIGINT) AS VARCHAR), 3, '0')) AS ft, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(0.00:00:00.0000001)')) * 1000000) < 0 THEN '-' ELSE '' END || (LPAD(CAST(CAST(FLOOR(CAST(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(0.00:00:00.0000001)')) * 1000000)), 1000000) AS BIGINT) / 1) AS BIGINT) AS VARCHAR), 6, '0') || '0')) AS ft2
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ft:String, ft2:String] rows=1
-    - ('1:02:03:04.005', '0000001')
-- DuckDB: ERROR — Conversion Error: Could not convert string 'time(0.00:00:00.0000001)' to INTERVAL
-
-LINE 1: ...), 3, '0')) AS ft, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(0.00:00:00.0000001)')) * 1000000) < 0 THEN '-' ELSE...
-                                                                       ^
 
 ### `agent-datetime-timespan-0026` — SqlExecError (highest)
 
@@ -1213,30 +1190,6 @@ SELECT DATE_DIFF('microsecond', TIMESTAMP '2020-01-01 00:00:00.000000', TIMESTAM
 - Kusto: cols=[d1:Int, d2:Int] rows=1
     - (2, 200)
 - DuckDB: ERROR — Conversion Error: extract specifier "nanosecond" not recognized
-
-### `agent-datetime-timespan-0010` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Could not convert string 'time(10675199.02:48:05.4775807)' to INTERVAL
-
-LINE 1: ...), 2, '0')) AS ft2, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(10675199.02:48:05.4775807)')) * 1000000) < 0 THEN...
-                                                                        ^
-
-**KQL**
-```kql
-print ft1 = format_timespan(90061123ms, 'd:h:m:s.fff'), ft2 = format_timespan(90061123ms, 'dd:hh:mm:ss'), ft3 = format_timespan(time(10675199.02:48:05.4775807), 'd.hh:mm:ss')
-```
-**Generated SQL**
-```sql
-SELECT (CASE WHEN (EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000) < 0 THEN '-' ELSE '' END || CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR) || ':' || CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000)), 86400000000) / 3600000000) AS BIGINT) AS VARCHAR) || ':' || CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000)), 3600000000) / 60000000) AS BIGINT) AS VARCHAR) || ':' || CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000)), 60000000) / 1000000) AS BIGINT) AS VARCHAR) || '.' || LPAD(CAST(CAST(FLOOR(CAST(MOD(ABS((EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000)), 1000000) AS BIGINT) / 1000) AS BIGINT) AS VARCHAR), 3, '0')) AS ft1, (CASE WHEN (EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000) < 0 THEN '-' ELSE '' END || LPAD(CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000)), 86400000000) / 3600000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000)), 3600000000) / 60000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((90061123 * INTERVAL '1 millisecond'))) * 1000000)), 60000000) / 1000000) AS BIGINT) AS VARCHAR), 2, '0')) AS ft2, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(10675199.02:48:05.4775807)')) * 1000000) < 0 THEN '-' ELSE '' END || CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(10675199.02:48:05.4775807)')) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR) || '.' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(10675199.02:48:05.4775807)')) * 1000000)), 86400000000) / 3600000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(10675199.02:48:05.4775807)')) * 1000000)), 3600000000) / 60000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(10675199.02:48:05.4775807)')) * 1000000)), 60000000) / 1000000) AS BIGINT) AS VARCHAR), 2, '0')) AS ft3
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ft1:String, ft2:String, ft3:String] rows=1
-    - ('1:1:1:1.123', '01:01:01:01', '10675199.02:48:05')
-- DuckDB: ERROR — Conversion Error: Could not convert string 'time(10675199.02:48:05.4775807)' to INTERVAL
-
-LINE 1: ...), 2, '0')) AS ft2, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(10675199.02:48:05.4775807)')) * 1000000) < 0 THEN...
-                                                                        ^
 
 ### `agent-datetime-timespan-0013` — SqlExecError (highest)
 
@@ -1481,30 +1434,6 @@ SELECT *, EXTRACT(WEEK FROM t) AS woy, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '0
 LINE 1: ...' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS iso_dow, (DATE_T...
                                                                           ^
 
-### `agent-datetime-timespan-0046` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Could not convert string 'time(1.02:03:04)' to INTERVAL
-
-LINE 1: ...), 4, '0')) AS a, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04)')) * 1000000) < 0 THEN '-' ELSE '' END...
-                                                                      ^
-
-**KQL**
-```kql
-print a = format_timespan(1d, 'dddd'), b = format_timespan(time(1.02:03:04), 'd'), c = format_timespan(time(1.02:03:04), 'hh'), d = format_timespan(time(0.00:00:00.123), 'fff'), e = format_timespan(time(2.05:00:00), 'd.h')
-```
-**Generated SQL**
-```sql
-SELECT (CASE WHEN (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond'))) * 1000000) < 0 THEN '-' ELSE '' END || LPAD(CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond'))) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR), 4, '0')) AS a, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04)')) * 1000000) < 0 THEN '-' ELSE '' END || CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04)')) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR)) AS b, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04)')) * 1000000) < 0 THEN '-' ELSE '' END || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04)')) * 1000000)), 86400000000) / 3600000000) AS BIGINT) AS VARCHAR), 2, '0')) AS c, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(0.00:00:00.123)')) * 1000000) < 0 THEN '-' ELSE '' END || LPAD(CAST(CAST(FLOOR(CAST(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(0.00:00:00.123)')) * 1000000)), 1000000) AS BIGINT) / 1000) AS BIGINT) AS VARCHAR), 3, '0')) AS d, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(2.05:00:00)')) * 1000000) < 0 THEN '-' ELSE '' END || CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(2.05:00:00)')) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR) || '.' || CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM (INTERVAL 'time(2.05:00:00)')) * 1000000)), 86400000000) / 3600000000) AS BIGINT) AS VARCHAR)) AS e
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:String, b:String, c:String, d:String, e:String] rows=1
-    - ('0001', '1', '02', '123', '2.5')
-- DuckDB: ERROR — Conversion Error: Could not convert string 'time(1.02:03:04)' to INTERVAL
-
-LINE 1: ...), 4, '0')) AS a, (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04)')) * 1000000) < 0 THEN '-' ELSE '' END...
-                                                                      ^
-
 ### `agent-datetime-timespan-0043` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=(2020-01-01T00:00:00.0000001Z, 2020, '0000001', 2020-12-31T23:59:59.9999999Z) duck=(2020-01-01T00:00:00.0000000Z, 2020, '000000', 2020-12-31T23:59:59.9999990Z)
@@ -1601,6 +1530,25 @@ SELECT STRFTIME(TIMESTAMP '2020-06-15 13:45:09.500000', '%S.%g') AS f1, STRFTIME
     - ('09.5', '09.05', '2020/06/15')
 - DuckDB: cols=[f1:String, f2:String, f3:String] rows=1
     - ('09.500', '09.050', '2020/06/15')
+
+### `agent-datetime-timespan-0018` — MismatchRows (high)
+
+*Detail:* first differing row[0]: kusto=('1:02:03:04.005', '0000001') duck=('1:02:03:04.005', '0000000')
+
+**KQL**
+```kql
+print ft = format_timespan(1d + 2h + 3m + 4s + 5ms, 'd:hh:mm:ss.fff'), ft2 = format_timespan(time(0.00:00:00.0000001), 'fffffff')
+```
+**Generated SQL**
+```sql
+SELECT (CASE WHEN (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000) < 0 THEN '-' ELSE '' END || CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR) || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)), 86400000000) / 3600000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)), 3600000000) / 60000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)), 60000000) / 1000000) AS BIGINT) AS VARCHAR), 2, '0') || '.' || LPAD(CAST(CAST(FLOOR(CAST(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + (4000 * INTERVAL '1 millisecond') + (5 * INTERVAL '1 millisecond'))) * 1000000)), 1000000) AS BIGINT) / 1000) AS BIGINT) AS VARCHAR), 3, '0')) AS ft, (CASE WHEN (EXTRACT(EPOCH FROM ((CAST(0 AS BIGINT) * INTERVAL '1 microsecond'))) * 1000000) < 0 THEN '-' ELSE '' END || (LPAD(CAST(CAST(FLOOR(CAST(MOD(ABS((EXTRACT(EPOCH FROM ((CAST(0 AS BIGINT) * INTERVAL '1 microsecond'))) * 1000000)), 1000000) AS BIGINT) / 1) AS BIGINT) AS VARCHAR), 6, '0') || '0')) AS ft2
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[ft:String, ft2:String] rows=1
+    - ('1:02:03:04.005', '0000001')
+- DuckDB: cols=[ft:String, ft2:String] rows=1
+    - ('1:02:03:04.005', '0000000')
 
 ### `agent-datetime-timespan-0023` — MismatchRows (high)
 
@@ -2490,7 +2438,7 @@ SELECT COALESCE(LIST(k) FILTER (WHERE k IS NOT NULL), []) AS list_k, COALESCE(LI
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
-- Kusto: cols=[list_k:Dynamic, list_d___obj_b65e232e-89cb-4541-85ad-5c96aceee4ed:Dynamic] rows=1
+- Kusto: cols=[list_k:Dynamic, list_d___obj_a10fadd8-a03b-4b11-8645-baf7bf069781:Dynamic] rows=1
     - ([
   "d",
   "c",
@@ -4556,7 +4504,7 @@ SELECT *, LIST_CONTAINS(a, 2) AS has2, LIST_CONTAINS(a, 9) AS has9, LIST_CONTAIN
 *Detail:* first differing row[0]: kusto=(7, [
   "a",
   "c"
-]) duck=(7, ["\u0022a\u0022","\u0022c\u0022"])
+]) duck=(7, ["\u0022c\u0022","\u0022a\u0022"])
 
 **KQL**
 ```kql
@@ -4574,7 +4522,7 @@ SELECT COALESCE(SUM(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') A
   "c"
 ])
 - DuckDB: cols=[total:Int, names:Unknown] rows=1
-    - (7, ["\u0022a\u0022","\u0022c\u0022"])
+    - (7, ["\u0022c\u0022","\u0022a\u0022"])
 
 ### `agent-dynamic-json-0031` — MismatchRows (high)
 
@@ -4931,7 +4879,7 @@ WITH L AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS
     - (2, 200)
     - (3, 0)
 
-## Family: nested-pipelines-let-cte (33)
+## Family: nested-pipelines-let-cte (34)
 
 ### `agent-nested-pipelines-let-cte-0028` — SqlExecError (highest)
 
@@ -5611,6 +5559,29 @@ SELECT c, b, a, * EXCLUDE (c, b, a) FROM (SELECT *, a + c AS b FROM (SELECT a, b
     - (3, 2, 1, 4)
     - (6, 5, 4, 10)
     - (9, 8, 7, 16)
+
+### `agent-nested-pipelines-let-cte-0022` — MismatchRows (high)
+
+*Detail:* first differing row[1]: kusto=(2, 'neg', 1, -5.5) duck=(2, 'zero', 1, 0)
+
+**KQL**
+```kql
+let nums = datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1, 7,100,3.25 ]; let s1 = nums | extend cat = case(i < 0, "neg", i == 0, "zero", "pos"); let s2 = s1 | summarize cnt = count(), avgr = avg(r) by cat; let s3 = s2 | sort by cnt desc; s3 | extend rn = row_number() | project rn, cat, cnt, avgr
+```
+**Generated SQL**
+```sql
+WITH nums AS NOT MATERIALIZED (SELECT * FROM (VALUES (-5, CAST(-5 AS BIGINT), CAST(-5.5 AS DOUBLE)), (0, CAST(0 AS BIGINT), CAST(0.0 AS DOUBLE)), (3, CAST(2147483648 AS BIGINT), CAST(0.1 AS DOUBLE)), (7, CAST(100 AS BIGINT), CAST(3.25 AS DOUBLE))) AS t(i, l, r)), s1 AS NOT MATERIALIZED (SELECT *, CASE WHEN i < 0 THEN 'neg' WHEN i = 0 THEN 'zero' ELSE 'pos' END AS cat FROM nums), s2 AS NOT MATERIALIZED (SELECT cat, COUNT(*) AS cnt, COALESCE(AVG(r), 'nan'::DOUBLE) AS avgr FROM s1 GROUP BY ALL), s3 AS NOT MATERIALIZED (SELECT * FROM s2 ORDER BY cnt DESC NULLS LAST) SELECT rn, cat, cnt, avgr FROM (SELECT *, ROW_NUMBER() OVER () AS rn FROM s3)
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[rn:Int, cat:String, cnt:Int, avgr:Real] rows=3
+    - (1, 'pos', 2, 1.675)
+    - (2, 'neg', 1, -5.5)
+    - (3, 'zero', 1, 0)
+- DuckDB: cols=[rn:Int, cat:String, cnt:Int, avgr:Real] rows=3
+    - (1, 'pos', 2, 1.675)
+    - (2, 'zero', 1, 0)
+    - (3, 'neg', 1, -5.5)
 
 ### `agent-nested-pipelines-let-cte-0024` — MismatchRows (high)
 
@@ -11093,7 +11064,7 @@ SELECT t.* EXCLUDE (s), u.value AS s FROM (SELECT LIST(COALESCE(s_val, 0) ORDER 
 ### `agent-window-series-scan-0032` — MismatchRows (high)
 
 *Sub-verdicts:* NAME_MISMATCH, TYPE_MISMATCH[Sub:Int|String]  
-*Detail:* first differing row[0]: kusto=('b', 30, 'x', 30) duck=('b', 30, 'x', 'x')
+*Detail:* first differing row[0]: kusto=('b', 30, 'x', 30) duck=('a', 30, 'y', 'y')
 
 **KQL**
 ```kql
@@ -11110,9 +11081,9 @@ SELECT cat, Tot, sub, Sub FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat OR
     - ('a', 30, 'y', 20)
     - ('a', 30, 'x', 10)
 - DuckDB: cols=[cat:String, Tot:Int, sub:String, sub:String] rows=3
-    - ('b', 30, 'x', 'x')
     - ('a', 30, 'y', 'y')
     - ('a', 30, 'x', 'x')
+    - ('b', 30, 'x', 'x')
 
 ### `agent-window-series-scan-0042` — MismatchRows (high)
 
@@ -11795,27 +11766,6 @@ SELECT * FROM (SELECT g, COUNT(*) AS approximate_count_g FROM (VALUES ('a', CAST
     - ('c', 1)
     - ('d', 1)
 
-### `agent-window-series-scan-0020` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","y",20, "a","y",5, "b","x",30, "b","z",5, "c","x",1 ] | top-nested 2 of cat by Tot=sum(v), top-nested 1 of sub by SubTot=sum(v)
-```
-**Generated SQL**
-```sql
-SELECT cat, Tot, sub, SubTot FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat ORDER BY SubTot DESC) AS _rn1 FROM (SELECT _src.cat, _src.sub, _prev.Tot, COALESCE(SUM(v), 0) AS SubTot FROM (SELECT * FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'y', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT)), ('b', 'z', CAST(5 AS BIGINT)), ('c', 'x', CAST(1 AS BIGINT))) AS t(cat, sub, v)) AS _src INNER JOIN (SELECT cat, Tot FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY Tot DESC) AS _rn0 FROM (SELECT cat, COALESCE(SUM(v), 0) AS Tot FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'y', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT)), ('b', 'z', CAST(5 AS BIGINT)), ('c', 'x', CAST(1 AS BIGINT))) AS t(cat, sub, v) GROUP BY cat)) WHERE _rn0 <= 2) AS _prev ON _src.cat = _prev.cat GROUP BY _src.cat, _src.sub, _prev.Tot)) WHERE _rn1 <= 1
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[cat:String, Tot:Int, sub:String, SubTot:Int] rows=2
-    - ('b', 35, 'x', 30)
-    - ('a', 35, 'y', 25)
-- DuckDB: cols=[cat:String, Tot:Int, sub:String, SubTot:Int] rows=2
-    - ('a', 35, 'y', 25)
-    - ('b', 35, 'x', 30)
-
 ### `agent-window-series-scan-0021` — MismatchOrder (medium)
 
 *Detail:* rows match as a set but order differs
@@ -11863,4 +11813,27 @@ SELECT * FROM (SELECT g, SUM(v) AS approximate_sum_v FROM (VALUES ('a', CAST(1 A
     - ('b', 3)
     - ('c', 15)
     - ('d', 15)
+
+### `agent-window-series-scan-0040` — MismatchOrder (medium)
+
+*Detail:* rows match as a set but order differs
+
+**KQL**
+```kql
+datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","x",20, "a","y",5, "b","x",30 ] | top-nested 2 of cat by sum(v), top-nested 2 of sub by sum(v), top-nested 1 of v by sum(v)
+```
+**Generated SQL**
+```sql
+SELECT cat, aggregated_cat, sub, aggregated_sub, v, aggregated_v FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat, sub ORDER BY aggregated_v DESC) AS _rn2 FROM (SELECT _src.cat, _src.sub, _src.v, _prev.aggregated_cat, _prev.aggregated_sub, COALESCE(SUM(v), 0) AS aggregated_v FROM (SELECT * FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'x', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT))) AS t(cat, sub, v)) AS _src INNER JOIN (SELECT cat, aggregated_cat, sub, aggregated_sub FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat ORDER BY aggregated_sub DESC) AS _rn1 FROM (SELECT _src.cat, _src.sub, _prev.aggregated_cat, COALESCE(SUM(v), 0) AS aggregated_sub FROM (SELECT * FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'x', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT))) AS t(cat, sub, v)) AS _src INNER JOIN (SELECT cat, aggregated_cat FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY aggregated_cat DESC) AS _rn0 FROM (SELECT cat, COALESCE(SUM(v), 0) AS aggregated_cat FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'x', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT))) AS t(cat, sub, v) GROUP BY cat)) WHERE _rn0 <= 2) AS _prev ON _src.cat = _prev.cat GROUP BY _src.cat, _src.sub, _prev.aggregated_cat)) WHERE _rn1 <= 2) AS _prev ON _src.cat = _prev.cat AND _src.sub = _prev.sub GROUP BY _src.cat, _src.sub, _src.v, _prev.aggregated_cat, _prev.aggregated_sub)) WHERE _rn2 <= 1
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[cat:String, aggregated_cat:Int, sub:String, aggregated_sub:Int, v:Int, aggregated_v:Int] rows=3
+    - ('a', 35, 'x', 30, 20, 20)
+    - ('a', 35, 'y', 5, 5, 5)
+    - ('b', 30, 'x', 30, 30, 30)
+- DuckDB: cols=[cat:String, aggregated_cat:Int, sub:String, aggregated_sub:Int, v:Int, aggregated_v:Int] rows=3
+    - ('a', 35, 'y', 5, 5, 5)
+    - ('a', 35, 'x', 30, 20, 20)
+    - ('b', 30, 'x', 30, 30, 30)
 

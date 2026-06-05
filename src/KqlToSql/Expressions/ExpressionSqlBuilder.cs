@@ -528,17 +528,23 @@ internal class ExpressionSqlBuilder
         if (string.Equals(bare, "null", StringComparison.OrdinalIgnoreCase))
             return "CAST(NULL AS INTERVAL)";
 
+        // Use the unwrapped inner so the time(...)/timespan(...) constructor parses like a bare
+        // timespan literal (e.g. time(1.02:03:04.567) → 1.02:03:04.567).
         // KQL 'tick' = 100ns. DuckDB INTERVAL has no 'tick' unit (and is µs-resolution), so express
         // N ticks as N/10 microseconds. (Sub-µs values round to 0µs, within comparison tolerance.)
         var tickMatch = System.Text.RegularExpressions.Regex.Match(
-            text, @"^(-?\d+(?:\.\d+)?)\s*ticks?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            bare, @"^(-?\d+(?:\.\d+)?)\s*ticks?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (tickMatch.Success)
             return $"(({tickMatch.Groups[1].Value} / 10.0) * INTERVAL '1 microsecond')";
-        if (TryParseTimespan(text, out var ms))
+        if (TryParseTimespan(bare, out var ms))
         {
             return $"({ms} * INTERVAL '1 millisecond')";
         }
-        return $"INTERVAL '{text}'";
+        // Colon form d.hh:mm:ss[.fffffff] (e.g. 1.02:03:04.567) — .NET TimeSpan parses it; emit as µs
+        // (DuckDB can't parse 'd.hh:mm:ss' as an INTERVAL literal directly).
+        if (TimeSpan.TryParse(bare, CultureInfo.InvariantCulture, out var tsLit))
+            return $"(CAST({tsLit.Ticks / 10} AS BIGINT) * INTERVAL '1 microsecond')";
+        return $"INTERVAL '{bare}'";
     }
 
     private string ConvertFunctionCall(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
