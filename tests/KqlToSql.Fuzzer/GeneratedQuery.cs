@@ -18,6 +18,8 @@ public sealed record GeneratedQuery
     public string[]? OrderKeys { get; init; }
     public bool Nondeterministic { get; init; }
     public bool ExpectedUnsupported { get; init; }
+    /// <summary>Query uses an unordered set aggregate (make_set/make_bag) → compare arrays order-insensitively.</summary>
+    public bool SetSemantics { get; init; }
     public bool NeedsStormEvents { get; init; }
     public string? Rationale { get; init; }
     public Dictionary<string, string>? GeneratorAxes { get; init; }

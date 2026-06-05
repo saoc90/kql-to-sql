@@ -892,7 +892,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var trimmed = source.TrimEnd();
         if (forceJsonCoerce ||
             trimmed.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.EndsWith(" AS JSON)", StringComparison.OrdinalIgnoreCase))
+            trimmed.EndsWith(" AS JSON)", StringComparison.OrdinalIgnoreCase) ||
+            // Dynamic property/index navigation (d.k / d["k"] / d[i]) yields a json_extract(...) value;
+            // it's JSON, not a native LIST, so it must be coerced before UNNEST.
+            trimmed.StartsWith("json_extract(", StringComparison.OrdinalIgnoreCase))
         {
             return $"CASE WHEN json_type({source}) = 'ARRAY' THEN CAST({source} AS JSON[]) " +
                    $"ELSE list_transform(json_keys({source}), lambda k: json_extract({source}, '$.' || k)) END";

@@ -46,8 +46,20 @@ public sealed class ComparisonOptions
     public bool NullEqualsEmpty { get; set; }
     public double AbsEpsilon { get; set; } = 1e-9;
     public double RelEpsilon { get; set; } = 1e-9;
+    /// <summary>Compare dynamic/JSON arrays order-insensitively (for unordered set aggregates like
+    /// make_set/make_bag whose element order Kusto leaves unspecified).</summary>
+    public bool SortJsonArrays { get; set; }
 
     public static ComparisonOptions Default => new();
+
+    public ComparisonOptions With(bool sortJsonArrays) => new()
+    {
+        CompareColumnNames = CompareColumnNames,
+        NullEqualsEmpty = NullEqualsEmpty,
+        AbsEpsilon = AbsEpsilon,
+        RelEpsilon = RelEpsilon,
+        SortJsonArrays = sortJsonArrays,
+    };
 }
 
 /// <summary>
@@ -60,6 +72,9 @@ public static class Comparator
     public static Verdict Compare(GeneratedQuery q, EngineResult kusto, EngineResult duck, ComparisonOptions? options = null)
     {
         var opts = options ?? ComparisonOptions.Default;
+        // Set aggregates (make_set/make_bag) produce arrays whose element order Kusto leaves
+        // unspecified — compare those order-insensitively (engine-specific tolerance).
+        if (q.SetSemantics && !opts.SortJsonArrays) opts = opts.With(sortJsonArrays: true);
         var subs = new List<string>();
 
         // ---- error handling ------------------------------------------------
@@ -234,7 +249,7 @@ public static class Comparator
 
         // dynamic / JSON
         if (a is DynamicJson || b is DynamicJson)
-            return JsonEqual(ToJsonText(a), ToJsonText(b));
+            return JsonEqual(ToJsonText(a), ToJsonText(b), opts.SortJsonArrays);
 
         // numeric (covers int/long/double/decimal/float widening across engines)
         if (IsNumeric(a) && IsNumeric(b))
@@ -356,22 +371,22 @@ public static class Comparator
         _ => JsonSerializer.Serialize(o),
     };
 
-    public static bool JsonEqual(string a, string b)
+    public static bool JsonEqual(string a, string b, bool sortArrays = false)
     {
-        var ca = TryCanonicalizeJson(a, out var oka);
-        var cb = TryCanonicalizeJson(b, out var okb);
+        var ca = TryCanonicalizeJson(a, sortArrays, out var oka);
+        var cb = TryCanonicalizeJson(b, sortArrays, out var okb);
         if (oka && okb) return string.Equals(ca, cb, StringComparison.Ordinal);
         // One or both aren't valid JSON: compare trimmed raw text.
         return string.Equals(a.Trim(), b.Trim(), StringComparison.Ordinal);
     }
 
-    private static string TryCanonicalizeJson(string s, out bool ok)
+    private static string TryCanonicalizeJson(string s, bool sortArrays, out bool ok)
     {
         try
         {
             using var doc = JsonDocument.Parse(s);
             var sb = new StringBuilder();
-            WriteCanonical(doc.RootElement, sb);
+            WriteCanonical(doc.RootElement, sb, sortArrays);
             ok = true;
             return sb.ToString();
         }
@@ -382,7 +397,7 @@ public static class Comparator
         }
     }
 
-    private static void WriteCanonical(JsonElement el, StringBuilder sb)
+    private static void WriteCanonical(JsonElement el, StringBuilder sb, bool sortArrays)
     {
         switch (el.ValueKind)
         {
@@ -394,19 +409,22 @@ public static class Comparator
                     if (!first) sb.Append(',');
                     first = false;
                     sb.Append(JsonSerializer.Serialize(p.Name)).Append(':');
-                    WriteCanonical(p.Value, sb);
+                    WriteCanonical(p.Value, sb, sortArrays);
                 }
                 sb.Append('}');
                 break;
             case JsonValueKind.Array:
                 sb.Append('[');
-                bool f2 = true;
-                foreach (var item in el.EnumerateArray())
+                // Default: arrays are ordered. For set-aggregate results, sort element canonical
+                // forms so unspecified Kusto set order is tolerated.
+                var items = el.EnumerateArray().Select(item =>
                 {
-                    if (!f2) sb.Append(',');
-                    f2 = false;
-                    WriteCanonical(item, sb);
-                }
+                    var isb = new StringBuilder();
+                    WriteCanonical(item, isb, sortArrays);
+                    return isb.ToString();
+                });
+                if (sortArrays) items = items.OrderBy(x => x, StringComparer.Ordinal);
+                sb.Append(string.Join(",", items));
                 sb.Append(']');
                 break;
             case JsonValueKind.Number:

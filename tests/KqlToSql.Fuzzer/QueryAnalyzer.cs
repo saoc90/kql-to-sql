@@ -64,11 +64,15 @@ public static partial class QueryAnalyzer
     public static GeneratedQuery Enrich(GeneratedQuery q)
     {
         var (mode, nondet, unsupported) = Analyze(q.Kql);
+        var lower = q.Kql.ToLowerInvariant();
+        // make_set/make_bag are unordered set aggregates — Kusto leaves element order unspecified.
+        bool setSemantics = lower.Contains("make_set") || lower.Contains("make_bag") || lower.Contains("makeset");
         return q with
         {
             ExpectedMode = q.ExpectedMode == ComparisonMode.Ordered ? ComparisonMode.Ordered : mode,
             Nondeterministic = q.Nondeterministic || nondet,
             ExpectedUnsupported = q.ExpectedUnsupported || unsupported,
+            SetSemantics = q.SetSemantics || setSemantics,
         };
     }
 
