@@ -67,6 +67,27 @@ internal class TabularHandlers : OperatorHandlerBase
         return new List<string>();
     }
 
+    /// <summary>Resolves the INPUT columns of a query operator via the Kusto semantic model — i.e. the
+    /// columns flowing into it from upstream (a CTE/let, datatable, prior operators). Returns null when
+    /// the query can't be bound (e.g. an unknown base table), so callers fall back to text heuristics.
+    /// Used so an extend that redefines an existing column EXCLUDEs it even when that column comes from a
+    /// referenced CTE and is therefore not textually visible in the generated SQL.</summary>
+    private static HashSet<string>? ResolveOperatorInputColumns(QueryOperator op)
+    {
+        try
+        {
+            var analyzed = KustoCode.ParseAndAnalyze(op.Root.ToString());
+            var opText = op.ToString();
+            var match = analyzed.Syntax.GetDescendants<QueryOperator>()
+                .FirstOrDefault(o => o.Kind == op.Kind && o.ToString() == opText && o.Parent is PipeExpression);
+            if (match?.Parent is PipeExpression pipe &&
+                pipe.Expression.ResultType is Kusto.Language.Symbols.TableSymbol ts)
+                return new HashSet<string>(ts.Columns.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+        }
+        catch { /* unbound source — caller falls back to text heuristics */ }
+        return null;
+    }
+
     internal string ApplyFilter(string leftSql, FilterOperator filter)
     {
         // `where * <op> rhs` expands over every input column — resolve them via the bound semantic model.
@@ -279,9 +300,26 @@ internal class TabularHandlers : OperatorHandlerBase
         // Check if any extended column name already exists as an alias at the OUTER level of leftSql
         // (paren depth 0). Inner-scope AS aliases (from deeply nested subqueries) may not be visible
         // to the enclosing FROM, so using EXCLUDE on them would cause 'column not found' errors.
+        // A redefined column must be EXCLUDEd so it isn't emitted twice (which shadows the new value
+        // and breaks UNION BY NAME). Detect existing columns three ways: the cheap text scans (alias /
+        // relation-alias column list), plus the semantic model for columns that flow in from a referenced
+        // CTE/let and so aren't textually present in leftSql.
+        // The semantic-model path is only used when leftSql is a bare CTE/table reference
+        // (`SELECT * FROM <name>`): there the input columns equal the referenced relation's columns, so
+        // an EXCLUDE on them is valid. For any other shape (e.g. an mv-apply on-subquery's reconstructed
+        // `(SELECT u.value AS x)`) the model's column view can diverge from the generated SQL, which would
+        // EXCLUDE a column not present in the FROM — so we stick to the text heuristics there.
+        // Only when leftSql is a bare CTE/table reference (`SELECT * FROM <name>`) do the input columns
+        // equal the referenced relation's columns, making an EXCLUDE on a model-reported column valid.
+        // Broader shapes (`SELECT * FROM (subquery)`, mv-apply on-subqueries) can diverge from the model
+        // and either EXCLUDE an absent column or change the output shape, so they use text heuristics only.
+        bool leftIsBareCteRef = Regex.IsMatch(leftSql, @"^SELECT \* FROM [A-Za-z_][A-Za-z0-9_]*\s*$");
+        var inputCols = leftIsBareCteRef ? ResolveOperatorInputColumns(extend) : null;
         var columnsToExclude = extras
-            .Where(e => HasTopLevelAlias(leftSql, e.Name) || HasRelationAliasColumn(leftSql, e.Name))
+            .Where(e => HasTopLevelAlias(leftSql, e.Name) || HasRelationAliasColumn(leftSql, e.Name)
+                     || (inputCols?.Contains(e.Name) ?? false))
             .Select(e => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(e.Name))
+            .Distinct()
             .ToArray();
 
         var joined = string.Join(", ", extras.Select(e => e.Expr));
