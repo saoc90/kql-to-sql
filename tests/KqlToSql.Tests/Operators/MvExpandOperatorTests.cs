@@ -55,15 +55,18 @@ public class MvExpandOperatorTests
     [Fact]
     public void MvExpand_JsonObjectColumn_EmitsCaseWhenJsonType()
     {
-        // mv-expand on a JSON-cast expression (e.g. output of make_bag / parse_json)
-        // must emit a CASE WHEN json_type(...) = 'ARRAY' branch so that DuckDB can
-        // handle both JSON arrays (CAST AS JSON[]) and JSON objects (list_transform/json_keys)
-        // without failing with "UNNEST requires a single list as input".
+        // mv-expand on a JSON-cast expression (e.g. output of make_bag / parse_json) must emit a CASE
+        // that coerces every dynamic shape to a JSON[] so DuckDB's UNNEST never sees a bare JSON value:
+        //   null → one null row, array → elements, object → one single-key bag per property, scalar → one row.
         var converter = new KqlToSqlConverter();
         var kql = "datatable(bag:string) [ '{\"a\":1}' ] | mv-expand bag=parse_json(bag)";
         var sql = converter.Convert(kql);
-        Assert.Contains("CASE WHEN json_type(", sql);
+        Assert.Contains("CASE WHEN", sql);
+        Assert.Contains("json_type(", sql);
         Assert.Contains("= 'ARRAY'", sql);
+        Assert.Contains("= 'OBJECT'", sql);
+        // object → single-key bags {"k":v} (not raw values), matching Kusto's default bag expansion.
         Assert.Contains("list_transform(json_keys(", sql);
+        Assert.Contains("json_object(", sql);
     }
 }

@@ -1,0 +1,5 @@
+{"Id":"t-0","Tier":2,"Family":"b","Kql":"datatable(d:dynamic)[ dynamic({\"a\":1,\"b\":[1,2,3]}), dynamic([10,20,30]) ] | mv-expand d | project d"}
+{"Id":"t-1","Tier":2,"Family":"b","Kql":"datatable(d:dynamic)[ dynamic({\"k\":1}), dynamic(null), dynamic([1,2,3]) ] | mv-expand d | project d"}
+{"Id":"t-2","Tier":2,"Family":"b","Kql":"print d = dynamic({\"x\":[1,2],\"y\":[3,4],\"z\":[5,6]}) | extend flat = array_concat(d.x, d.y, d.z) | mv-expand f = flat to typeof(long) | summarize sum(f), avg(f)"}
+{"Id":"t-3","Tier":2,"Family":"b","Kql":"print d = dynamic({\"a\":[{\"b\":[1,2]},{\"b\":[3,4,5]}]}) | mv-apply o = d.a on (mv-expand v = o.b to typeof(long) | summarize s = sum(v)) | summarize grand = sum(s)"}
+{"Id":"t-4","Tier":2,"Family":"b","Kql":"datatable(d:dynamic)[ dynamic({\"a\":1,\"b\":[1,2,3]}), dynamic([10,20,30]), dynamic({\"nested\":{\"x\":\"y\"}}), dynamic(null) ] | mv-expand d"}

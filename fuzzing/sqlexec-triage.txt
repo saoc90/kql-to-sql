@@ -1,0 +1,200 @@
+### 1 [dynamic-json]
+KQL: datatable(d:dynamic)[ dynamic({"x":1}), dynamic({"y":2}) ] | mv-apply k = bag_keys(d) on (extend kk = k)
+ERR: Parser Error: syntax error at or near "AS"
+
+### 2 [nested-pipelines-let-cte]
+KQL: datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic([10,20,30]) ] | mv-expand d | project d
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 3 [null-and-edge]
+KQL: datatable(s:string)[ "a", "" ] | union (datatable(s:string)[ "c" ] | extend s=tostring(dynamic(null))) | extend e=isempty(s), n=isnull(s) | project s, e, n
+ERR: Binder Error: UNION (ALL) BY NAME operation doesn't support duplicate names in the SELECT list - the name "s" occurs multiple times
+
+### 4 [datetime-timespan]
+KQL: range t from datetime(2021-12-26) to datetime(2022-01-02) step 1d | extend sow = startofweek(t), eow = endofweek(t), wd = dayofweek(t) / 1d, woy = week_of_year(t)
+ERR: Binder Error: No function matches the given name and argument types '/(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
+
+### 5 [datetime-timespan]
+KQL: datatable(t:datetime)[ datetime(1601-01-01 00:00:00), datetime(0001-01-01 00:00:00.0000001), datetime(9999-12-31 23:59:59.9999999) ] | extend y = getyear(t), woy = week_of_year(t), dow = dayofweek(t) / 1d, eom = endofmonth(t)
+ERR: Binder Error: No function matches the given name and argument types '/(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
+
+### 6 [dynamic-json]
+KQL: datatable(d:dynamic)[ dynamic({"a":[1,2],"b":[3,4,5]}) ] | extend z = array_concat(array_slice(d.a, 0, 0), array_reverse(d.b)) | mv-expand z to typeof(long) | summarize s = sum(z), c = count()
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 7 [dynamic-json]
+KQL: print d = dynamic({"x":1,"y":2,"z":3}) | extend ks = bag_keys(d) | mv-expand k = ks to typeof(string) | extend val = toint(d[k]) | summarize sum(val)
+ERR: Binder Error: No function matches the given name and argument types '+(VARCHAR, INTEGER_LITERAL)'. You might need to add explicit type casts.
+
+### 8 [dynamic-json]
+KQL: print arr = dynamic([10,20,30,40,50]) | mv-expand with_itemindex=idx v = arr | project idx, v, prod = toint(v) * idx
+ERR: Binder Error: Referenced column "idx" not found in FROM clause!
+
+### 9 [dynamic-json]
+KQL: print s = '[{"id":1,"vals":[10,20]},{"id":2,"vals":[30]}]' | extend d = parse_json(s) | mv-expand o = d | mv-expand v = o.vals | summarize sum(toint(v)) by oid = tostring(o.id)
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 10 [dynamic-json]
+KQL: print d = dynamic({"x":[1,2],"y":[3,4],"z":[5,6]}) | extend flat = array_concat(d.x, d.y, d.z) | mv-expand f = flat to typeof(long) | summarize sum(f), avg(f)
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 11 [dynamic-json]
+KQL: print d = dynamic([[1,2,3],[4,5,6]]) | mv-expand row = d | mv-expand cell = row to typeof(long) | summarize grand = sum(cell)
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 12 [dynamic-json]
+KQL: print d = dynamic({"a":1,"b":2,"c":3,"d":4}) | extend pairs = bag_keys(d) | mv-expand k = pairs to typeof(string) | order by k desc | summarize make_list(k), make_list(toint(d[k]))
+ERR: Binder Error: No function matches the given name and argument types '+(VARCHAR, INTEGER_LITERAL)'. You might need to add explicit type casts.
+
+### 13 [nested-pipelines-let-cte]
+KQL: print a = 1, b = 2 | extend c = pack("x", a, "y", b) | mv-expand kind=array c | project c | sort by tostring(c) asc
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 14 [null-and-edge]
+KQL: datatable(d:dynamic)[ dynamic({"k":1}), dynamic(null), dynamic([1,2,3]) ] | mv-expand d | project d
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 15 [string-ops]
+KQL: datatable(s:string)[ "2020-01-02 03:04","a1b2c3d4","nope" ] | project s, all=extract_all(@"(\d+)",s), all2=extract_all(@"(\d)(\d)",dynamic([1,2]),s)
+ERR: Binder Error: No function matches the given name and argument types 'regexp_extract_all(STRING_LITERAL, INTEGER[])'. You might need to add explicit type casts.
+
+### 16 [aggregation]
+KQL: datatable(k:long, s:string)[ 1,"a", 1,"", 1,"b", 2,"", 2,"" ] | summarize ml=make_list(s), ms=make_set(s), joined=strcat_array(make_list(s), "|") by k | order by k asc
+ERR: Binder Error: aggregate function calls cannot be nested
+
+### 17 [datetime-timespan]
+KQL: range t from datetime(2023-12-29) to datetime(2024-01-04) step 1d | extend sow = startofweek(t), eow = endofweek(t), som = startofmonth(t), soy = startofyear(t), woy = week_of_year(t), dow = dayofweek(t) / 1d
+ERR: Binder Error: No function matches the given name and argument types '/(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
+
+### 18 [datetime-timespan]
+KQL: print d1 = datetime_diff('microsecond', datetime(2020-01-01 00:00:00.0000020), datetime(2020-01-01 00:00:00.0000005)), d2 = datetime_diff('nanosecond', datetime(2020-01-01 00:00:00.0000002), datetime(2020-01-01 00:00:00))
+ERR: Conversion Error: extract specifier "nanosecond" not recognized
+
+### 19 [datetime-timespan]
+KQL: datatable(y:int, m:int, d:int)[ 2020,2,29, 2021,2,28, 2000,1,1, 1999,12,31 ] | extend dt = make_datetime(y, m, d), eom = endofmonth(make_datetime(y, m, d)), woy = week_of_year(make_datetime(y, m, d)), dow = dayofweek(make_datetime(y, m, d)) / 1d
+ERR: Binder Error: No function matches the given name and argument types '/(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
+
+### 20 [datetime-timespan]
+KQL: datatable(t:datetime)[ datetime(0100-02-28), datetime(0200-02-28), datetime(0400-02-29), datetime(1900-02-28), datetime(2000-02-29) ] | extend eom = endofmonth(t), dom = dayofmonth(endofmonth(t)), dow = dayofweek(t) / 1d
+ERR: Binder Error: No function matches the given name and argument types '/(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
+
+### 21 [datetime-timespan]
+KQL: datatable(a:datetime, b:datetime)[ datetime(2020-01-01 00:00:01.9999999),datetime(2020-01-01 00:00:00.0000001), datetime(2020-03-01 00:00:00),datetime(2020-02-29 23:59:59.9999999) ] | extend ds = datetime_diff('second', a, b), dms = datetime_diff('millisecond', a, b), span = a - b, spanticks = (a - b) / 1tick
+ERR: Binder Error: No function matches the given name and argument types '/(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
+
+### 22 [datetime-timespan]
+KQL: datatable(t:datetime, s:timespan)[ datetime(2020-03-29 01:30:00),1h, datetime(2020-10-25 02:30:00),-1h, datetime(2024-02-29 23:00:00),2h ] | extend plus = t + s, minus = t - s, bin = bin(t, s), dow = dayofweek(t) / 1d
+ERR: Binder Error: No function matches the given name and argument types '/(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
+
+### 23 [datetime-timespan]
+KQL: range t from datetime(2020-12-28) to datetime(2021-01-04) step 1d | extend woy = week_of_year(t), iso_dow = dayofweek(t) / 1d, sow = startofweek(t), eow = endofweek(t), som = startofmonth(t)
+ERR: Binder Error: No function matches the given name and argument types '/(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
+
+### 24 [dynamic-json]
+KQL: print d = dynamic({"a":[{"b":[1,2]},{"b":[3,4,5]}]}) | mv-apply o = d.a on (mv-expand v = o.b to typeof(long) | summarize s = sum(v)) | summarize grand = sum(s)
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 25 [dynamic-json]
+KQL: print d = dynamic([1,2,3,4,5,6,7,8]) | extend parts = array_split(d, dynamic([2,5])) | extend p0 = parts[0], p1 = parts[1], p2 = parts[2], np = array_length(parts)
+ERR: Binder Error: The upper and lower bounds of the slice must be a BIGINT
+
+### 26 [dynamic-json]
+KQL: print d = dynamic({"vals":[1,2,3]}) | extend doubled = array_iff(dynamic([true,false,true]), d.vals, dynamic([0,0,0]))
+ERR: Binder Error: Parameter type needs to be List
+
+### 27 [dynamic-json]
+KQL: print d = dynamic([10,20,30]) | mv-expand with_itemindex=i x = d | extend cum = array_sum(array_slice(d, 0, i)) + toint(x) | project i, x = toint(x), cum
+ERR: Binder Error: Referenced column "i" not found in FROM clause!
+
+### 28 [dynamic-json]
+KQL: print d = dynamic([[1,2],[3,4],[5,6]]) | extend cols = array_concat(pack_array(d[0][0],d[1][0],d[2][0]), pack_array(d[0][1],d[1][1],d[2][1])) | extend colsum = array_sum(cols)
+ERR: Binder Error: No matching aggregate function
+
+### 29 [dynamic-json]
+KQL: print d = dynamic({"a":1,"b":2,"c":3,"d":4,"e":5}) | extend ks = array_sort_desc(bag_keys(d)) | mv-expand k = ks to typeof(string) | extend v = toint(d[k]) | summarize vals = make_list(v), keys = make_list(k)
+ERR: Binder Error: No function matches the given name and argument types '+(VARCHAR, INTEGER_LITERAL)'. You might need to add explicit type casts.
+
+### 30 [dynamic-json]
+KQL: print d = dynamic({"a":[1,2,3],"b":[4,5,6]}) | extend zipped = zip(d.a, d.b) | mv-expand z = zipped | project lhs = toint(z[0]), rhs = toint(z[1]), prod = toint(z[0]) * toint(z[1])
+ERR: Binder Error: Parameter type needs to be List
+
+### 31 [dynamic-json]
+KQL: datatable(d:dynamic)[ dynamic({"type":"A","v":1}), dynamic({"type":"B","v":2}), dynamic({"type":"A","v":3}) ] | evaluate bag_unpack(d) | summarize sum(v) by type | sort by type asc
+ERR: Binder Error: No function matches the given name and argument types 'sum(VARCHAR)'. You might need to add explicit type casts.
+
+### 32 [dynamic-json]
+KQL: print d = dynamic({"matrix":[[1,2,3],[4,5,6]]}) | mv-apply row = d.matrix on (extend rs = array_sum(row)) | summarize total = sum(rs)
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 33 [dynamic-json]
+KQL: print s = '[]' | extend e = parse_json(s) | extend al = array_length(e), s2 = array_sum(e), srt = array_sort_asc(e), keys = bag_keys(e)
+ERR: Binder Error: No function matches the given name and argument types 'list_aggr(JSON, STRING_LITERAL)'. You might need to add explicit type casts.
+
+### 34 [dynamic-json]
+KQL: print arr = dynamic([{"k":1},{"k":2},{"k":3}]) | mv-expand with_itemindex=i e = arr | extend tagged = bag_merge(e, pack("idx", i)) | project ki = toint(tagged.k), idx = toint(tagged.idx)
+ERR: Binder Error: Referenced column "i" not found in FROM clause!
+
+### 35 [dynamic-json]
+KQL: print d = dynamic({"groups":[{"g":"x","items":[1,2]},{"g":"y","items":[3,4,5]}]}) | mv-apply grp = d.groups on (extend gs = array_sum(grp.items), gn = tostring(grp.g)) | project gn, gs | sort by gn asc
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 36 [dynamic-json]
+KQL: print d = dynamic({"a":[1,2],"b":[3,4],"c":[5,6]}) | extend ks = bag_keys(d) | mv-expand k = ks to typeof(string) | extend arr = d[k], s = array_sum(d[k]) | summarize grand = sum(s), allkeys = make_list(k)
+ERR: Binder Error: No function matches the given name and argument types '+(VARCHAR, INTEGER_LITERAL)'. You might need to add explicit type casts.
+
+### 37 [joins-lookup-union]
+KQL: let L = datatable(k:guid, lv:string)[ guid(11111111-1111-1111-1111-111111111111),"a", guid(22222222-2222-2222-2222-222222222222),"b" ]; let R = datatable(k:guid, rv:string)[ guid(11111111-1111-1111-1111-111111111111),"x" ]; L | join kind=leftouter R on k | order by lv asc
+ERR: Catalog Error: Scalar Function with name guid does not exist!
+
+### 38 [nested-pipelines-let-cte]
+KQL: let a = datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ]; let b = a | summarize count() by k; let c = b | extend Column1 = count_; let d = c | summarize count_ = sum(count_), Column1 = sum(Column1) by k; d | join kind=inner (b) on k | project k, count_, Column1, count_1 | sort by k asc
+ERR: Binder Error: Referenced column "count_1" not found in FROM clause!
+
+### 39 [nested-pipelines-let-cte]
+KQL: datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | summarize count() by k | as Stage1 | extend count_ = count_ + 100 | join kind=inner (Stage1) on k | project k, count_, count_1 | sort by k asc
+ERR: Binder Error: Referenced column "count_1" not found in FROM clause!
+
+### 40 [nested-pipelines-let-cte]
+KQL: let d = datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic({"a":2,"b":[4,5]}), dynamic({"a":3,"b":[6]}) ]; let e = d | extend a = toint(d.a), arr = d.b; let f = e | mv-expand x = arr to typeof(long); f | summarize s = sum(x), cnt = count() by a | sort by a asc
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 41 [nested-pipelines-let-cte]
+KQL: datatable(i:int)[ 1, 2, 3, 4, 5, 6 ] | extend grp = i % 2 | partition by grp (summarize s = sum(i) | extend tag = "p") | sort by s asc
+ERR: Binder Error: Referenced column "s" not found in FROM clause!
+
+### 42 [nested-pipelines-let-cte]
+KQL: let d = datatable(d:dynamic)[ dynamic({"k":1,"vals":[10,20]}), dynamic({"k":2,"vals":[30]}) ]; let e = d | extend k = tolong(d.k), vals = d.vals; let f = e | mv-expand v = vals to typeof(long); let g = f | summarize total = sum(v), lst = make_list(v) by k; g | extend back = array_length(lst) | project k, total, back | sort by k asc
+ERR: Binder Error: UNNEST requires a single list as input
+
+### 43 [nested-pipelines-let-cte]
+KQL: let m1 = materialize(range x from 1 to 4 step 1 | extend y = x * x); let m2 = materialize(m1 | where y > 2 | extend z = y + 1); m1 | join kind=inner (m2) on x | project x, y, y1, z | sort by x asc
+ERR: Binder Error: Referenced column "y1" not found in FROM clause!
+
+### 44 [nested-pipelines-let-cte]
+KQL: print outer = 1 | extend inner = toscalar(datatable(n:long)[ 10, 20, 30 ] | summarize sum(n)) | extend ratio = inner / outer | extend both = outer + inner | project outer, inner, ratio, both
+ERR: Parser Error: syntax error at or near "both"
+
+### 45 [window-series-scan]
+KQL: datatable(t:datetime, v:long)[ datetime(2021-01-01),10, datetime(2021-01-02),20, datetime(2021-01-03),30, datetime(2021-01-04),40 ] | make-series s = sum(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-05) step 1d | extend d = series_subtract(s, series_fill_const(s, 5)), m = series_multiply(s, s)
+ERR: Catalog Error: Scalar Function with name series_fill_const does not exist!
+
+### 46 [window-series-scan]
+KQL: datatable(t:long, v:long)[ 1,10, 2,20, 3,30 ] | make-series s = sum(v) default = 0 on t from 1 to 10 step 3 | extend gt15 = array_iff(series_greater(s, 15), s, -1)
+ERR: Binder Error: Parameter type needs to be List
+
+### 47 [window-series-scan]
+KQL: datatable(t:long, v:long)[ 2,20, 4,40, 6,60 ] | make-series s = sum(v) default = -7 on t from 1 to 8 step 1 | mv-expand idx = range(0, array_length(s)-1, 1) to typeof(long), s to typeof(long) | sort by idx asc
+ERR: INTERNAL Error: Failed to cast expression to type - expression type mismatch
+
+### 48 [dynamic-json]
+KQL: datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic([10,20,30]), dynamic({"nested":{"x":"y"}}), dynamic(null) ] | project v = array_sort_asc(d)
+ERR: Binder Error: No function matches the given name and argument types 'list_sort(JSON)'. You might need to add explicit type casts.
+
+### 49 [dynamic-json]
+KQL: datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic([10,20,30]), dynamic({"nested":{"x":"y"}}), dynamic(null) ] | project v = array_concat(d, dynamic([99]))
+ERR: Binder Error: No function matches the given name and argument types 'list_concat(JSON, INTEGER[])'. You might need to add explicit type casts.
+
+### 50 [dynamic-json]
+KQL: datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic([10,20,30]), dynamic({"nested":{"x":"y"}}), dynamic(null) ] | mv-expand d
+ERR: Binder Error: UNNEST requires a single list as input
+

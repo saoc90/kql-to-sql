@@ -55,12 +55,38 @@ internal class ExpressionSqlBuilder
     /// <summary>Returns true if the named column was previously marked as interval-typed.</summary>
     internal bool IsIntervalColumn(string name) => _intervalColumns.Contains(name);
     /// <summary>Clears interval column tracking — call once per top-level Convert() to avoid cross-query stale state.</summary>
-    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); }
+    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); _jsonColumns.Clear(); }
 
     private readonly HashSet<string> _integerColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as KQL-integer-typed (e.g. a summarize count()/dcount() result) so a
     /// downstream `col / N` uses KQL integer (truncating) division instead of DuckDB real division.</summary>
     internal void MarkIntegerColumn(string name) => _integerColumns.Add(name);
+
+    private readonly HashSet<string> _jsonColumns = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Records a column as JSON/dynamic-typed (datatable dynamic column, or an extend/project
+    /// assigning a JSON-producing expression) so a later bare reference is recognized as JSON — array
+    /// functions then coerce it to a LIST and mv-expand coerces it before UNNEST.</summary>
+    internal void MarkJsonColumn(string name) => _jsonColumns.Add(name);
+    /// <summary>Returns true if the named column was previously marked as JSON/dynamic-typed.</summary>
+    internal bool IsJsonColumn(string name) => _jsonColumns.Contains(name);
+
+    /// <summary>True when a converted SQL expression evaluates to a JSON value — a ::JSON / CAST(.. AS JSON)
+    /// cast or a JSON-producing builtin. Used by extend/project to tag the assigned column as JSON.</summary>
+    internal static bool LooksLikeJsonResult(string sql)
+    {
+        var t = sql.TrimEnd();
+        if (t.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase) ||
+            t.EndsWith(" AS JSON)", StringComparison.OrdinalIgnoreCase))
+            return true;
+        var s = t.TrimStart('(').TrimStart();
+        return s.StartsWith("json_extract(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("json_object(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("json_merge_patch(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("to_json(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("json_array(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("json_group_array(", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("json_quote(", StringComparison.OrdinalIgnoreCase);
+    }
 
     // Input column names for the current operator, used to expand `where *` predicates over all
     // columns. _starColumnOverride is the column substituted for '*' during a single expansion pass.
@@ -594,9 +620,17 @@ internal class ExpressionSqlBuilder
         // Strip SimpleNamedExpression wrappers from function arguments — ConvertExpression would
         // otherwise emit "X AS alias" *inside* the function call, which is invalid SQL.
         var args = fce.ArgumentList.Expressions
-            .Select(a => ConvertExpression(
-                a.Element is SimpleNamedExpression snArg ? snArg.Expression : a.Element,
-                leftAlias, rightAlias))
+            .Select(a =>
+            {
+                var node = a.Element is SimpleNamedExpression snArg ? snArg.Expression : a.Element;
+                var sql = ConvertExpression(node, leftAlias, rightAlias);
+                // A bare reference to a dynamic/JSON column (e.g. a datatable `dynamic` column) carries no
+                // ::JSON marker, so the dialect's array helpers would treat it as a native LIST and emit
+                // list_sort(JSON)/UNNEST(JSON)-style errors. Make its JSON-ness explicit with a no-op cast.
+                if (node is NameReference nrArg && IsJsonColumn(nrArg.SimpleName))
+                    sql = $"CAST({sql} AS JSON)";
+                return sql;
+            })
             .ToArray();
 
         // sum/sumif on an interval column — rewrite to epoch-ms arithmetic so it type-checks in DuckDB.

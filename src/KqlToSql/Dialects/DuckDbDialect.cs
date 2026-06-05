@@ -590,6 +590,7 @@ public class DuckDbDialect : ISqlDialect
         var t = sql.TrimEnd();
         var s = t.TrimStart('(').TrimStart();
         return t.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase)
+            || t.EndsWith(" AS JSON)", StringComparison.OrdinalIgnoreCase)
             || s.StartsWith("json_extract(", StringComparison.OrdinalIgnoreCase)
             || s.StartsWith("JSON_EXTRACT(", StringComparison.OrdinalIgnoreCase)
             || s.StartsWith("json_object(", StringComparison.OrdinalIgnoreCase)

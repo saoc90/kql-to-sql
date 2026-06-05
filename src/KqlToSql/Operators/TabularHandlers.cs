@@ -104,6 +104,8 @@ internal class TabularHandlers : OperatorHandlerBase
                 var sql = Expr.ConvertExpression(sne.Expression);
                 if (LooksLikeIntervalResult(sne.Expression, sql) || Expr.IsIntervalExpression(sql))
                     Expr.MarkIntervalColumn(name);
+                if (Expressions.ExpressionSqlBuilder.LooksLikeJsonResult(sql))
+                    Expr.MarkJsonColumn(name);
                 return $"{sql} AS {Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(name)}";
             }
             var synthesized = SynthesizePathAlias(se.Element);
@@ -220,6 +222,9 @@ internal class TabularHandlers : OperatorHandlerBase
                 if (LooksLikeIntervalResult(sne.Expression, convertedSql) ||
                     Expr.IsIntervalExpression(convertedSql))
                     Expr.MarkIntervalColumn(name);
+                // Tag JSON/dynamic results so a later bare reference (mv-expand / array funcs) coerces.
+                if (Expressions.ExpressionSqlBuilder.LooksLikeJsonResult(convertedSql))
+                    Expr.MarkJsonColumn(name);
                 extras.Add(($"{convertedSql} AS {quotedName}", name));
             }
             else if (se.Element is CompoundNamedExpression cne)

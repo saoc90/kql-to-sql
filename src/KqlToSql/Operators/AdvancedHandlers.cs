@@ -568,7 +568,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var aliasedFrom = $"{fromSql} AS {sourceAlias}";
 
         var unnestAlias = "u";
-        var unnestSource = sourceSql == columnName ? $"{sourceAlias}.{columnName}" : sourceSql;
+        var bareRef = sourceSql == columnName;
+        var unnestSource = CoerceToUnnestable(
+            bareRef ? $"{sourceAlias}.{columnName}" : sourceSql,
+            forceJsonCoerce: bareRef && ColumnDefinedAsJson(leftSql, columnName));
         var unnestClause = $"CROSS JOIN UNNEST({unnestSource}) AS {unnestAlias}(value)";
 
         // KQL's mv-apply subquery operates on an implicit "virtual table" named after the element column.
@@ -844,6 +847,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
         // int32 would otherwise be inferred as INTEGER, breaking long arithmetic (overflow) and
         // getschema; pin it to BIGINT so the declared schema is honored.
         var colCastTypes = new List<string?>();
+        // Columns declared `dynamic` are rendered as a uniform JSON column (every cell CAST AS JSON),
+        // so a datatable mixing object and array values — dynamic({...}) and dynamic([...]) — produces
+        // ONE JSON-typed column instead of an irreconcilable (JSON, INTEGER[]) mix that breaks UNNEST.
+        var isDynamicCol = new List<bool>();
         foreach (var col in dt.Schema.Columns)
         {
             if (col.Element is NameAndTypeDeclaration nat)
@@ -856,17 +863,20 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 {
                     Expr.MarkIntervalColumn(cname);
                     colCastTypes.Add(null);
+                    isDynamicCol.Add(false);
                 }
                 // Propagate integer columns so '/' and '%' use KQL's truncating/Euclidean semantics.
                 else if (string.Equals(typeName, "long", StringComparison.OrdinalIgnoreCase))
                 {
                     Expr.MarkIntegerColumn(cname);
                     colCastTypes.Add("BIGINT");
+                    isDynamicCol.Add(false);
                 }
                 else if (string.Equals(typeName, "int", StringComparison.OrdinalIgnoreCase))
                 {
                     Expr.MarkIntegerColumn(cname);
                     colCastTypes.Add(null);
+                    isDynamicCol.Add(false);
                 }
                 // KQL real == double. DuckDB infers decimal-looking literals (1.5) as DECIMAL, which
                 // diverges in getschema (decimal vs real) and in division precision; pin to DOUBLE.
@@ -874,10 +884,19 @@ internal class AdvancedHandlers : OperatorHandlerBase
                       || string.Equals(typeName, "double", StringComparison.OrdinalIgnoreCase))
                 {
                     colCastTypes.Add("DOUBLE");
+                    isDynamicCol.Add(false);
+                }
+                // dynamic columns become a single uniform JSON column (see isDynamicCol comment above).
+                else if (string.Equals(typeName, "dynamic", StringComparison.OrdinalIgnoreCase))
+                {
+                    Expr.MarkJsonColumn(cname);
+                    colCastTypes.Add("JSON");
+                    isDynamicCol.Add(true);
                 }
                 else
                 {
                     colCastTypes.Add(null);
+                    isDynamicCol.Add(false);
                 }
             }
         }
@@ -921,6 +940,17 @@ internal class AdvancedHandlers : OperatorHandlerBase
             return $"SELECT {cols} WHERE 1 = 0";
         }
 
+        // When a dynamic (JSON) column is present, project it explicitly as `CAST(col AS JSON) AS col`
+        // so the JSON type is visible to downstream JSON-detection (mv-expand's CoerceToUnnestable,
+        // array functions) — `SELECT *` would hide the column's JSON-ness behind a bare reference.
+        bool IsDyn(int j) => j < isDynamicCol.Count && isDynamicCol[j];
+        if (isDynamicCol.Any(d => d))
+        {
+            var proj = string.Join(", ", columnNames.Select((n, j) =>
+                IsDyn(j) ? $"CAST({n} AS JSON) AS {n}" : n));
+            return $"SELECT {proj} FROM (VALUES {string.Join(", ", rows)}) AS t({string.Join(", ", columnNames)})";
+        }
+
         return $"SELECT * FROM (VALUES {string.Join(", ", rows)}) AS t({string.Join(", ", columnNames)})";
     }
 
@@ -944,47 +974,101 @@ internal class AdvancedHandlers : OperatorHandlerBase
             // it's JSON, not a native LIST, so it must be coerced before UNNEST.
             trimmed.StartsWith("json_extract(", StringComparison.OrdinalIgnoreCase))
         {
-            return $"CASE WHEN json_type({source}) = 'ARRAY' THEN CAST({source} AS JSON[]) " +
-                   $"ELSE list_transform(json_keys({source}), lambda k: json_extract({source}, '$.' || k)) END";
+            // Kusto mv-expand of a dynamic value:
+            //   array      → one row per element
+            //   empty []   → zero rows
+            //   object bag → one row per top-level property, each a single-key bag {"k":v}
+            //   null       → one row holding null
+            //   scalar     → one row holding the scalar
+            // Every branch yields JSON[] so the UNNEST column type is uniform.
+            return $"CASE " +
+                   $"WHEN {source} IS NULL THEN CAST([NULL] AS JSON[]) " +
+                   $"WHEN json_type({source}) = 'ARRAY' THEN CAST({source} AS JSON[]) " +
+                   $"WHEN json_type({source}) = 'OBJECT' THEN list_transform(json_keys({source}), " +
+                       $"lambda k: json_object(k, json_extract({source}, '$.\"' || k || '\"'))) " +
+                   $"ELSE CAST([{source}] AS JSON[]) END";
         }
         return source;
     }
 
-    // Detects whether `columnName` is defined as a JSON-typed expression in the upstream SQL
-    // (e.g. `CAST(Value AS JSON) AS arr` emitted by todynamic()/parse_json()). mv-expand of such a
-    // bare column reference yields a JSON value that DuckDB's UNNEST rejects until coerced to a list.
+    // JSON-producing SQL builtins: when a column is `extend`ed/projected from one of these (or a
+    // ::JSON / CAST(.. AS JSON) cast), the column is JSON-typed, so mv-expand must coerce it to a
+    // list before UNNEST. (todynamic/parse_json → CAST AS JSON; d.field → json_extract; array funcs
+    // over dynamic → TO_JSON(...); bag ops → json_object/json_merge_patch.)
+    private static readonly string[] JsonProducerPrefixes =
+    {
+        "json_extract(", "json_object(", "json_merge_patch(", "to_json(", "json_array(",
+        "json_group_array(", "json_quote(", "json_group_object(",
+    };
+
+    // Detects whether `columnName` is defined as a JSON-typed expression in the upstream SQL. Finds the
+    // column's `AS <name>` alias, walks backward (paren-aware) to the start of its defining expression,
+    // then classifies that expression as JSON or not.
     private static bool ColumnDefinedAsJson(string leftSql, string columnName)
     {
-        // Match the JSON producer immediately followed by the column alias, optionally quoted:
-        //   ... AS JSON) AS arr      |   ... AS JSON) AS "order"
-        //   ... ::JSON AS arr        |   ... ::JSON AS "order"
-        foreach (var marker in new[] { " AS JSON)", "::JSON" })
+        foreach (var (start, end) in FindAliasDefinitions(leftSql, columnName))
         {
-            int idx = 0;
-            while ((idx = leftSql.IndexOf(marker, idx, StringComparison.OrdinalIgnoreCase)) >= 0)
-            {
-                var after = leftSql.AsSpan(idx + marker.Length);
-                int p = 0;
-                while (p < after.Length && after[p] == ' ') p++;
-                if (after.Slice(p).StartsWith("AS ", StringComparison.OrdinalIgnoreCase))
-                {
-                    p += 3;
-                    while (p < after.Length && after[p] == ' ') p++;
-                    var alias = after.Slice(p);
-                    if (alias.Length > 0 && alias[0] == '"')
-                        alias = alias.Slice(1);
-                    if (alias.StartsWith(columnName, StringComparison.Ordinal))
-                    {
-                        // Ensure full-token match: next char must be a delimiter (quote, space, comma, paren) or end.
-                        char next = alias.Length > columnName.Length ? alias[columnName.Length] : ' ';
-                        if (next is '"' or ' ' or ',' or ')' or '\0')
-                            return true;
-                    }
-                }
-                idx += marker.Length;
-            }
+            var expr = leftSql.Substring(start, end - start).Trim();
+            if (expr.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase) ||
+                expr.EndsWith(" AS JSON)", StringComparison.OrdinalIgnoreCase))
+                return true;
+            var lower = expr.TrimStart('(').TrimStart();
+            foreach (var p in JsonProducerPrefixes)
+                if (lower.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                    return true;
         }
         return false;
+    }
+
+    // Yields (start,end) substring ranges of the defining expression for each `AS columnName` alias
+    // in the SQL (the text between the previous top-level boundary — comma or SELECT — and the `AS`).
+    private static IEnumerable<(int start, int end)> FindAliasDefinitions(string sql, string columnName)
+    {
+        int search = 0;
+        while (true)
+        {
+            int asIdx = IndexOfAlias(sql, columnName, search);
+            if (asIdx < 0) yield break;
+            search = asIdx + 1;
+
+            // Walk backward from just before " AS" to the start of the defining expression.
+            int i = asIdx - 1;
+            while (i >= 0 && sql[i] == ' ') i--;
+            int exprEnd = i + 1;
+            int depth = 0;
+            for (; i >= 0; i--)
+            {
+                char c = sql[i];
+                if (c == ')') depth++;
+                else if (c == '(')
+                {
+                    if (depth == 0) break;   // start of enclosing SELECT/paren
+                    depth--;
+                }
+                else if (c == ',' && depth == 0) break;  // previous column boundary
+            }
+            int exprStart = i + 1;
+            // Skip a leading "SELECT " / "SELECT * EXCLUDE(..)," is already handled by the comma break.
+            yield return (exprStart, exprEnd);
+        }
+    }
+
+    // Finds the index of " AS <columnName>" (optionally quoted), as a whole token, from `from`.
+    private static int IndexOfAlias(string sql, string columnName, int from)
+    {
+        foreach (var form in new[] { $" AS {columnName}", $" AS \"{columnName}\"" })
+        {
+            int idx = sql.IndexOf(form, from, StringComparison.Ordinal);
+            while (idx >= 0)
+            {
+                int afterPos = idx + form.Length;
+                char next = afterPos < sql.Length ? sql[afterPos] : '\0';
+                if (next is ' ' or ',' or ')' or '\0' or '\n')
+                    return idx;
+                idx = sql.IndexOf(form, idx + 1, StringComparison.Ordinal);
+            }
+        }
+        return -1;
     }
 
     private static string? TryGetInnerIdentifier(SyntaxNode node)
