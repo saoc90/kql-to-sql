@@ -81,6 +81,22 @@ public class GeneratedRegressionTests
         { "make_timespan-4", "print a = make_timespan(1,2,3,4)" },
         { "make_list-drops-nulls", "datatable(x:int)[ int(null), 1, 2, int(null), 3 ] | summarize lst=make_list(x)" },
         { "make_list-by-group", "datatable(g:string,v:long)[ \"a\",1,\"a\",2,\"b\",3 ] | summarize l=make_list(v) by g | sort by g asc" },
+
+        // --- triage follow-up fixes (themes A/G/B/D/C) ---
+        // Theme A: verbatim @"..." regex + escape decoding in string literals.
+        { "verbatim-regex-match", "datatable(s:string)[ \"2020-01-02\",\"nope\" ] | where s matches regex @\"^\\d{4}-\\d{2}-\\d{2}$\"" },
+        { "string-escape-strlen", "datatable(s:string)[ \"a\\tb\" ] | project n = strlen(s)" },
+        // Theme G: order by asc with an explicit nulls clause is no longer inverted to DESC.
+        { "order-asc-nulls-first", "datatable(i:int)[ 3, int(null), 1, 2 ] | sort by i asc nulls first" },
+        // Theme B: tostring of dynamic unquotes; tostring(null) -> ''; tostring(bool) -> 'True'/'False'.
+        { "tostring-dynamic-unquote", "print v = tostring(dynamic({\"a\":\"red\"}).a)" },
+        { "tostring-null-empty", "print n = tostring(dynamic(null)), e = isempty(tostring(dynamic(null)))" },
+        { "tostring-bool-capitalized", "print b = tostring(true), f = tostring(false)" },
+        // Theme D: extend redefining a column from a referenced CTE excludes the shadowed copy.
+        { "extend-redefine-via-cte", "let a=datatable(k:long,v:long)[1,10,2,20]; let b=a|summarize count() by k; let c=b|extend count_=count_*2; c | project k, count_ | sort by k asc" },
+        // Theme C: prev offset+default; row_number start index.
+        { "prev-offset-default", "datatable(t:long,v:long)[1,10,2,20,3,30] | sort by t asc | serialize p = prev(v, 1, -1)" },
+        { "row_number-start", "datatable(t:long)[1,2,3] | sort by t asc | serialize rn = row_number(5)" },
     };
 
     [SkippableTheory]
@@ -143,6 +159,10 @@ public class GeneratedRegressionTests
         { "extract_all-capturegroups", "datatable(s:string)[ \"2020-01-02\" ] | project parts = extract_all(@\"(\\d)(\\d)\", dynamic([1,2]), s)" },
         // extend redefining a column shadowed by an intermediate summarize must not over-EXCLUDE.
         { "extend-redefine-after-summarize", "datatable(k:long, v:long)[ 1,10, 2,20 ] | extend v = v + 1 | summarize sum_v = sum(v) by k | extend v = sum_v | summarize sum(v) by k | project k, sum_v1 = sum_v" },
+        // row_cumsum with a restart predicate (reset-group hoist) executes; value-correct, order tolerant.
+        { "row_cumsum-restart", "datatable(g:string,v:long)[ \"a\",5, \"a\",3, \"b\",8, \"b\",1, \"b\",2 ] | sort by g asc, v desc | serialize cs = row_cumsum(v, g != prev(g))" },
+        // gettype of JSON scalars classifies via json_type (residual parse_json scalar value diff tolerated).
+        { "gettype-json-scalars", "print a = gettype(parse_json(\"123\")), b = gettype(parse_json('\"hi\"'))" },
     };
 
     [SkippableTheory]

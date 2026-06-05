@@ -1,0 +1,11 @@
+{"Id":"a-verbatim-regex","Tier":2,"Family":"reg","Kql":"datatable(s:string)[ \"2020-01-02\",\"nope\" ] | where s matches regex @\"^\\d{4}-\\d{2}-\\d{2}$\""}
+{"Id":"a-escape-strlen","Tier":2,"Family":"reg","Kql":"datatable(s:string)[ \"a\\tb\" ] | project n = strlen(s)"}
+{"Id":"g-asc-nulls-first","Tier":2,"Family":"reg","Kql":"datatable(i:int)[ 3, int(null), 1, 2 ] | sort by i asc nulls first"}
+{"Id":"b-tostring-json","Tier":2,"Family":"reg","Kql":"print v = tostring(dynamic({\"a\":\"red\"}).a)"}
+{"Id":"b-tostring-null","Tier":2,"Family":"reg","Kql":"print n = tostring(dynamic(null)), e = isempty(tostring(dynamic(null)))"}
+{"Id":"b-tostring-bool","Tier":2,"Family":"reg","Kql":"print b = tostring(true), f = tostring(false)"}
+{"Id":"b-gettype-scalar","Tier":2,"Family":"reg","Kql":"print a = gettype(parse_json(\"123\")), b = gettype(parse_json('\"hi\"')), c = gettype(parse_json(\"1.5\"))"}
+{"Id":"d-cte-redefine","Tier":2,"Family":"reg","Kql":"let a=datatable(k:long,v:long)[1,10,2,20]; let b=a|summarize count() by k; let c=b|extend count_=count_*2; c | project k, count_ | sort by k asc"}
+{"Id":"c-prev-default","Tier":2,"Family":"reg","Kql":"datatable(t:long,v:long)[1,10,2,20,3,30] | sort by t asc | serialize p = prev(v, 1, -1)"}
+{"Id":"c-rownumber-start","Tier":2,"Family":"reg","Kql":"datatable(t:long)[1,2,3] | sort by t asc | serialize rn = row_number(5)"}
+{"Id":"c-rowcumsum-restart","Tier":2,"Family":"reg","Kql":"datatable(g:string,v:long)[ \"a\",5, \"a\",3, \"b\",8, \"b\",1, \"b\",2 ] | sort by g asc, v desc | serialize cs = row_cumsum(v, g != prev(g))"}

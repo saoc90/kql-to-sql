@@ -913,8 +913,9 @@ public class DuckDbDialect : ISqlDialect
         return
             $"CASE " +
             $"WHEN {t} IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' " +
-            $"WHEN {t} LIKE 'DECIMAL%' THEN 'decimal' " +
-            $"WHEN {t} IN ('FLOAT','DOUBLE','REAL') THEN 'real' " +
+            // KQL real literals (1.5) surface as DuckDB DECIMAL, and KQL gettype(1.5) is 'real', so map
+            // DECIMAL -> 'real' too. (gettype(todecimal(x)) therefore also reports 'real' — accepted.)
+            $"WHEN {t} IN ('FLOAT','DOUBLE','REAL') OR {t} LIKE 'DECIMAL%' THEN 'real' " +
             $"WHEN {t} = 'VARCHAR' THEN 'string' " +
             $"WHEN {t} = 'BOOLEAN' THEN 'bool' " +
             $"WHEN {t} IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' " +
