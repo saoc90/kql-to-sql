@@ -85,7 +85,7 @@ internal sealed class OperatorDispatcher
             PartitionOperator partition => ApplyPartition(leftSql, partition),
 
             // | as Name — register the pipeline output as a CTE so later references to Name work.
-            AsOperator asOp => RegisterAsCte(leftSql, asOp),
+            AsOperator asOp => RegisterAsCte(leftSql, asOp, leftExpression),
             ConsumeOperator => leftSql,
             RenderOperator => leftSql,
 
@@ -93,7 +93,7 @@ internal sealed class OperatorDispatcher
         };
     }
 
-    private string RegisterAsCte(string leftSql, AsOperator asOp)
+    private string RegisterAsCte(string leftSql, AsOperator asOp, Expression? leftExpression = null)
     {
         var nameNode = asOp.GetDescendants<Kusto.Language.Syntax.NameDeclaration>().FirstOrDefault();
         var name = nameNode?.Name?.SimpleName;
@@ -112,6 +112,8 @@ internal sealed class OperatorDispatcher
                 leftSql = RewriteTableReferences(leftSql, name, versioned);
             }
             _converter.AddCte(name, leftSql, materialized: false);
+            // Record the AST so a later `join (Name)` can enumerate Name's columns for duplicate suffixing.
+            if (leftExpression != null) _converter.AddCteExpression(name, leftExpression);
         }
         return leftSql;
     }

@@ -516,6 +516,13 @@ internal class ExpressionSqlBuilder
         "limit", "offset", "with", "into", "values", "inner", "outer", "left", "right",
         "full", "cross", "natural", "using", "window", "over", "partition",
         "table",
+        // Additional DuckDB-reserved keywords that can legitimately appear as KQL column names and
+        // must be quoted to parse as identifiers (e.g. `extend both = ...`, TRIM's BOTH/LEADING/TRAILING).
+        "both", "leading", "trailing", "for", "to", "default", "lateral", "check", "collate",
+        "column", "constraint", "create", "do", "fetch", "except", "intersect", "unique",
+        "placing", "returning", "symmetric", "asymmetric", "variadic", "only", "array",
+        "qualify", "pivot", "unpivot", "localtime", "localtimestamp", "user",
+        "current_date", "current_time", "current_timestamp", "current_user", "current_role",
     };
 
     internal static string QuoteIdentifierIfReserved(string name)
@@ -1196,6 +1203,16 @@ internal class ExpressionSqlBuilder
 
     private string ConvertNumericOrOtherLiteral(LiteralExpression lit)
     {
+        // guid(xxxxxxxx-....) literal → a UUID cast (DuckDB has no `guid()` function).
+        var litText = lit.ToString().Trim();
+        if (litText.StartsWith("guid(", StringComparison.OrdinalIgnoreCase) && litText.EndsWith(")"))
+        {
+            var inner = litText.Substring(5, litText.Length - 6).Trim().Trim('"', '\'');
+            return inner.Length == 0 || inner.Equals("null", StringComparison.OrdinalIgnoreCase)
+                ? "CAST(NULL AS UUID)"
+                : $"CAST('{inner}' AS UUID)";
+        }
+
         // KQL typed numeric/bool literals — int(N), long(N), double(N), bool(X) — parse as a LiteralExpression
         // whose text looks like "int(0)" or "long(null)". The LiteralValue holds the parsed value (null for (null)).
         //
@@ -1969,6 +1986,12 @@ internal class ExpressionSqlBuilder
         var part = fce.ArgumentList.Expressions[0].Element.ToString().Trim().Trim('\'', '"').ToLowerInvariant();
         var dt1 = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
         var dt2 = ConvertExpression(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
+        // DuckDB DATE_DIFF resolves to microsecond at finest; KQL also supports nanosecond/tick.
+        // Derive them from the microsecond diff (sub-microsecond precision is below DuckDB's resolution).
+        if (part == "nanosecond")
+            return $"(DATE_DIFF('microsecond', {dt2}, {dt1}) * 1000)";
+        if (part == "tick")
+            return $"(DATE_DIFF('microsecond', {dt2}, {dt1}) * 10)";
         return $"DATE_DIFF('{part}', {dt2}, {dt1})";
     }
 

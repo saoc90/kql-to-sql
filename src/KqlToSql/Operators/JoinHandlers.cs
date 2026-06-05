@@ -426,6 +426,48 @@ internal class JoinHandlers : OperatorHandlerBase
         return string.Join(", ", parts);
     }
 
+    /// <summary>Derives the KQL auto-name of a bare (unaliased) aggregate, for column enumeration.
+    /// Mirrors AggregationHandlers.DeriveAutoAlias for the AST-only cases. Returns null when the shape
+    /// can't be named statically (so the caller treats the schema as unknown).</summary>
+    private static string? AggAutoAlias(FunctionCallExpression fce)
+    {
+        var fn = fce.Name.SimpleName.ToLowerInvariant();
+        var argc = fce.ArgumentList.Expressions.Count;
+        string? inner = argc > 0 ? AggInnerIdentifier(fce.ArgumentList.Expressions[0].Element) : null;
+        switch (fn)
+        {
+            case "count": return "count_";
+            case "countif": return "countif_";
+            case "dcountif": return "dcountif_";
+            case "make_list" or "make_list_if" or "makelist" or "make_list_with_nulls":
+                return inner != null ? $"list_{inner}" : null;
+            case "make_set" or "make_set_if" or "makeset":
+                return inner != null ? $"set_{inner}" : null;
+            case "make_bag" or "make_bag_if":
+                return inner != null ? $"bag_{inner}" : null;
+            case "take_any" or "take_anyif":
+                return inner; // keeps the inner identifier
+            case "percentile" or "percentiles" when argc >= 2:
+                return inner != null ? $"percentile_{inner}_{fce.ArgumentList.Expressions[1].Element.ToString().Trim()}" : null;
+        }
+        if (inner != null) return $"{fn}_{inner}";
+        return $"{fn}_";
+    }
+
+    /// <summary>The inner identifier of an aggregate argument (drilling through conversion wrappers).</summary>
+    private static string? AggInnerIdentifier(SyntaxNode node)
+    {
+        SyntaxNode? cur = node;
+        while (cur is FunctionCallExpression f && f.ArgumentList.Expressions.Count == 1)
+            cur = f.ArgumentList.Expressions[0].Element;
+        return cur switch
+        {
+            NameReference nr => nr.SimpleName,
+            SimpleNamedExpression sne => sne.Name.SimpleName,
+            _ => null,
+        };
+    }
+
     /// <summary>The lowest <c>name{n}</c> (n≥1) not already in <paramref name="used"/> — KQL's
     /// duplicate-column suffixing across joins.</summary>
     private static string NextFreeSuffix(string name, HashSet<string> used)
@@ -712,6 +754,9 @@ internal class JoinHandlers : OperatorHandlerBase
             }
             case DataTableExpression dt:
                 return DataTableColumnNames(dt);
+            case RangeOperator rng:
+                // `range x from .. to .. step ..` produces a single column named after the variable.
+                return new List<string> { rng.Name.SimpleName };
             case NameReference nr:
             {
                 var name = nr.SimpleName;
@@ -832,6 +877,13 @@ internal class JoinHandlers : OperatorHandlerBase
                             else if (v is NameReference vNr) cols.Add(vNr.Name.SimpleName);
                             else return null; // e.g. arg_max(k, *) — can't enumerate wildcard
                         }
+                    }
+                    else if (agg.Element is FunctionCallExpression bareAgg)
+                    {
+                        // Bare aggregate (count(), sum(x), make_list(x), …) → Kusto auto-name (count_, sum_x, list_x).
+                        var alias = AggAutoAlias(bareAgg);
+                        if (alias == null) return null;
+                        cols.Add(alias);
                     }
                     else
                     {

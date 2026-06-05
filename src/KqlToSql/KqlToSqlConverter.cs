@@ -20,6 +20,10 @@ public class KqlToSqlConverter
     private readonly Dictionary<string, Expression> _cteExpressions = new();
     /// <summary>Adds or replaces a CTE. Exposed for operators that bind pipeline output to a name (e.g. `| as t1`).</summary>
     internal void AddCte(string name, string sql, bool materialized = false) => _ctes[name] = (sql, materialized);
+    /// <summary>Records the AST expression backing a CTE (e.g. an `as Name` result) so structural
+    /// column enumeration can inspect it for join-duplicate suffixing.</summary>
+    internal void AddCteExpression(string name, Expression expression) =>
+        _cteExpressions[name] = expression is MaterializeExpression me ? me.Expression : expression;
     /// <summary>Peeks a CTE by name.</summary>
     internal bool TryGetCte(string name, out (string sql, bool materialized) cte) => _ctes.TryGetValue(name, out cte);
     /// <summary>Peeks the KQL AST expression used to build a CTE (if known).</summary>

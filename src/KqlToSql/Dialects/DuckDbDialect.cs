@@ -202,6 +202,13 @@ public class DuckDbDialect : ISqlDialect
             "series_multiply" => $"LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN({args[0]}), LEN({args[1]}))), i -> {args[0]}[i] * {args[1]}[i])",
             "series_divide" => $"LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN({args[0]}), LEN({args[1]}))), i -> CASE WHEN {args[1]}[i] = 0 THEN 'nan'::DOUBLE ELSE ({args[0]}[i]::DOUBLE / {args[1]}[i]) END)",
 
+            // series_fill_const(series, constant[, missing_placeholder]) — replace missing elements
+            // (null by default, else the placeholder) with the constant.
+            "series_fill_const" when args.Length >= 3 =>
+                $"LIST_TRANSFORM({CoerceArr(args[0])}, x -> CASE WHEN x = {args[2]} OR x IS NULL THEN {args[1]} ELSE x END)",
+            "series_fill_const" =>
+                $"LIST_TRANSFORM({CoerceArr(args[0])}, x -> COALESCE(x, {args[1]}))",
+
             // Element-wise comparison against a scalar → list of booleans.
             "series_greater" => $"LIST_TRANSFORM({args[0]}, x -> x > {args[1]})",
             "series_less" => $"LIST_TRANSFORM({args[0]}, x -> x < {args[1]})",
