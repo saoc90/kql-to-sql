@@ -132,12 +132,14 @@ internal class ExpressionSqlBuilder
             // (_starColumnOverride == null) prevents infinite recursion during expansion.
             BinaryExpression starBin when starBin.Left is StarExpression && _starColumnOverride == null && _allColumns.Count > 0 =>
                 ExpandStarPredicate(starBin, leftAlias, rightAlias),
+            // Arithmetic: a dynamic operand arrives as a JSON value (json_extract/::JSON); coerce it to
+            // a number so DuckDB's numeric operators accept it (NumOperand is a no-op for non-JSON).
             BinaryExpression bin when bin.Kind == SyntaxKind.AddExpression =>
-                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} + {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+                $"{NumOperand(ConvertExpression(bin.Left, leftAlias, rightAlias))} + {NumOperand(ConvertExpression(bin.Right, leftAlias, rightAlias))}",
             BinaryExpression bin when bin.Kind == SyntaxKind.SubtractExpression =>
-                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} - {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+                $"{NumOperand(ConvertExpression(bin.Left, leftAlias, rightAlias))} - {NumOperand(ConvertExpression(bin.Right, leftAlias, rightAlias))}",
             BinaryExpression bin when bin.Kind == SyntaxKind.MultiplyExpression =>
-                $"{ConvertExpression(bin.Left, leftAlias, rightAlias)} * {ConvertExpression(bin.Right, leftAlias, rightAlias)}",
+                $"{NumOperand(ConvertExpression(bin.Left, leftAlias, rightAlias))} * {NumOperand(ConvertExpression(bin.Right, leftAlias, rightAlias))}",
             BinaryExpression bin when bin.Kind == SyntaxKind.DivideExpression =>
                 ConvertDivide(bin, leftAlias, rightAlias),
             BinaryExpression bin when bin.Kind == SyntaxKind.ModuloExpression =>
@@ -1482,7 +1484,8 @@ internal class ExpressionSqlBuilder
         if (!_dialect.NativeIntegerDivision && IsIntegerKqlExpr(bin.Left) && IsIntegerKqlExpr(bin.Right))
             return $"CAST(TRUNC(CAST({left} AS DOUBLE) / NULLIF({right}, 0)) AS BIGINT)";
 
-        return $"{left} / {right}";
+        // A dynamic (JSON) numerator/denominator must be coerced to a number (no-op otherwise).
+        return $"{NumOperand(left)} / {NumOperand(right)}";
     }
 
     /// <summary>
@@ -1524,12 +1527,29 @@ internal class ExpressionSqlBuilder
     /// </summary>
     private string ConvertModulo(BinaryExpression bin, string? leftAlias, string? rightAlias)
     {
-        var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
-        var right = ConvertExpression(bin.Right, leftAlias, rightAlias);
+        var left = NumOperand(ConvertExpression(bin.Left, leftAlias, rightAlias));
+        var right = NumOperand(ConvertExpression(bin.Right, leftAlias, rightAlias));
+        // interval % interval -> epoch-seconds remainder (DuckDB rejects INTERVAL % INTERVAL).
+        if (IsIntervalSql(left) && IsIntervalSql(right))
+            return $"(EXTRACT(EPOCH FROM ({left})) % NULLIF(EXTRACT(EPOCH FROM ({right})), 0))";
         if (IsIntegerKqlExpr(bin.Left) && IsIntegerKqlExpr(bin.Right))
             return $"((({left}) % NULLIF({right}, 0)) + ABS({right})) % NULLIF({right}, 0)";
         return $"{left} % {right}";
     }
+
+    /// <summary>Coerce a dynamic (JSON) operand to a number for arithmetic; no-op for non-JSON SQL.</summary>
+    private static string NumOperand(string sql)
+    {
+        var t = sql.TrimEnd();
+        var s = t.TrimStart('(').TrimStart();
+        if (t.EndsWith("::JSON", StringComparison.OrdinalIgnoreCase) ||
+            s.StartsWith("json_extract(", StringComparison.OrdinalIgnoreCase))
+            return $"CAST({sql} AS DOUBLE)";
+        return sql;
+    }
+
+    private static bool IsIntervalSql(string sql) =>
+        sql.Contains("INTERVAL", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>True when an expression is statically a KQL integer (long/int): integer literals,
     /// integer-returning functions (count/countif/dcount/dcountif/toint/tolong/binary_*), or arithmetic

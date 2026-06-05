@@ -289,6 +289,19 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
                 return new[] { $"((SUM({ms}) FILTER (WHERE {args[1]})) * INTERVAL '1 millisecond') AS {alias}" };
             }
 
+            // A dynamic operand (JSON/text from mv-expand or property access) fed to a numeric aggregate
+            // must be coerced to a number, else DuckDB errors with sum(JSON)/sum(VARCHAR).
+            if (name is "sum" or "sumif" or "avg" or "avgif" or "stdev" or "stdevif"
+                or "stdevp" or "variance" or "varianceif" or "variancep")
+            {
+                static bool LooksDynamicText(string a) =>
+                    a.Contains("json_extract(", StringComparison.OrdinalIgnoreCase)
+                    || a.TrimEnd().EndsWith("::JSON", StringComparison.OrdinalIgnoreCase)
+                    || a.Contains("::VARCHAR", StringComparison.OrdinalIgnoreCase)
+                    || (a.StartsWith("trim(", StringComparison.OrdinalIgnoreCase) && a.Contains("json", StringComparison.OrdinalIgnoreCase));
+                args = args.Select(a => LooksDynamicText(a) ? $"TRY_CAST({a} AS DOUBLE)" : a).ToArray();
+            }
+
             var sqlFunc = Dialect.TryTranslateAggregate(name, args);
             if (sqlFunc != null)
             {

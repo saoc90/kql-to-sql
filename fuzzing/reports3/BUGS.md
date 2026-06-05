@@ -1,22 +1,22 @@
 # KQL→SQL Translator — Differential Fuzzing Findings
 
 Oracle: Kustainer (real Kusto). SUT: KqlToSqlConverter → DuckDB.
-Total verdicts: 1662. Bug candidates: 417.
+Total verdicts: 1662. Bug candidates: 406.
 
 ## Counts by outcome
 
 | Outcome | Count |
 |---|---|
-| Match | 1066 |
-| MismatchRows | 331 |
+| Match | 1077 |
+| MismatchRows | 337 |
 | KustoError | 127 |
-| SqlExecError | 72 |
+| SqlExecError | 57 |
 | SkippedNondeterministic | 31 |
 | SkippedEngineError | 21 |
-| MismatchOrder | 11 |
+| MismatchOrder | 9 |
 | MismatchColumns | 3 |
 
-## Family: aggregation (31)
+## Family: aggregation (30)
 
 ### `agent-aggregation-0013` — SqlExecError (highest)
 
@@ -304,7 +304,7 @@ SELECT g, STDDEV_SAMP(x) AS stdev_x, VAR_SAMP(x) AS variance_x, COALESCE(SUM(x),
 
 ### `agent-aggregation-0016` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(2007-02-14T00:00:00.0000000Z, 3) duck=(2007-02-16T00:00:00.0000000Z, 3)
+*Detail:* first differing row[0]: kusto=(2007-02-14T00:00:00.0000000Z, 3) duck=(2007-12-13T00:00:00.0000000Z, 7)
 
 **KQL**
 ```kql
@@ -320,8 +320,8 @@ SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/2592000000)*2592000000
     - (2007-02-14T00:00:00.0000000Z, 3)
     - (2007-12-11T00:00:00.0000000Z, 7)
 - DuckDB: cols=[t:DateTime, sum_v:Int] rows=2
-    - (2007-02-16T00:00:00.0000000Z, 3)
     - (2007-12-13T00:00:00.0000000Z, 7)
+    - (2007-02-16T00:00:00.0000000Z, 3)
 
 ### `agent-aggregation-0019` — MismatchRows (high)
 
@@ -706,31 +706,6 @@ SELECT MIN(d) AS mn, MAX(d) AS mx, COUNT(*) AS cnt, max(d) - min(d) AS span, COA
 - DuckDB: cols=[mn:DateTime, mx:DateTime, cnt:Int, span:TimeSpan, ml:Unknown] rows=1
     - (2020-01-01T00:00:00.0000000Z, 2020-01-10T00:00:00.0000000Z, 3, 9.00:00:00, ["2020-01-01T00:00:00","2020-01-05T00:00:00","2020-01-10T00:00:00"])
 
-### `agent-aggregation-0027` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1000, 700, 2, [
-  200,
-  400
-]) duck=(1000, 700, 2, [400,200])
-
-**KQL**
-```kql
-datatable(g:long, v:long)[ 1,100, 1,200, 2,300, 2,400 ] | summarize tot=sum(v), amx=arg_max(v, g) by g | summarize gtot=sum(tot), maxgrp=arg_max(tot, g), allamx=make_list(amx)
-```
-**Generated SQL**
-```sql
-SELECT COALESCE(SUM(tot), 0) AS gtot, MAX(tot) AS maxgrp, ARG_MAX(g, tot) AS g, COALESCE(LIST(amx) FILTER (WHERE amx IS NOT NULL), []) AS allamx FROM (SELECT g, COALESCE(SUM(v), 0) AS tot, MAX(v) AS amx, ARG_MAX(g, v) AS g FROM (VALUES (CAST(1 AS BIGINT), CAST(100 AS BIGINT)), (CAST(1 AS BIGINT), CAST(200 AS BIGINT)), (CAST(2 AS BIGINT), CAST(300 AS BIGINT)), (CAST(2 AS BIGINT), CAST(400 AS BIGINT))) AS t(g, v) GROUP BY ALL)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Dynamic] rows=1
-    - (1000, 700, 2, [
-  200,
-  400
-])
-- DuckDB: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Unknown] rows=1
-    - (1000, 700, 2, [400,200])
-
 ### `agent-aggregation-0029` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=([
@@ -740,7 +715,7 @@ SELECT COALESCE(SUM(tot), 0) AS gtot, MAX(tot) AS maxgrp, ARG_MAX(g, tot) AS g, 
   1,
   2,
   1
-], 6, 3) duck=([[1,2,3],[1],[1,2]], 6, 3)
+], 6, 3) duck=([[1,2],[1,2,3],[1]], 6, 3)
 
 **KQL**
 ```kql
@@ -762,7 +737,7 @@ SELECT COALESCE(LIST("inner") FILTER (WHERE "inner" IS NOT NULL), []) AS outer_l
   1
 ], 6, 3)
 - DuckDB: cols=[outer_lists:Unknown, totcnt:Int, grps:Int] rows=1
-    - ([[1,2,3],[1],[1,2]], 6, 3)
+    - ([[1,2],[1,2,3],[1]], 6, 3)
 
 ### `agent-aggregation-0032` — MismatchRows (high)
 
@@ -829,7 +804,7 @@ SELECT MAX(x) AS mx, MIN(x) AS mn, COALESCE(AVG(x), 'nan'::DOUBLE) AS av, COALES
 ], [
   1,
   2
-]) duck=([1,2,3,4,5,6], [3,6,5,2,1,4])
+]) duck=([1,2,3,4,5,6], [2,3,6,5,1,4])
 
 **KQL**
 ```kql
@@ -851,7 +826,7 @@ SELECT COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS a, COALESCE(LIST(DI
   2
 ])
 - DuckDB: cols=[a:Unknown, b:Unknown] rows=1
-    - ([1,2,3,4,5,6], [3,6,5,2,1,4])
+    - ([1,2,3,4,5,6], [2,3,6,5,1,4])
 
 ### `agent-aggregation-0038` — MismatchRows (high)
 
@@ -940,7 +915,7 @@ SELECT * FROM (SELECT g, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS m
     "g": 3,
     "c": 2
   }
-]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}"])
+]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:1,\u0022c\u0022:2}"])
 
 **KQL**
 ```kql
@@ -972,7 +947,7 @@ SELECT histogram(json_object(TRY_CAST(g AS TEXT), cnt)) AS bag, COALESCE(LIST(js
   }
 ])
 - DuckDB: cols=[bag:Unknown, histlist:Unknown] rows=1
-    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}"])
+    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:1,\u0022c\u0022:2}"])
 
 ## Family: datetime-timespan (42)
 
@@ -2438,7 +2413,7 @@ SELECT COALESCE(LIST(k) FILTER (WHERE k IS NOT NULL), []) AS list_k, COALESCE(LI
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
-- Kusto: cols=[list_k:Dynamic, list_d___obj_a10fadd8-a03b-4b11-8645-baf7bf069781:Dynamic] rows=1
+- Kusto: cols=[list_k:Dynamic, list_d___obj_a9db6734-6dbc-4f42-942b-07e8f08533a5:Dynamic] rows=1
     - ([
   "d",
   "c",
@@ -3507,7 +3482,7 @@ SELECT *, CASE WHEN TYPEOF(x) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEI
 
 ### `agent-dynamic-json-0028` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('red', 1) duck=('"green"', 1)
+*Detail:* first differing row[0]: kusto=('red', 1) duck=('"red"', 1)
 
 **KQL**
 ```kql
@@ -3524,9 +3499,9 @@ SELECT TRY_CAST(tag AS TEXT) AS tag, COUNT(*) AS cnt FROM (SELECT t.*, u.value A
     - ('green', 1)
     - ('blue', 1)
 - DuckDB: cols=[tag:String, cnt:Int] rows=3
+    - ('"red"', 1)
     - ('"green"', 1)
     - ('"blue"', 1)
-    - ('"red"', 1)
 
 ### `agent-dynamic-json-0029` — MismatchRows (high)
 
@@ -3718,6 +3693,7 @@ SELECT *, json_extract(d, '$.' || TRY_CAST(keys AS TEXT)) AS kv FROM (SELECT t.*
 
 ### `agent-dynamic-json-0001` — MismatchRows (high)
 
+*Sub-verdicts:* TYPE_MISMATCH[tot:Int|Real]  
 *Detail:* first differing row[0]: kusto=('a', 4) duck=('"a"', 4)
 
 **KQL**
@@ -3726,14 +3702,14 @@ datatable(d:dynamic)[ dynamic([{"k":"a","v":1},{"k":"b","v":2},{"k":"a","v":3}])
 ```
 **Generated SQL**
 ```sql
-SELECT * FROM (SELECT TRY_CAST(json_extract(item, '$.k') AS TEXT) AS g, COALESCE(SUM(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(item, '$.v') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(item, '$.v') AS BOOLEAN) AS DOUBLE))) AS INTEGER)), 0) AS tot FROM (SELECT t.*, u.value AS item FROM (SELECT * FROM (VALUES (LIST_VALUE('{"k":"a","v":1}'::JSON, '{"k":"b","v":2}'::JSON, '{"k":"a","v":3}'::JSON))) AS t(d)) AS t CROSS JOIN UNNEST(d) AS u(value)) GROUP BY ALL) ORDER BY g ASC NULLS FIRST
+SELECT * FROM (SELECT TRY_CAST(json_extract(item, '$.k') AS TEXT) AS g, COALESCE(SUM(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(item, '$.v') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(item, '$.v') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS DOUBLE)), 0) AS tot FROM (SELECT t.*, u.value AS item FROM (SELECT * FROM (VALUES (LIST_VALUE('{"k":"a","v":1}'::JSON, '{"k":"b","v":2}'::JSON, '{"k":"a","v":3}'::JSON))) AS t(d)) AS t CROSS JOIN UNNEST(d) AS u(value)) GROUP BY ALL) ORDER BY g ASC NULLS FIRST
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[g:String, tot:Int] rows=2
     - ('a', 4)
     - ('b', 2)
-- DuckDB: cols=[g:String, tot:Int] rows=2
+- DuckDB: cols=[g:String, tot:Real] rows=2
     - ('"a"', 4)
     - ('"b"', 2)
 
@@ -4501,6 +4477,7 @@ SELECT *, LIST_CONTAINS(a, 2) AS has2, LIST_CONTAINS(a, 9) AS has9, LIST_CONTAIN
 
 ### `agent-dynamic-json-0028` — MismatchRows (high)
 
+*Sub-verdicts:* TYPE_MISMATCH[total:Int|Real]  
 *Detail:* first differing row[0]: kusto=(7, [
   "a",
   "c"
@@ -4512,7 +4489,7 @@ print d = dynamic({"items":[{"name":"a","qty":2},{"name":"b","qty":0},{"name":"c
 ```
 **Generated SQL**
 ```sql
-SELECT COALESCE(SUM(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(it, '$.qty') AS BOOLEAN) AS DOUBLE))) AS INTEGER)), 0) AS total, COALESCE(LIST(DISTINCT TRY_CAST(json_extract(it, '$.name') AS TEXT)) FILTER (WHERE TRY_CAST(json_extract(it, '$.name') AS TEXT) IS NOT NULL), []) AS names FROM (SELECT * FROM (SELECT t.*, u.value AS it FROM (SELECT '{"items":[{"name":"a","qty":2},{"name":"b","qty":0},{"name":"c","qty":5}]}'::JSON AS d) AS t CROSS JOIN UNNEST(CASE WHEN json_type(json_extract(d, '$.items')) = 'ARRAY' THEN CAST(json_extract(d, '$.items') AS JSON[]) ELSE list_transform(json_keys(json_extract(d, '$.items')), lambda k: json_extract(json_extract(d, '$.items'), '$.' || k)) END) AS u(value)) WHERE TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(it, '$.qty') AS BOOLEAN) AS DOUBLE))) AS INTEGER) > 0)
+SELECT COALESCE(SUM(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(it, '$.qty') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS DOUBLE)), 0) AS total, COALESCE(LIST(DISTINCT TRY_CAST(json_extract(it, '$.name') AS TEXT)) FILTER (WHERE TRY_CAST(json_extract(it, '$.name') AS TEXT) IS NOT NULL), []) AS names FROM (SELECT * FROM (SELECT t.*, u.value AS it FROM (SELECT '{"items":[{"name":"a","qty":2},{"name":"b","qty":0},{"name":"c","qty":5}]}'::JSON AS d) AS t CROSS JOIN UNNEST(CASE WHEN json_type(json_extract(d, '$.items')) = 'ARRAY' THEN CAST(json_extract(d, '$.items') AS JSON[]) ELSE list_transform(json_keys(json_extract(d, '$.items')), lambda k: json_extract(json_extract(d, '$.items'), '$.' || k)) END) AS u(value)) WHERE TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(it, '$.qty') AS BOOLEAN) AS DOUBLE))) AS INTEGER) > 0)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -4521,7 +4498,7 @@ SELECT COALESCE(SUM(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') A
   "a",
   "c"
 ])
-- DuckDB: cols=[total:Int, names:Unknown] rows=1
+- DuckDB: cols=[total:Real, names:Unknown] rows=1
     - (7, ["\u0022c\u0022","\u0022a\u0022"])
 
 ### `agent-dynamic-json-0031` — MismatchRows (high)
@@ -4598,6 +4575,7 @@ SELECT (json_extract(d, '$.a') IS NULL) AS an, (json_extract(json_extract(d, '$.
 
 ### `agent-dynamic-json-0039` — MismatchRows (high)
 
+*Sub-verdicts:* TYPE_MISMATCH[evensum:Int|Real]  
 *Detail:* row count: kusto=1 duck=4
 
 **KQL**
@@ -4606,13 +4584,13 @@ print d = dynamic([{"v":1},{"v":2},{"v":3},{"v":4}]) | mv-apply e = d on (where 
 ```
 **Generated SQL**
 ```sql
-SELECT evensum FROM (SELECT t.*, _sub.* FROM (SELECT LIST_VALUE('{"v":1}'::JSON, '{"v":2}'::JSON, '{"v":3}'::JSON, '{"v":4}'::JSON) AS d) AS t CROSS JOIN UNNEST(d) AS u(value), LATERAL (SELECT COALESCE(SUM(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(e, '$.v') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(e, '$.v') AS BOOLEAN) AS DOUBLE))) AS INTEGER)), 0) AS evensum FROM (SELECT * FROM (SELECT u.value AS e) WHERE (((TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(e, '$.v') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(e, '$.v') AS BOOLEAN) AS DOUBLE))) AS INTEGER)) % NULLIF(2, 0)) + ABS(2)) % NULLIF(2, 0) = 0)) AS _sub)
+SELECT evensum FROM (SELECT t.*, _sub.* FROM (SELECT LIST_VALUE('{"v":1}'::JSON, '{"v":2}'::JSON, '{"v":3}'::JSON, '{"v":4}'::JSON) AS d) AS t CROSS JOIN UNNEST(d) AS u(value), LATERAL (SELECT COALESCE(SUM(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(e, '$.v') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(e, '$.v') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS DOUBLE)), 0) AS evensum FROM (SELECT * FROM (SELECT u.value AS e) WHERE (((TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(e, '$.v') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(e, '$.v') AS BOOLEAN) AS DOUBLE))) AS INTEGER)) % NULLIF(2, 0)) + ABS(2)) % NULLIF(2, 0) = 0)) AS _sub)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[evensum:Int] rows=1
     - (6)
-- DuckDB: cols=[evensum:Int] rows=4
+- DuckDB: cols=[evensum:Real] rows=4
     - (4)
     - (0)
     - (2)
@@ -4879,7 +4857,7 @@ WITH L AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS
     - (2, 200)
     - (3, 0)
 
-## Family: nested-pipelines-let-cte (34)
+## Family: nested-pipelines-let-cte (32)
 
 ### `agent-nested-pipelines-let-cte-0028` — SqlExecError (highest)
 
@@ -5560,29 +5538,6 @@ SELECT c, b, a, * EXCLUDE (c, b, a) FROM (SELECT *, a + c AS b FROM (SELECT a, b
     - (6, 5, 4, 10)
     - (9, 8, 7, 16)
 
-### `agent-nested-pipelines-let-cte-0022` — MismatchRows (high)
-
-*Detail:* first differing row[1]: kusto=(2, 'neg', 1, -5.5) duck=(2, 'zero', 1, 0)
-
-**KQL**
-```kql
-let nums = datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1, 7,100,3.25 ]; let s1 = nums | extend cat = case(i < 0, "neg", i == 0, "zero", "pos"); let s2 = s1 | summarize cnt = count(), avgr = avg(r) by cat; let s3 = s2 | sort by cnt desc; s3 | extend rn = row_number() | project rn, cat, cnt, avgr
-```
-**Generated SQL**
-```sql
-WITH nums AS NOT MATERIALIZED (SELECT * FROM (VALUES (-5, CAST(-5 AS BIGINT), CAST(-5.5 AS DOUBLE)), (0, CAST(0 AS BIGINT), CAST(0.0 AS DOUBLE)), (3, CAST(2147483648 AS BIGINT), CAST(0.1 AS DOUBLE)), (7, CAST(100 AS BIGINT), CAST(3.25 AS DOUBLE))) AS t(i, l, r)), s1 AS NOT MATERIALIZED (SELECT *, CASE WHEN i < 0 THEN 'neg' WHEN i = 0 THEN 'zero' ELSE 'pos' END AS cat FROM nums), s2 AS NOT MATERIALIZED (SELECT cat, COUNT(*) AS cnt, COALESCE(AVG(r), 'nan'::DOUBLE) AS avgr FROM s1 GROUP BY ALL), s3 AS NOT MATERIALIZED (SELECT * FROM s2 ORDER BY cnt DESC NULLS LAST) SELECT rn, cat, cnt, avgr FROM (SELECT *, ROW_NUMBER() OVER () AS rn FROM s3)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[rn:Int, cat:String, cnt:Int, avgr:Real] rows=3
-    - (1, 'pos', 2, 1.675)
-    - (2, 'neg', 1, -5.5)
-    - (3, 'zero', 1, 0)
-- DuckDB: cols=[rn:Int, cat:String, cnt:Int, avgr:Real] rows=3
-    - (1, 'pos', 2, 1.675)
-    - (2, 'zero', 1, 0)
-    - (3, 'neg', 1, -5.5)
-
 ### `agent-nested-pipelines-let-cte-0024` — MismatchRows (high)
 
 *Detail:* row count: kusto=2 duck=4
@@ -5675,27 +5630,6 @@ SELECT x, y, z FROM (SELECT *, x - y AS z FROM (SELECT * EXCLUDE (tmp) FROM (SEL
     - (3, 30, -27)
     - (2, 20, -18)
     - (1, 10, -9)
-
-### `agent-nested-pipelines-let-cte-0031` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(x:long, g:string)[ 1,"a", 2,"a", 3,"b" ] | summarize s = sum(x) by g | where s > 2 | extend label = strcat("g_", g) | project label, s | order by s asc
-```
-**Generated SQL**
-```sql
-SELECT label, s FROM (SELECT *, CONCAT('g_', g) AS label FROM (SELECT g, COALESCE(SUM(x), 0) AS s FROM (VALUES (CAST(1 AS BIGINT), 'a'), (CAST(2 AS BIGINT), 'a'), (CAST(3 AS BIGINT), 'b')) AS t(x, g) GROUP BY ALL) WHERE s > 2) ORDER BY s ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[label:String, s:Int] rows=2
-    - ('g_a', 3)
-    - ('g_b', 3)
-- DuckDB: cols=[label:String, s:Int] rows=2
-    - ('g_b', 3)
-    - ('g_a', 3)
 
 ## Family: null-and-edge (39)
 
@@ -6582,57 +6516,7 @@ SELECT x, d, m FROM (SELECT *, CAST(TRUNC(CAST(10 AS DOUBLE) / NULLIF(x, 0)) AS 
     - (-1, -10, 0)
     - (null, null, null)
 
-## Family: parse-search (15)
-
-### `agent-parse-search-0012` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Could not convert string 'error' to BOOL
-
-LINE 1: ... BIGINT)), ('info', CAST(3 AS BIGINT))) AS t(s, n) WHERE NOT ('error'))
-                                                                         ^
-
-**KQL**
-```kql
-datatable(s:string, n:long)[ "error",1, "warn",2, "info",3 ] | search not("error") | project s
-```
-**Generated SQL**
-```sql
-SELECT s FROM (SELECT 'search_arg0' AS "$table", * FROM (VALUES ('error', CAST(1 AS BIGINT)), ('warn', CAST(2 AS BIGINT)), ('info', CAST(3 AS BIGINT))) AS t(s, n) WHERE NOT ('error'))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String] rows=2
-    - ('warn')
-    - ('info')
-- DuckDB: ERROR — Conversion Error: Could not convert string 'error' to BOOL
-
-LINE 1: ... BIGINT)), ('info', CAST(3 AS BIGINT))) AS t(s, n) WHERE NOT ('error'))
-                                                                         ^
-
-### `agent-parse-search-0040` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Could not convert string 'low' to BOOL
-
-LINE 1: ...)) AS t(s, score) WHERE (score BETWEEN 50.0 AND 100.0 AND NOT ('low')))
-                                                                          ^
-
-**KQL**
-```kql
-datatable(s:string, score:real)[ "high",95.5, "low",12.3, "mid",50.0 ] | search score between (50.0 .. 100.0) and not("low") | project s, score
-```
-**Generated SQL**
-```sql
-SELECT s, score FROM (SELECT 'search_arg0' AS "$table", * FROM (VALUES ('high', CAST(95.5 AS DOUBLE)), ('low', CAST(12.3 AS DOUBLE)), ('mid', CAST(50.0 AS DOUBLE))) AS t(s, score) WHERE (score BETWEEN 50.0 AND 100.0 AND NOT ('low')))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, score:Real] rows=2
-    - ('high', 95.5)
-    - ('mid', 50)
-- DuckDB: ERROR — Conversion Error: Could not convert string 'low' to BOOL
-
-LINE 1: ...)) AS t(s, score) WHERE (score BETWEEN 50.0 AND 100.0 AND NOT ('low')))
-                                                                          ^
+## Family: parse-search (13)
 
 ### `agent-parse-search-0007` — MismatchRows (high)
 
@@ -6795,7 +6679,7 @@ datatable(s:string)[ "100", "200", "abc", "10.5" ] | search "1*" and not("abc") 
 ```
 **Generated SQL**
 ```sql
-SELECT s FROM (SELECT 'search_arg0' AS "$table", * FROM (VALUES ('100'), ('200'), ('abc'), ('10.5')) AS t(s) WHERE (REGEXP_MATCHES(LOWER(CAST(s AS VARCHAR)), '(^|[^A-Za-z0-9])1\*([^A-Za-z0-9]|$)') AND NOT ('abc')))
+SELECT s FROM (SELECT 'search_arg0' AS "$table", * FROM (VALUES ('100'), ('200'), ('abc'), ('10.5')) AS t(s) WHERE (REGEXP_MATCHES(LOWER(CAST(s AS VARCHAR)), '(^|[^A-Za-z0-9])1\*([^A-Za-z0-9]|$)') AND (NOT REGEXP_MATCHES(LOWER(CAST(s AS VARCHAR)), '(^|[^A-Za-z0-9])abc([^A-Za-z0-9]|$)'))))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -8762,60 +8646,6 @@ SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), 
 
 ## Family: type-casts-coercion (60)
 
-### `agent-type-casts-coercion-0017` — SqlExecError (highest)
-
-*Detail:* Binder Error: No function matches the given name and argument types '%(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
-	Candidate functions:
-	%(TINYINT, TINYINT) -> TINYINT
-	%(SMALLINT, SMALLINT) -> SMALLINT
-	%(INTEGER, INTEGER) -> INTEGER
-	%(BIGINT, BIGINT) -> BIGINT
-	%(HUGEINT, HUGEINT) -> HUGEINT
-	%(FLOAT, FLOAT) -> FLOAT
-	%(DOUBLE, DOUBLE) -> DOUBLE
-	%(DECIMAL, DECIMAL) -> DECIMAL
-	%(UTINYINT, UTINYINT) -> UTINYINT
-	%(USMALLINT, USMALLINT) -> USMALLINT
-	%(UINTEGER, UINTEGER) -> UINTEGER
-	%(UBIGINT, UBIGINT) -> UBIGINT
-	%(UHUGEINT, UHUGEINT) -> UHUGEINT
-
-
-LINE 1: ...cond')))) AS ts_div, (86400000 * INTERVAL '1 millisecond') % (18000000 * INTERVAL '1 millisecond') AS ts_mod, TRY_CAST...
-                                                                      ^
-
-**KQL**
-```kql
-print ts_long = tolong(1d), ts_real = todouble(1d), ts_back = totimespan(tolong(1d)), ts_div = 1d / 1h, ts_mod = 1d % 5h, ts_int = toint(1h)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS ts_long, COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE)) AS ts_real, TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS INTERVAL) AS ts_back, (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond'))) / EXTRACT(EPOCH FROM ((3600000 * INTERVAL '1 millisecond')))) AS ts_div, (86400000 * INTERVAL '1 millisecond') % (18000000 * INTERVAL '1 millisecond') AS ts_mod, TRY_CAST(TRUNC(COALESCE(TRY_CAST((3600000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((3600000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS ts_int
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ts_long:Int, ts_real:Real, ts_back:TimeSpan, ts_div:Real, ts_mod:TimeSpan, ts_int:Int] rows=1
-    - (864000000000, 864000000000, 1.00:00:00, 24, 04:00:00, 1640261632)
-- DuckDB: ERROR — Binder Error: No function matches the given name and argument types '%(INTERVAL, INTERVAL)'. You might need to add explicit type casts.
-	Candidate functions:
-	%(TINYINT, TINYINT) -> TINYINT
-	%(SMALLINT, SMALLINT) -> SMALLINT
-	%(INTEGER, INTEGER) -> INTEGER
-	%(BIGINT, BIGINT) -> BIGINT
-	%(HUGEINT, HUGEINT) -> HUGEINT
-	%(FLOAT, FLOAT) -> FLOAT
-	%(DOUBLE, DOUBLE) -> DOUBLE
-	%(DECIMAL, DECIMAL) -> DECIMAL
-	%(UTINYINT, UTINYINT) -> UTINYINT
-	%(USMALLINT, USMALLINT) -> USMALLINT
-	%(UINTEGER, UINTEGER) -> UINTEGER
-	%(UBIGINT, UBIGINT) -> UBIGINT
-	%(UHUGEINT, UHUGEINT) -> UHUGEINT
-
-
-LINE 1: ...cond')))) AS ts_div, (86400000 * INTERVAL '1 millisecond') % (18000000 * INTERVAL '1 millisecond') AS ts_mod, TRY_CAST...
-                                                                      ^
-
 ### `agent-type-casts-coercion-0006` — MismatchRows (high)
 
 *Detail:* first differing row[3]: kusto=('3.14', null, null, 3.14) duck=('3.14', 3, 3, 3.14)
@@ -9375,6 +9205,26 @@ SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(t AS DOUBLE), TRY_CAST(TRY_CAST(t AS 
     - (0001-01-01T00:00:00.0000000Z, null, null, null)
     - (9999-12-31T23:59:59.9999990Z, null, null, null)
     - (2020-02-29T00:00:00.0000000Z, null, null, null)
+
+### `agent-type-casts-coercion-0017` — MismatchRows (high)
+
+*Sub-verdicts:* TYPE_MISMATCH[ts_mod:TimeSpan|Real]  
+*Detail:* first differing row[0]: kusto=(864000000000, 864000000000, 1.00:00:00, 24, 04:00:00, 1640261632) duck=(null, null, null, 24, 14400, null)
+
+**KQL**
+```kql
+print ts_long = tolong(1d), ts_real = todouble(1d), ts_back = totimespan(tolong(1d)), ts_div = 1d / 1h, ts_mod = 1d % 5h, ts_int = toint(1h)
+```
+**Generated SQL**
+```sql
+SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS ts_long, COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE)) AS ts_real, TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS INTERVAL) AS ts_back, (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond'))) / EXTRACT(EPOCH FROM ((3600000 * INTERVAL '1 millisecond')))) AS ts_div, (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond'))) % NULLIF(EXTRACT(EPOCH FROM ((18000000 * INTERVAL '1 millisecond'))), 0)) AS ts_mod, TRY_CAST(TRUNC(COALESCE(TRY_CAST((3600000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((3600000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS ts_int
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[ts_long:Int, ts_real:Real, ts_back:TimeSpan, ts_div:Real, ts_mod:TimeSpan, ts_int:Int] rows=1
+    - (864000000000, 864000000000, 1.00:00:00, 24, 04:00:00, 1640261632)
+- DuckDB: cols=[ts_long:Int, ts_real:Real, ts_back:TimeSpan, ts_div:Real, ts_mod:Real, ts_int:Int] rows=1
+    - (null, null, null, 24, 14400, null)
 
 ### `agent-type-casts-coercion-0019` — MismatchRows (high)
 
@@ -10161,354 +10011,15 @@ SELECT TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('abc' AS DOUBLE), TRY_CAST(TRY_
 - DuckDB: cols=[x:String, y:Int, z:Bool] rows=1
     - (null, null, null)
 
-## Family: window-series-scan (50)
-
-### `agent-window-series-scan-0029` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_stats_dynamic does not exist!
-Did you mean "era"?
-
-LINE 1: SELECT *, series_stats_dynamic(s) AS e FROM (SELECT LIST(COALESCE...
-                  ^
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2020-01-01),10, datetime(2020-01-02),20 ] | make-series s = sum(v) default = 0 on t from datetime(2020-01-01) to datetime(2020-01-03) step 1d | extend e = series_stats_dynamic(s)
-```
-**Generated SQL**
-```sql
-SELECT *, series_stats_dynamic(s) AS e FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2020-01-01 00:00:00', TIMESTAMP '2020-01-03 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2020-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2020-01-02 00:00:00', CAST(20 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:Dynamic, t:Dynamic, e:Dynamic] rows=1
-    - ([
-  10,
-  20
-], [
-  "2020-01-01T00:00:00.0000000Z",
-  "2020-01-02T00:00:00.0000000Z"
-], {
-  "min": 10.0,
-  "min_idx": 0,
-  "max": 20.0,
-  "max_idx": 1,
-  "avg": 15.0,
-  "stdev": 7.0710678118654755,
-  "variance": 50.0,
-  "sum": 30.0,
-  "len": 2
-})
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_stats_dynamic does not exist!
-Did you mean "era"?
-
-LINE 1: SELECT *, series_stats_dynamic(s) AS e FROM (SELECT LIST(COALESCE...
-                  ^
-
-### `agent-window-series-scan-0010` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_fill_forward does not exist!
-Did you mean "jaro_winkler_similarity"?
-
-LINE 1: SELECT *, series_fill_forward(s) AS f FROM (SELECT LIST(COALESCE(s_val...
-                  ^
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2021-01-01),10, datetime(2021-01-03),30, datetime(2021-01-07),70 ] | make-series s = sum(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-08) step 2d | extend f = series_fill_forward(s)
-```
-**Generated SQL**
-```sql
-SELECT *, series_fill_forward(s) AS f FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-08 00:00:00', 172800000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/172800000)*172800000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-03 00:00:00', CAST(30 AS BIGINT)), (TIMESTAMP '2021-01-07 00:00:00', CAST(70 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:Dynamic, t:Dynamic, f:Dynamic] rows=1
-    - ([
-  10,
-  30,
-  0,
-  70
-], [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-05T00:00:00.0000000Z",
-  "2021-01-07T00:00:00.0000000Z"
-], [
-  10,
-  30,
-  0,
-  70
-])
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_fill_forward does not exist!
-Did you mean "jaro_winkler_similarity"?
-
-LINE 1: SELECT *, series_fill_forward(s) AS f FROM (SELECT LIST(COALESCE(s_val...
-                  ^
-
-### `agent-window-series-scan-0011` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_fill_linear does not exist!
-Did you mean "json_serialize_plan"?
-
-LINE 1: SELECT *, series_fill_linear(s) AS lf FROM (SELECT LIST(COALESCE(s_val...
-                  ^
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2021-01-01),10, datetime(2021-01-02),0, datetime(2021-01-04),40 ] | make-series s = sum(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-05) step 1d | extend lf = series_fill_linear(s)
-```
-**Generated SQL**
-```sql
-SELECT *, series_fill_linear(s) AS lf FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-05 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-02 00:00:00', CAST(0 AS BIGINT)), (TIMESTAMP '2021-01-04 00:00:00', CAST(40 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:Dynamic, t:Dynamic, lf:Dynamic] rows=1
-    - ([
-  10,
-  0,
-  0,
-  40
-], [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z"
-], [
-  10,
-  0,
-  0,
-  40
-])
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_fill_linear does not exist!
-Did you mean "json_serialize_plan"?
-
-LINE 1: SELECT *, series_fill_linear(s) AS lf FROM (SELECT LIST(COALESCE(s_val...
-                  ^
+## Family: window-series-scan (44)
 
 ### `agent-window-series-scan-0015` — SqlExecError (highest)
 
-*Detail:* Catalog Error: Scalar Function with name series_stats does not exist!
-Did you mean "starts_with"?
+*Detail:* Catalog Error: Scalar Function with name series_fill_const does not exist!
+Did you mean "millisecond"?
 
-LINE 1: SELECT *, series_stats(s) AS st FROM (SELECT LIST(COALESCE(s_val,...
-                  ^
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2021-01-01),10, datetime(2021-01-05),50 ] | make-series s = sum(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-06) step 1d | extend st = series_stats(s)
-```
-**Generated SQL**
-```sql
-SELECT *, series_stats(s) AS st FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-06 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-05 00:00:00', CAST(50 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:Dynamic, t:Dynamic, st:Real] rows=1
-    - ([
-  10,
-  0,
-  0,
-  0,
-  50
-], [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z",
-  "2021-01-05T00:00:00.0000000Z"
-], 0)
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_stats does not exist!
-Did you mean "starts_with"?
-
-LINE 1: SELECT *, series_stats(s) AS st FROM (SELECT LIST(COALESCE(s_val,...
-                  ^
-
-### `agent-window-series-scan-0016` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_fit_line does not exist!
-Did you mean "reservoir_quantile"?
-
-LINE 1: SELECT *, series_fit_line(s) AS fit FROM (SELECT LIST(COALESCE(s_val...
-                  ^
-
-**KQL**
-```kql
-datatable(t:datetime, v:real)[ datetime(2021-01-01),1.0, datetime(2021-01-02),2.0, datetime(2021-01-03),4.0, datetime(2021-01-04),8.0 ] | make-series s = avg(v) default = 0.0 on t from datetime(2021-01-01) to datetime(2021-01-05) step 1d | extend fit = series_fit_line(s)
-```
-**Generated SQL**
-```sql
-SELECT *, series_fit_line(s) AS fit FROM (SELECT LIST(COALESCE(s_val, 0.0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-05 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(AVG(v), 'nan'::DOUBLE) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(1.0 AS DOUBLE)), (TIMESTAMP '2021-01-02 00:00:00', CAST(2.0 AS DOUBLE)), (TIMESTAMP '2021-01-03 00:00:00', CAST(4.0 AS DOUBLE)), (TIMESTAMP '2021-01-04 00:00:00', CAST(8.0 AS DOUBLE))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:Dynamic, t:Dynamic, fit:Real] rows=1
-    - ([
-  1.0,
-  2.0,
-  4.0,
-  8.0
-], [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z"
-], 0.92)
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_fit_line does not exist!
-Did you mean "reservoir_quantile"?
-
-LINE 1: SELECT *, series_fit_line(s) AS fit FROM (SELECT LIST(COALESCE(s_val...
-                  ^
-
-### `agent-window-series-scan-0039` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_iir does not exist!
-Did you mean "list_reverse"?
-
-LINE 1: SELECT *, series_iir(s, LIST_VALUE(1), LIST_VALUE(1, (-1))) AS cums...
-                  ^
-
-**KQL**
-```kql
-datatable(t:long, v:long, g:string)[ 1,10,"a", 3,30,"a", 1,5,"b", 5,50,"b" ] | make-series s = sum(v) default = 0 on t from 1 to 6 step 2 by g | extend cums = series_iir(s, dynamic([1]), dynamic([1,-1]))
-```
-**Generated SQL**
-```sql
-SELECT *, series_iir(s, LIST_VALUE(1), LIST_VALUE(1, (-1))) AS cums FROM (SELECT _axis.g, LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(_axis._ts ORDER BY _axis._ts) AS t FROM (SELECT _g.*, _t._ts FROM (SELECT DISTINCT g FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 'a'), (CAST(3 AS BIGINT), CAST(30 AS BIGINT), 'a'), (CAST(1 AS BIGINT), CAST(5 AS BIGINT), 'b'), (CAST(5 AS BIGINT), CAST(50 AS BIGINT), 'b')) AS t(t, v, g)) AS _g CROSS JOIN (SELECT (1) + _i*(2) AS _ts FROM range(0, CAST(CEIL(((6) - (1))/(2)) AS BIGINT)) AS _r(_i)) AS _t) AS _axis LEFT JOIN (SELECT g, ((1) + FLOOR(((t) - (1))/(2))*(2)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 'a'), (CAST(3 AS BIGINT), CAST(30 AS BIGINT), 'a'), (CAST(1 AS BIGINT), CAST(5 AS BIGINT), 'b'), (CAST(5 AS BIGINT), CAST(50 AS BIGINT), 'b')) AS t(t, v, g) GROUP BY g, _bucket) AS _data ON _axis.g = _data.g AND _axis._ts = _data._bucket GROUP BY _axis.g)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, s:Dynamic, t:Dynamic, cums:Dynamic] rows=2
-    - ('a', [
-  10,
-  30,
-  0
-], [
-  1,
-  3,
-  5
-], [
-  10.0,
-  40.0,
-  40.0
-])
-    - ('b', [
-  5,
-  0,
-  50
-], [
-  1,
-  3,
-  5
-], [
-  5.0,
-  5.0,
-  55.0
-])
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_iir does not exist!
-Did you mean "list_reverse"?
-
-LINE 1: SELECT *, series_iir(s, LIST_VALUE(1), LIST_VALUE(1, (-1))) AS cums...
-                  ^
-
-### `agent-window-series-scan-0043` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_pearson_correlation does not exist!
-Did you mean "sin"?
-
-LINE 1: SELECT *, series_pearson_correlation(s, s) AS pf FROM (SELECT LIST...
-                  ^
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2021-01-01),0, datetime(2021-01-02),0, datetime(2021-01-03),5 ] | make-series s = max(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-04) step 1d | extend pf = series_pearson_correlation(s, s)
-```
-**Generated SQL**
-```sql
-SELECT *, series_pearson_correlation(s, s) AS pf FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-04 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(MAX(v) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(0 AS BIGINT)), (TIMESTAMP '2021-01-02 00:00:00', CAST(0 AS BIGINT)), (TIMESTAMP '2021-01-03 00:00:00', CAST(5 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:Dynamic, t:Dynamic, pf:Real] rows=1
-    - ([
-  0,
-  0,
-  5
-], [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z"
-], 1.0000000000000002)
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_pearson_correlation does not exist!
-Did you mean "sin"?
-
-LINE 1: SELECT *, series_pearson_correlation(s, s) AS pf FROM (SELECT LIST...
-                  ^
-
-### `agent-window-series-scan-0014` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_fill_forward does not exist!
-Did you mean "jaro_winkler_similarity"?
-
-LINE 1: SELECT *, series_fill_forward(s) AS ff, series_fill_backward(s) AS...
-                  ^
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2021-01-01),10, datetime(2021-01-03),30, datetime(2021-01-08),80 ] | make-series s = sum(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-10) step 2d | extend ff = series_fill_forward(s), fb = series_fill_backward(s), lin = series_fill_linear(s)
-```
-**Generated SQL**
-```sql
-SELECT *, series_fill_forward(s) AS ff, series_fill_backward(s) AS fb, series_fill_linear(s) AS lin FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-10 00:00:00', 172800000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/172800000)*172800000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-03 00:00:00', CAST(30 AS BIGINT)), (TIMESTAMP '2021-01-08 00:00:00', CAST(80 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:Dynamic, t:Dynamic, ff:Dynamic, fb:Dynamic, lin:Dynamic] rows=1
-    - ([
-  10,
-  30,
-  0,
-  80,
-  0
-], [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-05T00:00:00.0000000Z",
-  "2021-01-07T00:00:00.0000000Z",
-  "2021-01-09T00:00:00.0000000Z"
-], [
-  10,
-  30,
-  0,
-  80,
-  0
-], [
-  10,
-  30,
-  0,
-  80,
-  0
-], [
-  10,
-  30,
-  0,
-  80,
-  0
-])
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_fill_forward does not exist!
-Did you mean "jaro_winkler_similarity"?
-
-LINE 1: SELECT *, series_fill_forward(s) AS ff, series_fill_backward(s) AS...
-                  ^
-
-### `agent-window-series-scan-0015` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_subtract does not exist!
-Did you mean "session_user"?
-
-LINE 1: SELECT *, series_subtract(s, series_fill_const(s, 5)) AS d, series_mu...
-                  ^
+LINE 1: ... *, LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN(s), LEN(series_fill_const(s, 5)))), i -> s[i] - series_fill_const...
+                                                                   ^
 
 **KQL**
 ```kql
@@ -10516,7 +10027,7 @@ datatable(t:datetime, v:long)[ datetime(2021-01-01),10, datetime(2021-01-02),20,
 ```
 **Generated SQL**
 ```sql
-SELECT *, series_subtract(s, series_fill_const(s, 5)) AS d, series_multiply(s, s) AS m FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-05 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-02 00:00:00', CAST(20 AS BIGINT)), (TIMESTAMP '2021-01-03 00:00:00', CAST(30 AS BIGINT)), (TIMESTAMP '2021-01-04 00:00:00', CAST(40 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
+SELECT *, LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN(s), LEN(series_fill_const(s, 5)))), i -> s[i] - series_fill_const(s, 5)[i]) AS d, LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN(s), LEN(s))), i -> s[i] * s[i]) AS m FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-05 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-02 00:00:00', CAST(20 AS BIGINT)), (TIMESTAMP '2021-01-03 00:00:00', CAST(30 AS BIGINT)), (TIMESTAMP '2021-01-04 00:00:00', CAST(40 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -10542,159 +10053,15 @@ SELECT *, series_subtract(s, series_fill_const(s, 5)) AS d, series_multiply(s, s
   900,
   1600
 ])
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_subtract does not exist!
-Did you mean "session_user"?
+- DuckDB: ERROR — Catalog Error: Scalar Function with name series_fill_const does not exist!
+Did you mean "millisecond"?
 
-LINE 1: SELECT *, series_subtract(s, series_fill_const(s, 5)) AS d, series_mu...
-                  ^
-
-### `agent-window-series-scan-0019` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_fit_line_dynamic does not exist!
-Did you mean "setseed"?
-
-LINE 1: ...) AS rsq, json_extract(fl, '$.slope') AS slope FROM (SELECT *, series_fit_line_dynamic(s) AS fl FROM (SELECT LIST(COALESCE...
-                                                                          ^
-
-**KQL**
-```kql
-datatable(t:long, v:real)[ 1,1.0, 2,2.0, 3,3.0, 4,4.0, 5,5.0 ] | make-series s = avg(v) default = 0.0 on t from 1 to 6 step 1 | extend fl = series_fit_line_dynamic(s) | project rsq = fl.rsquare, slope = fl.slope
-```
-**Generated SQL**
-```sql
-SELECT json_extract(fl, '$.rsquare') AS rsq, json_extract(fl, '$.slope') AS slope FROM (SELECT *, series_fit_line_dynamic(s) AS fl FROM (SELECT LIST(COALESCE(s_val, 0.0) ORDER BY _ts) AS s, LIST(_axis._ts ORDER BY _axis._ts) AS t FROM (SELECT (1) + _i*(1) AS _ts FROM range(0, CAST(CEIL(((6) - (1))/(1)) AS BIGINT)) AS _r(_i)) AS _axis LEFT JOIN (SELECT ((1) + FLOOR(((t) - (1))/(1))*(1)) AS _bucket, CAST(COALESCE(AVG(v), 'nan'::DOUBLE) AS DOUBLE) AS s_val FROM (VALUES (CAST(1 AS BIGINT), CAST(1.0 AS DOUBLE)), (CAST(2 AS BIGINT), CAST(2.0 AS DOUBLE)), (CAST(3 AS BIGINT), CAST(3.0 AS DOUBLE)), (CAST(4 AS BIGINT), CAST(4.0 AS DOUBLE)), (CAST(5 AS BIGINT), CAST(5.0 AS DOUBLE))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[rsq:Dynamic, slope:Dynamic] rows=1
-    - (1.0, 0.9999999999999999)
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_fit_line_dynamic does not exist!
-Did you mean "setseed"?
-
-LINE 1: ...) AS rsq, json_extract(fl, '$.slope') AS slope FROM (SELECT *, series_fit_line_dynamic(s) AS fl FROM (SELECT LIST(COALESCE...
-                                                                          ^
-
-### `agent-window-series-scan-0020` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_fir does not exist!
-Did you mean "list_reverse"?
-
-LINE 1: SELECT *, series_fir(s, LIST_VALUE(1, (-1)), FALSE, FALSE) AS dlt...
-                  ^
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2021-01-01),5, datetime(2021-01-02),15, datetime(2021-01-03),10, datetime(2021-01-04),20 ] | make-series s = sum(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-05) step 1d | extend dlt = series_fir(s, dynamic([1,-1]), false, false)
-```
-**Generated SQL**
-```sql
-SELECT *, series_fir(s, LIST_VALUE(1, (-1)), FALSE, FALSE) AS dlt FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-05 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(5 AS BIGINT)), (TIMESTAMP '2021-01-02 00:00:00', CAST(15 AS BIGINT)), (TIMESTAMP '2021-01-03 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-04 00:00:00', CAST(20 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:Dynamic, t:Dynamic, dlt:Dynamic] rows=1
-    - ([
-  5,
-  15,
-  10,
-  20
-], [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z"
-], [
-  5,
-  10,
-  -5,
-  10
-])
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_fir does not exist!
-Did you mean "list_reverse"?
-
-LINE 1: SELECT *, series_fir(s, LIST_VALUE(1, (-1)), FALSE, FALSE) AS dlt...
-                  ^
-
-### `agent-window-series-scan-0021` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_fill_forward does not exist!
-Did you mean "jaro_winkler_similarity"?
-
-LINE 1: ... (s, ff), u0.value AS s, u1.value AS ff FROM (SELECT *, series_fill_forward(s) AS ff FROM (SELECT LIST(COALESCE...
-                                                                   ^
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2021-01-01),10, datetime(2021-01-04),40, datetime(2021-01-06),60 ] | make-series s = sum(v) default = long(null) on t from datetime(2021-01-01) to datetime(2021-01-07) step 1d | extend ff = series_fill_forward(s) | mv-expand s to typeof(long), ff to typeof(long)
-```
-**Generated SQL**
-```sql
-SELECT t.* EXCLUDE (s, ff), u0.value AS s, u1.value AS ff FROM (SELECT *, series_fill_forward(s) AS ff FROM (SELECT LIST(COALESCE(s_val, CAST(NULL AS BIGINT)) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-07 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-04 00:00:00', CAST(40 AS BIGINT)), (TIMESTAMP '2021-01-06 00:00:00', CAST(60 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)) AS t CROSS JOIN UNNEST(t.s) AS u0(value) CROSS JOIN UNNEST(t.ff) AS u1(value)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:Int, t:Dynamic, ff:Int] rows=6
-    - (10, [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z",
-  "2021-01-05T00:00:00.0000000Z",
-  "2021-01-06T00:00:00.0000000Z"
-], 10)
-    - (null, [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z",
-  "2021-01-05T00:00:00.0000000Z",
-  "2021-01-06T00:00:00.0000000Z"
-], 10)
-    - (null, [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z",
-  "2021-01-05T00:00:00.0000000Z",
-  "2021-01-06T00:00:00.0000000Z"
-], 10)
-    - (40, [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z",
-  "2021-01-05T00:00:00.0000000Z",
-  "2021-01-06T00:00:00.0000000Z"
-], 40)
-    - (null, [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z",
-  "2021-01-05T00:00:00.0000000Z",
-  "2021-01-06T00:00:00.0000000Z"
-], 40)
-    - (60, [
-  "2021-01-01T00:00:00.0000000Z",
-  "2021-01-02T00:00:00.0000000Z",
-  "2021-01-03T00:00:00.0000000Z",
-  "2021-01-04T00:00:00.0000000Z",
-  "2021-01-05T00:00:00.0000000Z",
-  "2021-01-06T00:00:00.0000000Z"
-], 60)
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_fill_forward does not exist!
-Did you mean "jaro_winkler_similarity"?
-
-LINE 1: ... (s, ff), u0.value AS s, u1.value AS ff FROM (SELECT *, series_fill_forward(s) AS ff FROM (SELECT LIST(COALESCE...
+LINE 1: ... *, LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN(s), LEN(series_fill_const(s, 5)))), i -> s[i] - series_fill_const...
                                                                    ^
 
 ### `agent-window-series-scan-0022` — SqlExecError (highest)
 
-*Detail:* Catalog Error: Scalar Function with name series_greater does not exist!
-Did you mean "str_split_regex"?
-
-LINE 1: SELECT *, LIST_TRANSFORM(LIST_ZIP(series_greater(s, 15), s, (-1)), x -> CASE WHEN x[1] THEN...
-                                          ^
+*Detail:* Binder Error: Parameter type needs to be List
 
 **KQL**
 ```kql
@@ -10702,7 +10069,7 @@ datatable(t:long, v:long)[ 1,10, 2,20, 3,30 ] | make-series s = sum(v) default =
 ```
 **Generated SQL**
 ```sql
-SELECT *, LIST_TRANSFORM(LIST_ZIP(series_greater(s, 15), s, (-1)), x -> CASE WHEN x[1] THEN x[2] ELSE x[3] END) AS gt15 FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(_axis._ts ORDER BY _axis._ts) AS t FROM (SELECT (1) + _i*(3) AS _ts FROM range(0, CAST(CEIL(((10) - (1))/(3)) AS BIGINT)) AS _r(_i)) AS _axis LEFT JOIN (SELECT ((1) + FLOOR(((t) - (1))/(3))*(3)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(2 AS BIGINT), CAST(20 AS BIGINT)), (CAST(3 AS BIGINT), CAST(30 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
+SELECT *, LIST_TRANSFORM(LIST_ZIP(LIST_TRANSFORM(s, x -> x > 15), s, (-1)), x -> CASE WHEN x[1] THEN x[2] ELSE x[3] END) AS gt15 FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(_axis._ts ORDER BY _axis._ts) AS t FROM (SELECT (1) + _i*(3) AS _ts FROM range(0, CAST(CEIL(((10) - (1))/(3)) AS BIGINT)) AS _r(_i)) AS _axis LEFT JOIN (SELECT ((1) + FLOOR(((t) - (1))/(3))*(3)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(2 AS BIGINT), CAST(20 AS BIGINT)), (CAST(3 AS BIGINT), CAST(30 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -10720,11 +10087,7 @@ SELECT *, LIST_TRANSFORM(LIST_ZIP(series_greater(s, 15), s, (-1)), x -> CASE WHE
   -1,
   -1
 ])
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_greater does not exist!
-Did you mean "str_split_regex"?
-
-LINE 1: SELECT *, LIST_TRANSFORM(LIST_ZIP(series_greater(s, 15), s, (-1)), x -> CASE WHEN x[1] THEN...
-                                          ^
+- DuckDB: ERROR — Binder Error: Parameter type needs to be List
 
 ### `agent-window-series-scan-0040` — SqlExecError (highest)
 
@@ -10809,61 +10172,6 @@ SELECT t.* EXCLUDE (s), u0.value AS idx, u1.value AS s FROM (SELECT LIST(COALESC
 - DuckDB: ERROR — INTERNAL Error: Failed to cast expression to type - expression type mismatch
 This error signals an assertion failure within DuckDB. This usually occurs due to unexpected conditions or errors in the program's logic.
 For more information, see https://duckdb.org/docs/stable/dev/internal_errors
-
-### `agent-window-series-scan-0041` — SqlExecError (highest)
-
-*Detail:* Catalog Error: Scalar Function with name series_iir does not exist!
-Did you mean "list_reverse"?
-
-LINE 1: ... (s, cum), u0.value AS s, u1.value AS cum FROM (SELECT *, series_iir(s, LIST_VALUE(1), LIST_VALUE(1, (-1))) AS cum...
-                                                                     ^
-
-**KQL**
-```kql
-datatable(t:long, v:long, g:string)[ 1,1,"a", 2,2,"a", 1,10,"b", 2,20,"b", 3,30,"b" ] | make-series s = sum(v) default = 0 on t from 1 to 4 step 1 by g | extend cum = series_iir(s, dynamic([1]), dynamic([1,-1])) | mv-expand s to typeof(long), cum to typeof(long) | sort by g asc
-```
-**Generated SQL**
-```sql
-SELECT t.* EXCLUDE (s, cum), u0.value AS s, u1.value AS cum FROM (SELECT *, series_iir(s, LIST_VALUE(1), LIST_VALUE(1, (-1))) AS cum FROM (SELECT _axis.g, LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(_axis._ts ORDER BY _axis._ts) AS t FROM (SELECT _g.*, _t._ts FROM (SELECT DISTINCT g FROM (VALUES (CAST(1 AS BIGINT), CAST(1 AS BIGINT), 'a'), (CAST(2 AS BIGINT), CAST(2 AS BIGINT), 'a'), (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 'b'), (CAST(2 AS BIGINT), CAST(20 AS BIGINT), 'b'), (CAST(3 AS BIGINT), CAST(30 AS BIGINT), 'b')) AS t(t, v, g)) AS _g CROSS JOIN (SELECT (1) + _i*(1) AS _ts FROM range(0, CAST(CEIL(((4) - (1))/(1)) AS BIGINT)) AS _r(_i)) AS _t) AS _axis LEFT JOIN (SELECT g, ((1) + FLOOR(((t) - (1))/(1))*(1)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (CAST(1 AS BIGINT), CAST(1 AS BIGINT), 'a'), (CAST(2 AS BIGINT), CAST(2 AS BIGINT), 'a'), (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 'b'), (CAST(2 AS BIGINT), CAST(20 AS BIGINT), 'b'), (CAST(3 AS BIGINT), CAST(30 AS BIGINT), 'b')) AS t(t, v, g) GROUP BY g, _bucket) AS _data ON _axis.g = _data.g AND _axis._ts = _data._bucket GROUP BY _axis.g)) AS t CROSS JOIN UNNEST(t.s) AS u0(value) CROSS JOIN UNNEST(t.cum) AS u1(value) ORDER BY g ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, s:Int, t:Dynamic, cum:Int] rows=6
-    - ('a', 1, [
-  1,
-  2,
-  3
-], 1)
-    - ('a', 2, [
-  1,
-  2,
-  3
-], 3)
-    - ('a', 0, [
-  1,
-  2,
-  3
-], 3)
-    - ('b', 10, [
-  1,
-  2,
-  3
-], 10)
-    - ('b', 20, [
-  1,
-  2,
-  3
-], 30)
-    - ('b', 30, [
-  1,
-  2,
-  3
-], 60)
-- DuckDB: ERROR — Catalog Error: Scalar Function with name series_iir does not exist!
-Did you mean "list_reverse"?
-
-LINE 1: ... (s, cum), u0.value AS s, u1.value AS cum FROM (SELECT *, series_iir(s, LIST_VALUE(1), LIST_VALUE(1, (-1))) AS cum...
-                                                                     ^
 
 ### `agent-window-series-scan-0001` — MismatchRows (high)
 
@@ -11061,6 +10369,58 @@ SELECT t.* EXCLUDE (s), u.value AS s FROM (SELECT LIST(COALESCE(s_val, 0) ORDER 
     - (["2020-01-01T00:00:00.0000000Z","2020-01-02T00:00:00.0000000Z","2020-01-03T00:00:00.0000000Z"], 20)
     - (["2020-01-01T00:00:00.0000000Z","2020-01-02T00:00:00.0000000Z","2020-01-03T00:00:00.0000000Z"], 30)
 
+### `agent-window-series-scan-0029` — MismatchRows (high)
+
+*Sub-verdicts:* TYPE_MISMATCH[e:Dynamic|String]  
+*Detail:* first differing row[0]: kusto=([
+  10,
+  20
+], [
+  "2020-01-01T00:00:00.0000000Z",
+  "2020-01-02T00:00:00.0000000Z"
+], {
+  "min": 10.0,
+  "min_idx": 0,
+  "max": 20.0,
+  "max_idx": 1,
+  "avg": 15.0,
+  "stdev": 7.0710678118654755,
+  "variance": 50.0,
+  "sum": 30.0,
+  "len": 2
+}) duck=([10,20], ["2020-01-01T00:00:00.0000000Z","2020-01-02T00:00:00.0000000Z"], '{"min":10.0,"min_idx":0,"max":20.0,"max_idx":1,"avg":15.0,"sum":30.0,"stdev":7.0710678118654755,"variance":50.0}')
+
+**KQL**
+```kql
+datatable(t:datetime, v:long)[ datetime(2020-01-01),10, datetime(2020-01-02),20 ] | make-series s = sum(v) default = 0 on t from datetime(2020-01-01) to datetime(2020-01-03) step 1d | extend e = series_stats_dynamic(s)
+```
+**Generated SQL**
+```sql
+SELECT *, json_object('min', LIST_MIN(LIST_FILTER(s, x -> x IS NOT NULL)), 'min_idx', LIST_POSITION(s, LIST_MIN(LIST_FILTER(s, x -> x IS NOT NULL))) - 1, 'max', LIST_MAX(LIST_FILTER(s, x -> x IS NOT NULL)), 'max_idx', LIST_POSITION(s, LIST_MAX(LIST_FILTER(s, x -> x IS NOT NULL))) - 1, 'avg', LIST_AVG(LIST_FILTER(s, x -> x IS NOT NULL)), 'sum', LIST_SUM(LIST_FILTER(s, x -> x IS NOT NULL)), 'stdev', LIST_AGGREGATE(LIST_FILTER(s, x -> x IS NOT NULL), 'stddev_samp'), 'variance', LIST_AGGREGATE(LIST_FILTER(s, x -> x IS NOT NULL), 'var_samp')) AS e FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2020-01-01 00:00:00', TIMESTAMP '2020-01-03 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2020-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2020-01-02 00:00:00', CAST(20 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[s:Dynamic, t:Dynamic, e:Dynamic] rows=1
+    - ([
+  10,
+  20
+], [
+  "2020-01-01T00:00:00.0000000Z",
+  "2020-01-02T00:00:00.0000000Z"
+], {
+  "min": 10.0,
+  "min_idx": 0,
+  "max": 20.0,
+  "max_idx": 1,
+  "avg": 15.0,
+  "stdev": 7.0710678118654755,
+  "variance": 50.0,
+  "sum": 30.0,
+  "len": 2
+})
+- DuckDB: cols=[s:Unknown, t:Unknown, e:String] rows=1
+    - ([10,20], ["2020-01-01T00:00:00.0000000Z","2020-01-02T00:00:00.0000000Z"], '{"min":10.0,"min_idx":0,"max":20.0,"max_idx":1,"avg":15.0,"sum":30.0,"stdev":7.0710678118654755,"variance":50.0}')
+
 ### `agent-window-series-scan-0032` — MismatchRows (high)
 
 *Sub-verdicts:* NAME_MISMATCH, TYPE_MISMATCH[Sub:Int|String]  
@@ -11237,6 +10597,90 @@ SELECT t.* EXCLUDE (s), u.value AS s FROM (SELECT LIST(COALESCE(s_val, (-1)) ORD
     - ([0,2,4,6], 5)
     - ([0,2,4,6], 7)
 
+### `agent-window-series-scan-0015` — MismatchRows (high)
+
+*Sub-verdicts:* TYPE_MISMATCH[st:Real|String]  
+*Detail:* first differing row[0]: kusto=([
+  10,
+  0,
+  0,
+  0,
+  50
+], [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z",
+  "2021-01-05T00:00:00.0000000Z"
+], 0) duck=([10,0,0,0,50], ["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z"], '{"min":0.0,"min_idx":1,"max":50.0,"max_idx":4,"avg":12.0,"sum":60.0,"stdev":21.6794833886788,"variance":470.0}')
+
+**KQL**
+```kql
+datatable(t:datetime, v:long)[ datetime(2021-01-01),10, datetime(2021-01-05),50 ] | make-series s = sum(v) default = 0 on t from datetime(2021-01-01) to datetime(2021-01-06) step 1d | extend st = series_stats(s)
+```
+**Generated SQL**
+```sql
+SELECT *, json_object('min', LIST_MIN(LIST_FILTER(s, x -> x IS NOT NULL)), 'min_idx', LIST_POSITION(s, LIST_MIN(LIST_FILTER(s, x -> x IS NOT NULL))) - 1, 'max', LIST_MAX(LIST_FILTER(s, x -> x IS NOT NULL)), 'max_idx', LIST_POSITION(s, LIST_MAX(LIST_FILTER(s, x -> x IS NOT NULL))) - 1, 'avg', LIST_AVG(LIST_FILTER(s, x -> x IS NOT NULL)), 'sum', LIST_SUM(LIST_FILTER(s, x -> x IS NOT NULL)), 'stdev', LIST_AGGREGATE(LIST_FILTER(s, x -> x IS NOT NULL), 'stddev_samp'), 'variance', LIST_AGGREGATE(LIST_FILTER(s, x -> x IS NOT NULL), 'var_samp')) AS st FROM (SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-06 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-05 00:00:00', CAST(50 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[s:Dynamic, t:Dynamic, st:Real] rows=1
+    - ([
+  10,
+  0,
+  0,
+  0,
+  50
+], [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z",
+  "2021-01-05T00:00:00.0000000Z"
+], 0)
+- DuckDB: cols=[s:Unknown, t:Unknown, st:String] rows=1
+    - ([10,0,0,0,50], ["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z"], '{"min":0.0,"min_idx":1,"max":50.0,"max_idx":4,"avg":12.0,"sum":60.0,"stdev":21.6794833886788,"variance":470.0}')
+
+### `agent-window-series-scan-0016` — MismatchRows (high)
+
+*Sub-verdicts:* TYPE_MISMATCH[fit:Real|String]  
+*Detail:* first differing row[0]: kusto=([
+  1.0,
+  2.0,
+  4.0,
+  8.0
+], [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z"
+], 0.92) duck=([1,2,4,8], ["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z"], '{"slope":2.3,"interception":0.30000000000000027,"rsquare":0.9199999999999999,"line_fit":[0.30000000000000027,2.6,4.9,7.199999999999999]}')
+
+**KQL**
+```kql
+datatable(t:datetime, v:real)[ datetime(2021-01-01),1.0, datetime(2021-01-02),2.0, datetime(2021-01-03),4.0, datetime(2021-01-04),8.0 ] | make-series s = avg(v) default = 0.0 on t from datetime(2021-01-01) to datetime(2021-01-05) step 1d | extend fit = series_fit_line(s)
+```
+**Generated SQL**
+```sql
+SELECT *, json_object('slope', ((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0)), 'interception', ((LIST_SUM(s)::DOUBLE - (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE) / NULLIF(LEN(s)::DOUBLE, 0)), 'rsquare', (1 - (LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> POWER(s[i] - ((((LIST_SUM(s)::DOUBLE - (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE) / NULLIF(LEN(s)::DOUBLE, 0))) + (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * (i - 1)), 2)))) / NULLIF(LIST_SUM(LIST_TRANSFORM(s, y -> POWER(y - (LIST_SUM(s)::DOUBLE / NULLIF(LEN(s)::DOUBLE, 0)), 2))), 0)), 'line_fit', LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> (((LIST_SUM(s)::DOUBLE - (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE) / NULLIF(LEN(s)::DOUBLE, 0))) + (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * x)) AS fit FROM (SELECT LIST(COALESCE(s_val, 0.0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-05 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(AVG(v), 'nan'::DOUBLE) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(1.0 AS DOUBLE)), (TIMESTAMP '2021-01-02 00:00:00', CAST(2.0 AS DOUBLE)), (TIMESTAMP '2021-01-03 00:00:00', CAST(4.0 AS DOUBLE)), (TIMESTAMP '2021-01-04 00:00:00', CAST(8.0 AS DOUBLE))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[s:Dynamic, t:Dynamic, fit:Real] rows=1
+    - ([
+  1.0,
+  2.0,
+  4.0,
+  8.0
+], [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z"
+], 0.92)
+- DuckDB: cols=[s:Unknown, t:Unknown, fit:String] rows=1
+    - ([1,2,4,8], ["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z"], '{"slope":2.3,"interception":0.30000000000000027,"rsquare":0.9199999999999999,"line_fit":[0.30000000000000027,2.6,4.9,7.199999999999999]}')
+
 ### `agent-window-series-scan-0018` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=([
@@ -11403,6 +10847,63 @@ SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-
 ])
 - DuckDB: cols=[s:Unknown, t:Unknown] rows=1
     - ([0,0,0], ["2020-01-01T00:00:00.0000000Z","2020-01-04T00:00:00.0000000Z","2020-01-07T00:00:00.0000000Z"])
+
+### `agent-window-series-scan-0039` — MismatchRows (high)
+
+*Detail:* first differing row[0]: kusto=('a', [
+  10,
+  30,
+  0
+], [
+  1,
+  3,
+  5
+], [
+  10.0,
+  40.0,
+  40.0
+]) duck=('b', [5,0,50], [1,3,5], [5,0,50])
+
+**KQL**
+```kql
+datatable(t:long, v:long, g:string)[ 1,10,"a", 3,30,"a", 1,5,"b", 5,50,"b" ] | make-series s = sum(v) default = 0 on t from 1 to 6 step 2 by g | extend cums = series_iir(s, dynamic([1]), dynamic([1,-1]))
+```
+**Generated SQL**
+```sql
+SELECT *, LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(LIST_VALUE(1))), k -> CASE WHEN i - k + 1 >= 1 THEN LIST_VALUE(1)[k] * COALESCE(s[i - k + 1], 0) ELSE 0 END))) AS cums FROM (SELECT _axis.g, LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(_axis._ts ORDER BY _axis._ts) AS t FROM (SELECT _g.*, _t._ts FROM (SELECT DISTINCT g FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 'a'), (CAST(3 AS BIGINT), CAST(30 AS BIGINT), 'a'), (CAST(1 AS BIGINT), CAST(5 AS BIGINT), 'b'), (CAST(5 AS BIGINT), CAST(50 AS BIGINT), 'b')) AS t(t, v, g)) AS _g CROSS JOIN (SELECT (1) + _i*(2) AS _ts FROM range(0, CAST(CEIL(((6) - (1))/(2)) AS BIGINT)) AS _r(_i)) AS _t) AS _axis LEFT JOIN (SELECT g, ((1) + FLOOR(((t) - (1))/(2))*(2)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 'a'), (CAST(3 AS BIGINT), CAST(30 AS BIGINT), 'a'), (CAST(1 AS BIGINT), CAST(5 AS BIGINT), 'b'), (CAST(5 AS BIGINT), CAST(50 AS BIGINT), 'b')) AS t(t, v, g) GROUP BY g, _bucket) AS _data ON _axis.g = _data.g AND _axis._ts = _data._bucket GROUP BY _axis.g)
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[g:String, s:Dynamic, t:Dynamic, cums:Dynamic] rows=2
+    - ('a', [
+  10,
+  30,
+  0
+], [
+  1,
+  3,
+  5
+], [
+  10.0,
+  40.0,
+  40.0
+])
+    - ('b', [
+  5,
+  0,
+  50
+], [
+  1,
+  3,
+  5
+], [
+  5.0,
+  5.0,
+  55.0
+])
+- DuckDB: cols=[g:String, s:Unknown, t:Unknown, cums:Unknown] rows=2
+    - ('b', [5,0,50], [1,3,5], [5,0,50])
+    - ('a', [10,30,0], [1,3,5], [10,30,0])
 
 ### `agent-window-series-scan-0042` — MismatchRows (high)
 
@@ -11648,6 +11149,100 @@ SELECT t.* EXCLUDE (t, s), u0.value AS t, u1.value AS s FROM (SELECT _axis.g, LI
     - ('a', '2021-01-03T00:00:00.0000000Z', 10)
     - ('a', '2021-01-03T00:00:00.0000000Z', 20)
 
+### `agent-window-series-scan-0019` — MismatchRows (high)
+
+*Sub-verdicts:* TYPE_MISMATCH[rsq:Dynamic|String], TYPE_MISMATCH[slope:Dynamic|String]  
+*Detail:* first differing row[0]: kusto=(1.0, 0.9999999999999999) duck=('1.0', '1.0')
+
+**KQL**
+```kql
+datatable(t:long, v:real)[ 1,1.0, 2,2.0, 3,3.0, 4,4.0, 5,5.0 ] | make-series s = avg(v) default = 0.0 on t from 1 to 6 step 1 | extend fl = series_fit_line_dynamic(s) | project rsq = fl.rsquare, slope = fl.slope
+```
+**Generated SQL**
+```sql
+SELECT json_extract(fl, '$.rsquare') AS rsq, json_extract(fl, '$.slope') AS slope FROM (SELECT *, json_object('slope', ((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0)), 'interception', ((LIST_SUM(s)::DOUBLE - (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE) / NULLIF(LEN(s)::DOUBLE, 0)), 'rsquare', (1 - (LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> POWER(s[i] - ((((LIST_SUM(s)::DOUBLE - (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE) / NULLIF(LEN(s)::DOUBLE, 0))) + (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * (i - 1)), 2)))) / NULLIF(LIST_SUM(LIST_TRANSFORM(s, y -> POWER(y - (LIST_SUM(s)::DOUBLE / NULLIF(LEN(s)::DOUBLE, 0)), 2))), 0)), 'line_fit', LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> (((LIST_SUM(s)::DOUBLE - (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE) / NULLIF(LEN(s)::DOUBLE, 0))) + (((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> (i - 1) * s[i]))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(s)::DOUBLE) / NULLIF((LEN(s)::DOUBLE * LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(0, LEN(s) - 1), x -> x * x))::DOUBLE - LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE * LIST_SUM(GENERATE_SERIES(0, LEN(s) - 1))::DOUBLE), 0))) * x)) AS fl FROM (SELECT LIST(COALESCE(s_val, 0.0) ORDER BY _ts) AS s, LIST(_axis._ts ORDER BY _axis._ts) AS t FROM (SELECT (1) + _i*(1) AS _ts FROM range(0, CAST(CEIL(((6) - (1))/(1)) AS BIGINT)) AS _r(_i)) AS _axis LEFT JOIN (SELECT ((1) + FLOOR(((t) - (1))/(1))*(1)) AS _bucket, CAST(COALESCE(AVG(v), 'nan'::DOUBLE) AS DOUBLE) AS s_val FROM (VALUES (CAST(1 AS BIGINT), CAST(1.0 AS DOUBLE)), (CAST(2 AS BIGINT), CAST(2.0 AS DOUBLE)), (CAST(3 AS BIGINT), CAST(3.0 AS DOUBLE)), (CAST(4 AS BIGINT), CAST(4.0 AS DOUBLE)), (CAST(5 AS BIGINT), CAST(5.0 AS DOUBLE))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket))
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[rsq:Dynamic, slope:Dynamic] rows=1
+    - (1.0, 0.9999999999999999)
+- DuckDB: cols=[rsq:String, slope:String] rows=1
+    - ('1.0', '1.0')
+
+### `agent-window-series-scan-0021` — MismatchRows (high)
+
+*Sub-verdicts:* NAME_MISMATCH, TYPE_MISMATCH[t:Dynamic|Real], TYPE_MISMATCH[ff:Int|Real]  
+*Detail:* row count: kusto=6 duck=36
+
+**KQL**
+```kql
+datatable(t:datetime, v:long)[ datetime(2021-01-01),10, datetime(2021-01-04),40, datetime(2021-01-06),60 ] | make-series s = sum(v) default = long(null) on t from datetime(2021-01-01) to datetime(2021-01-07) step 1d | extend ff = series_fill_forward(s) | mv-expand s to typeof(long), ff to typeof(long)
+```
+**Generated SQL**
+```sql
+SELECT t.* EXCLUDE (s, ff), u0.value AS s, u1.value AS ff FROM (SELECT *, LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> LIST_LAST(LIST_TRANSFORM(LIST_FILTER(GENERATE_SERIES(1, i), j -> s[j] IS NOT NULL), j -> s[j]))) AS ff FROM (SELECT LIST(COALESCE(s_val, CAST(NULL AS BIGINT)) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-%m-%dT%H:%M:%S.%f') || '0Z' ORDER BY _axis._ts) AS t FROM (SELECT UNNEST(range(TIMESTAMP '2021-01-01 00:00:00', TIMESTAMP '2021-01-07 00:00:00', 86400000 * INTERVAL '1 millisecond')) AS _ts) AS _axis LEFT JOIN (SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(t)/86400000)*86400000 AS BIGINT)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(10 AS BIGINT)), (TIMESTAMP '2021-01-04 00:00:00', CAST(40 AS BIGINT)), (TIMESTAMP '2021-01-06 00:00:00', CAST(60 AS BIGINT))) AS t(t, v) GROUP BY _bucket) AS _data ON _axis._ts = _data._bucket)) AS t CROSS JOIN UNNEST(t.s) AS u0(value) CROSS JOIN UNNEST(t.ff) AS u1(value)
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[s:Int, t:Dynamic, ff:Int] rows=6
+    - (10, [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z",
+  "2021-01-05T00:00:00.0000000Z",
+  "2021-01-06T00:00:00.0000000Z"
+], 10)
+    - (null, [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z",
+  "2021-01-05T00:00:00.0000000Z",
+  "2021-01-06T00:00:00.0000000Z"
+], 10)
+    - (null, [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z",
+  "2021-01-05T00:00:00.0000000Z",
+  "2021-01-06T00:00:00.0000000Z"
+], 10)
+    - (40, [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z",
+  "2021-01-05T00:00:00.0000000Z",
+  "2021-01-06T00:00:00.0000000Z"
+], 40)
+    - (null, [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z",
+  "2021-01-05T00:00:00.0000000Z",
+  "2021-01-06T00:00:00.0000000Z"
+], 40)
+    - (60, [
+  "2021-01-01T00:00:00.0000000Z",
+  "2021-01-02T00:00:00.0000000Z",
+  "2021-01-03T00:00:00.0000000Z",
+  "2021-01-04T00:00:00.0000000Z",
+  "2021-01-05T00:00:00.0000000Z",
+  "2021-01-06T00:00:00.0000000Z"
+], 60)
+- DuckDB: cols=[t:Unknown, s:Real, ff:Real] rows=36
+    - (["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z","2021-01-06T00:00:00.0000000Z"], 10, 10)
+    - (["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z","2021-01-06T00:00:00.0000000Z"], 10, 10)
+    - (["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z","2021-01-06T00:00:00.0000000Z"], 10, 10)
+    - (["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z","2021-01-06T00:00:00.0000000Z"], 10, 40)
+    - (["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z","2021-01-06T00:00:00.0000000Z"], 10, 40)
+    - (["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z","2021-01-06T00:00:00.0000000Z"], 10, 60)
+    - (["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z","2021-01-06T00:00:00.0000000Z"], null, 10)
+    - (["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z","2021-01-05T00:00:00.0000000Z","2021-01-06T00:00:00.0000000Z"], null, 10)
+
 ### `agent-window-series-scan-0030` — MismatchRows (high)
 
 *Detail:* first differing row[1]: kusto=(3, 1) duck=(6, 1)
@@ -11745,6 +11340,62 @@ SELECT t.* EXCLUDE (t, s), u0.value AS t, u1.value AS s FROM (SELECT LIST(COALES
     - ('2021-01-01T12:00:00.0000000Z', 2)
     - ('2021-01-01T12:00:00.0000000Z', 3)
 
+### `agent-window-series-scan-0041` — MismatchRows (high)
+
+*Sub-verdicts:* NAME_MISMATCH, TYPE_MISMATCH[t:Dynamic|Real], TYPE_MISMATCH[cum:Int|Real]  
+*Detail:* row count: kusto=6 duck=18
+
+**KQL**
+```kql
+datatable(t:long, v:long, g:string)[ 1,1,"a", 2,2,"a", 1,10,"b", 2,20,"b", 3,30,"b" ] | make-series s = sum(v) default = 0 on t from 1 to 4 step 1 by g | extend cum = series_iir(s, dynamic([1]), dynamic([1,-1])) | mv-expand s to typeof(long), cum to typeof(long) | sort by g asc
+```
+**Generated SQL**
+```sql
+SELECT t.* EXCLUDE (s, cum), u0.value AS s, u1.value AS cum FROM (SELECT *, LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN(LIST_VALUE(1))), k -> CASE WHEN i - k + 1 >= 1 THEN LIST_VALUE(1)[k] * COALESCE(s[i - k + 1], 0) ELSE 0 END))) AS cum FROM (SELECT _axis.g, LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(_axis._ts ORDER BY _axis._ts) AS t FROM (SELECT _g.*, _t._ts FROM (SELECT DISTINCT g FROM (VALUES (CAST(1 AS BIGINT), CAST(1 AS BIGINT), 'a'), (CAST(2 AS BIGINT), CAST(2 AS BIGINT), 'a'), (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 'b'), (CAST(2 AS BIGINT), CAST(20 AS BIGINT), 'b'), (CAST(3 AS BIGINT), CAST(30 AS BIGINT), 'b')) AS t(t, v, g)) AS _g CROSS JOIN (SELECT (1) + _i*(1) AS _ts FROM range(0, CAST(CEIL(((4) - (1))/(1)) AS BIGINT)) AS _r(_i)) AS _t) AS _axis LEFT JOIN (SELECT g, ((1) + FLOOR(((t) - (1))/(1))*(1)) AS _bucket, CAST(COALESCE(SUM(v), 0) AS DOUBLE) AS s_val FROM (VALUES (CAST(1 AS BIGINT), CAST(1 AS BIGINT), 'a'), (CAST(2 AS BIGINT), CAST(2 AS BIGINT), 'a'), (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 'b'), (CAST(2 AS BIGINT), CAST(20 AS BIGINT), 'b'), (CAST(3 AS BIGINT), CAST(30 AS BIGINT), 'b')) AS t(t, v, g) GROUP BY g, _bucket) AS _data ON _axis.g = _data.g AND _axis._ts = _data._bucket GROUP BY _axis.g)) AS t CROSS JOIN UNNEST(t.s) AS u0(value) CROSS JOIN UNNEST(t.cum) AS u1(value) ORDER BY g ASC NULLS FIRST
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[g:String, s:Int, t:Dynamic, cum:Int] rows=6
+    - ('a', 1, [
+  1,
+  2,
+  3
+], 1)
+    - ('a', 2, [
+  1,
+  2,
+  3
+], 3)
+    - ('a', 0, [
+  1,
+  2,
+  3
+], 3)
+    - ('b', 10, [
+  1,
+  2,
+  3
+], 10)
+    - ('b', 20, [
+  1,
+  2,
+  3
+], 30)
+    - ('b', 30, [
+  1,
+  2,
+  3
+], 60)
+- DuckDB: cols=[g:String, t:Unknown, s:Real, cum:Real] rows=18
+    - ('a', [1,2,3], 1, 1)
+    - ('a', [1,2,3], 1, 2)
+    - ('a', [1,2,3], 1, 0)
+    - ('a', [1,2,3], 2, 1)
+    - ('a', [1,2,3], 2, 2)
+    - ('a', [1,2,3], 2, 0)
+    - ('a', [1,2,3], 0, 1)
+    - ('a', [1,2,3], 0, 2)
+
 ### `agent-window-series-scan-0035` — MismatchOrder (medium)
 
 *Detail:* rows match as a set but order differs
@@ -11765,31 +11416,6 @@ SELECT * FROM (SELECT g, COUNT(*) AS approximate_count_g FROM (VALUES ('a', CAST
 - DuckDB: cols=[g:String, approximate_count_g:Int] rows=2
     - ('c', 1)
     - ('d', 1)
-
-### `agent-window-series-scan-0021` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","y",20, "b","x",30, "b","z",5 ] | top-nested 3 of cat by sum(v), top-nested 2 of sub by max(v)
-```
-**Generated SQL**
-```sql
-SELECT cat, aggregated_cat, sub, aggregated_sub FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat ORDER BY aggregated_sub DESC) AS _rn1 FROM (SELECT _src.cat, _src.sub, _prev.aggregated_cat, MAX(v) AS aggregated_sub FROM (SELECT * FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'y', CAST(20 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT)), ('b', 'z', CAST(5 AS BIGINT))) AS t(cat, sub, v)) AS _src INNER JOIN (SELECT cat, aggregated_cat FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY aggregated_cat DESC) AS _rn0 FROM (SELECT cat, COALESCE(SUM(v), 0) AS aggregated_cat FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'y', CAST(20 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT)), ('b', 'z', CAST(5 AS BIGINT))) AS t(cat, sub, v) GROUP BY cat)) WHERE _rn0 <= 3) AS _prev ON _src.cat = _prev.cat GROUP BY _src.cat, _src.sub, _prev.aggregated_cat)) WHERE _rn1 <= 2
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[cat:String, aggregated_cat:Int, sub:String, aggregated_sub:Int] rows=4
-    - ('b', 35, 'x', 30)
-    - ('b', 35, 'z', 5)
-    - ('a', 30, 'y', 20)
-    - ('a', 30, 'x', 10)
-- DuckDB: cols=[cat:String, aggregated_cat:Int, sub:String, aggregated_sub:Int] rows=4
-    - ('a', 30, 'y', 20)
-    - ('a', 30, 'x', 10)
-    - ('b', 35, 'x', 30)
-    - ('b', 35, 'z', 5)
 
 ### `agent-window-series-scan-0024` — MismatchOrder (medium)
 
@@ -11834,6 +11460,6 @@ SELECT cat, aggregated_cat, sub, aggregated_sub, v, aggregated_v FROM (SELECT *,
     - ('b', 30, 'x', 30, 30, 30)
 - DuckDB: cols=[cat:String, aggregated_cat:Int, sub:String, aggregated_sub:Int, v:Int, aggregated_v:Int] rows=3
     - ('a', 35, 'y', 5, 5, 5)
-    - ('a', 35, 'x', 30, 20, 20)
     - ('b', 30, 'x', 30, 30, 30)
+    - ('a', 35, 'x', 30, 20, 20)
 

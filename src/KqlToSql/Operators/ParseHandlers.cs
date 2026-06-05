@@ -218,7 +218,13 @@ internal sealed class ParseHandlers : OperatorHandlerBase
             case BinaryExpression bin when bin.Kind == SyntaxKind.OrExpression:
                 return $"({ConvertSearchCondition(bin.Left, columns, caseSensitive)} OR {ConvertSearchCondition(bin.Right, columns, caseSensitive)})";
 
-            // Any other predicate (col == 'x', col > 1, col has 'y', …) is a normal scalar predicate.
+            // not(<search-term>) negates a term/sub-condition (recurse so a bare term stays a term match,
+            // not NOT('string') which DuckDB can't cast to BOOL).
+            case FunctionCallExpression nf when nf.Name.SimpleName.Equals("not", StringComparison.OrdinalIgnoreCase)
+                                                && nf.ArgumentList.Expressions.Count == 1:
+                return $"(NOT {ConvertSearchCondition(nf.ArgumentList.Expressions[0].Element, columns, caseSensitive)})";
+
+            // Any other predicate (col == 'x', col > 1, col has 'y', col between (..), …) is a normal scalar predicate.
             default:
                 return Expr.ConvertExpression(condition);
         }

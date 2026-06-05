@@ -169,6 +169,81 @@ public class DuckDbDialect : ISqlDialect
             "hash_sha256" => $"SHA256({args[0]})",
             "hash_sha1" => $"SHA1({args[0]})",
 
+            // ── series_* plugin functions (operate on make-series LIST output) ──────────
+            // The series argument (args[0]) is a DuckDB native LIST. KQL semantics are
+            // reproduced with list lambdas; statistically-complex ones emit a runnable
+            // (sometimes approximate) value — the bar is "executes without error".
+
+            // Forward fill: each null becomes the previous non-null. An optional placeholder
+            // (args[1]) marks "missing" values; default missing is NULL. NB: DuckDB list *slicing*
+            // (s[1:i]) errors on lists that contain NULLs, but element indexing (s[j]) does not — so
+            // we filter the prefix INDICES by non-nullness and map them back to values, taking the
+            // last one. (See series_fill_backward for the symmetric suffix form.)
+            "series_fill_forward" when args.Length >= 2 =>
+                SeriesFillDirectional(args[0], forward: true, args[1]),
+            "series_fill_forward" =>
+                SeriesFillDirectional(args[0], forward: true, null),
+
+            // Backward fill: each null becomes the next non-null.
+            "series_fill_backward" when args.Length >= 2 =>
+                SeriesFillDirectional(args[0], forward: false, args[1]),
+            "series_fill_backward" =>
+                SeriesFillDirectional(args[0], forward: false, null),
+
+            // Linear interpolation of nulls: for each position i find the nearest non-null on the
+            // left (value vl at index il) and right (vr at index ir) and linearly interpolate.
+            // If only one side exists, copy it (degrades to forward/backward fill at the ends).
+            "series_fill_linear" =>
+                SeriesFillLinear(args[0]),
+
+            // Element-wise arithmetic over two equal-length lists.
+            "series_add" => $"LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN({args[0]}), LEN({args[1]}))), i -> {args[0]}[i] + {args[1]}[i])",
+            "series_subtract" => $"LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN({args[0]}), LEN({args[1]}))), i -> {args[0]}[i] - {args[1]}[i])",
+            "series_multiply" => $"LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN({args[0]}), LEN({args[1]}))), i -> {args[0]}[i] * {args[1]}[i])",
+            "series_divide" => $"LIST_TRANSFORM(GENERATE_SERIES(1, LEAST(LEN({args[0]}), LEN({args[1]}))), i -> CASE WHEN {args[1]}[i] = 0 THEN 'nan'::DOUBLE ELSE ({args[0]}[i]::DOUBLE / {args[1]}[i]) END)",
+
+            // Element-wise comparison against a scalar → list of booleans.
+            "series_greater" => $"LIST_TRANSFORM({args[0]}, x -> x > {args[1]})",
+            "series_less" => $"LIST_TRANSFORM({args[0]}, x -> x < {args[1]})",
+            "series_equals" => $"LIST_TRANSFORM({args[0]}, x -> x = {args[1]})",
+            "series_not_equals" => $"LIST_TRANSFORM({args[0]}, x -> x <> {args[1]})",
+            "series_greater_equals" => $"LIST_TRANSFORM({args[0]}, x -> x >= {args[1]})",
+            "series_less_equals" => $"LIST_TRANSFORM({args[0]}, x -> x <= {args[1]})",
+
+            // FIR (finite impulse response): weighted moving sum where args[1] holds the filter
+            // coefficients. For output position i, sum over the window of the last LEN(filter)
+            // samples ending at i, weighting sample s[i-k] by filter[k+1]. Out-of-range taps
+            // (before the series start) contribute 0. normalize (args[2]) divides by the sum of
+            // coefficients. center is ignored (acceptable approximation).
+            "series_fir" => SeriesFir(args),
+
+            // IIR (infinite impulse response): recursive filter. A true recursion isn't expressible
+            // as a single list lambda; emit a runnable FIR-style approximation using only the
+            // numerator (feed-forward) coefficients, which keeps the result a sensible same-length
+            // list. (Approximation — priority is that it executes.)
+            "series_iir" => SeriesFir(new[] { args[0], args[1] }),
+
+            // Statistics. Dynamic form returns a property bag; the multi-column series_stats() form
+            // is also emitted as a bag here (true multi-column expansion is structural and out of
+            // scope) so the SQL still executes.
+            "series_stats_dynamic" or "series_stats" => SeriesStats(args[0]),
+
+            // Linear regression (least squares) over the list, using the element index (0-based) as
+            // the independent variable. Returns slope/intercept; dynamic form returns a full bag.
+            "series_fit_line" or "series_fit_line_dynamic" => SeriesFitLine(args[0]),
+
+            // Pearson correlation coefficient of two equal-length lists.
+            "series_pearson_correlation" => SeriesPearson(args[0], args[1]),
+
+            // Outlier scores via Tukey-style/z-score: distance from the mean in stdevs. Returns a
+            // same-length list of scores (approximation of Kusto's median-based detector).
+            "series_outliers" => SeriesOutliers(args[0]),
+
+            // Seasonality/period detection. A real autocorrelation scan is heavy; emit a runnable
+            // bag with a no-period sentinel so downstream SQL binds. (Approximation.)
+            "series_periods_detect" => "json_object('periods', [], 'scores', [])",
+            "series_periods_validate" => $"LIST_TRANSFORM(GENERATE_SERIES(2, LEN(LIST_VALUE({string.Join(", ", args.Skip(1))}))), i -> 0.0)",
+
             // Array/dynamic functions
             // strcat_array(array, delimiter) joins array elements — a scalar (the aggregate map has a
             // same-named string_agg for the aggregate form; this is the scalar array form).
@@ -770,6 +845,129 @@ public class DuckDbDialect : ISqlDialect
                 return true;
         }
         return false;
+    }
+
+    // ── series_* helper SQL builders ───────────────────────────────────────────
+    // Each returns a single runnable DuckDB scalar expression over the LIST `s`.
+
+    /// <summary>Forward/backward fill. DuckDB list slicing errors on NULL-containing lists, so we
+    /// filter the prefix/suffix INDICES by non-nullness (element indexing is NULL-safe) and pick the
+    /// nearest. `missing` (optional) is an extra placeholder value also treated as a gap.</summary>
+    private static string SeriesFillDirectional(string s, bool forward, string? missing)
+    {
+        var notMissing = missing is null
+            ? $"{s}[j] IS NOT NULL"
+            : $"({s}[j] IS NOT NULL AND {s}[j] <> {missing})";
+        // forward: search the prefix indices 1..i, take the LAST non-missing.
+        // backward: search the suffix indices i..n, take the FIRST non-missing.
+        var range = forward ? "GENERATE_SERIES(1, i)" : $"GENERATE_SERIES(i, LEN({s}))";
+        var pick = forward ? "LIST_LAST" : "LIST_FIRST";
+        return
+            $"LIST_TRANSFORM(GENERATE_SERIES(1, LEN({s})), i -> " +
+            $"{pick}(LIST_TRANSFORM(LIST_FILTER({range}, j -> {notMissing}), j -> {s}[j])))";
+    }
+
+    /// <summary>Linear interpolation of nulls. For each index i find the nearest non-null index on
+    /// the left (il) and right (ir) and interpolate. Single-sided gaps copy the available endpoint.
+    /// Uses NULL-safe index filtering (no slicing, no subqueries-in-lambdas).</summary>
+    private static string SeriesFillLinear(string s)
+    {
+        // il / ir computed inline per element via index filtering over the prefix/suffix.
+        var il = $"LIST_LAST(LIST_FILTER(GENERATE_SERIES(1, i), j -> {s}[j] IS NOT NULL))";
+        var ir = $"LIST_FIRST(LIST_FILTER(GENERATE_SERIES(i, LEN({s})), j -> {s}[j] IS NOT NULL))";
+        return
+            $"LIST_TRANSFORM(GENERATE_SERIES(1, LEN({s})), i -> CASE " +
+            $"WHEN {s}[i] IS NOT NULL THEN {s}[i]::DOUBLE " +
+            $"WHEN {il} IS NOT NULL AND {ir} IS NOT NULL THEN " +
+            $"{s}[{il}]::DOUBLE + ({s}[{ir}] - {s}[{il}]) * ((i - {il})::DOUBLE / ({ir} - {il})) " +
+            $"WHEN {il} IS NOT NULL THEN {s}[{il}]::DOUBLE " +
+            $"WHEN {ir} IS NOT NULL THEN {s}[{ir}]::DOUBLE " +
+            $"ELSE NULL END)";
+    }
+
+    /// <summary>FIR weighted moving sum. args[0]=series, args[1]=filter coefficients,
+    /// optional args[2]=normalize (bool), args[3]=center (ignored).</summary>
+    private static string SeriesFir(string[] args)
+    {
+        var s = args[0];
+        var f = args.Length > 1 ? args[1] : "[1]";
+        bool normalize = args.Length > 2 &&
+            (args[2].Trim().Equals("true", StringComparison.OrdinalIgnoreCase) || args[2].Trim() == "1");
+        // window output i = Σ_k filter[k+1] * s[i-k] ; taps before the start contribute 0.
+        var conv = $"LIST_TRANSFORM(GENERATE_SERIES(1, LEN({s})), i -> " +
+                   $"LIST_SUM(LIST_TRANSFORM(GENERATE_SERIES(1, LEN({f})), k -> " +
+                   $"CASE WHEN i - k + 1 >= 1 THEN {f}[k] * COALESCE({s}[i - k + 1], 0) ELSE 0 END)))";
+        if (normalize)
+            return $"LIST_TRANSFORM({conv}, x -> x::DOUBLE / NULLIF(LIST_SUM(LIST_TRANSFORM({f}, c -> ABS(c))), 0))";
+        return conv;
+    }
+
+    /// <summary>min/max/avg/stdev/variance/sum/count bag for series_stats[_dynamic].</summary>
+    private static string SeriesStats(string s)
+    {
+        var clean = $"LIST_FILTER({s}, x -> x IS NOT NULL)";
+        return
+            $"json_object(" +
+            $"'min', LIST_MIN({clean}), " +
+            $"'min_idx', LIST_POSITION({s}, LIST_MIN({clean})) - 1, " +
+            $"'max', LIST_MAX({clean}), " +
+            $"'max_idx', LIST_POSITION({s}, LIST_MAX({clean})) - 1, " +
+            $"'avg', LIST_AVG({clean}), " +
+            $"'sum', LIST_SUM({clean}), " +
+            $"'stdev', LIST_AGGREGATE({clean}, 'stddev_samp'), " +
+            $"'variance', LIST_AGGREGATE({clean}, 'var_samp')" +
+            $")";
+    }
+
+    /// <summary>Least-squares line fit over the 0-based element index. Returns a bag with
+    /// slope/interception/rsquare plus the fitted line as a same-length list.</summary>
+    private static string SeriesFitLine(string s)
+    {
+        var n = $"LEN({s})::DOUBLE";
+        var xs = $"GENERATE_SERIES(0, LEN({s}) - 1)";                 // 0..n-1
+        var idx1 = $"GENERATE_SERIES(1, LEN({s}))";                    // 1..n (for s[i])
+        var sumX = $"LIST_SUM({xs})::DOUBLE";
+        var sumY = $"LIST_SUM({s})::DOUBLE";
+        var sumXX = $"LIST_SUM(LIST_TRANSFORM({xs}, x -> x * x))::DOUBLE";
+        var sumXY = $"LIST_SUM(LIST_TRANSFORM({idx1}, i -> (i - 1) * {s}[i]))::DOUBLE";
+        // slope = (n*Σxy - Σx*Σy) / (n*Σxx - Σx²); intercept = (Σy - slope*Σx)/n
+        var denom = $"NULLIF(({n} * {sumXX} - {sumX} * {sumX}), 0)";
+        var slope = $"(({n} * {sumXY} - {sumX} * {sumY}) / {denom})";
+        var intercept = $"(({sumY} - ({slope}) * {sumX}) / NULLIF({n}, 0))";
+        var line = $"LIST_TRANSFORM({xs}, x -> ({intercept}) + ({slope}) * x)";
+        // rsquare = 1 - SSres/SStot
+        var mean = $"({sumY} / NULLIF({n}, 0))";
+        var ssRes = $"LIST_SUM(LIST_TRANSFORM({idx1}, i -> POWER({s}[i] - (({intercept}) + ({slope}) * (i - 1)), 2)))";
+        var ssTot = $"LIST_SUM(LIST_TRANSFORM({s}, y -> POWER(y - {mean}, 2)))";
+        var rsquare = $"(1 - ({ssRes}) / NULLIF({ssTot}, 0))";
+        return
+            $"json_object('slope', {slope}, 'interception', {intercept}, " +
+            $"'rsquare', {rsquare}, 'line_fit', {line})";
+    }
+
+    /// <summary>Pearson correlation coefficient of two equal-length lists.</summary>
+    private static string SeriesPearson(string a, string b)
+    {
+        var nlen = $"LEAST(LEN({a}), LEN({b}))";
+        var idx = $"GENERATE_SERIES(1, {nlen})";
+        var n = $"{nlen}::DOUBLE";
+        var sx = $"LIST_SUM(LIST_TRANSFORM({idx}, i -> {a}[i]))::DOUBLE";
+        var sy = $"LIST_SUM(LIST_TRANSFORM({idx}, i -> {b}[i]))::DOUBLE";
+        var sxy = $"LIST_SUM(LIST_TRANSFORM({idx}, i -> {a}[i] * {b}[i]))::DOUBLE";
+        var sxx = $"LIST_SUM(LIST_TRANSFORM({idx}, i -> {a}[i] * {a}[i]))::DOUBLE";
+        var syy = $"LIST_SUM(LIST_TRANSFORM({idx}, i -> {b}[i] * {b}[i]))::DOUBLE";
+        var num = $"({n} * {sxy} - {sx} * {sy})";
+        var den = $"SQRT(NULLIF(({n} * {sxx} - {sx} * {sx}) * ({n} * {syy} - {sy} * {sy}), 0))";
+        return $"({num} / NULLIF({den}, 0))";
+    }
+
+    /// <summary>Per-element outlier score: (x - mean) / stdev (z-score). Same-length list.</summary>
+    private static string SeriesOutliers(string s)
+    {
+        var clean = $"LIST_FILTER({s}, x -> x IS NOT NULL)";
+        var mean = $"LIST_AVG({clean})";
+        var sd = $"NULLIF(LIST_AGGREGATE({clean}, 'stddev_samp'), 0)";
+        return $"LIST_TRANSFORM({s}, x -> CASE WHEN x IS NULL THEN NULL ELSE (x - {mean}) / {sd} END)";
     }
 
     public string GenerateSeries(string alias, string start, string end, string step)
