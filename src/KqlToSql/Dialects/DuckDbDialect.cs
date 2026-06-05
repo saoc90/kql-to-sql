@@ -99,9 +99,13 @@ public class DuckDbDialect : ISqlDialect
             "endofyear" => $"DATE_TRUNC('year', {args[0]}) + INTERVAL '1 year' - INTERVAL '1 microsecond'",
             "min_of" => $"LEAST({string.Join(", ", args)})",
             "max_of" => $"GREATEST({string.Join(", ", args)})",
+            // row_number([StartingIndex]) — offset the 1-based count to the requested start.
+            // (A 2nd 'restart' argument needs a reset-group and is handled by the scan/extend hoister.)
+            "row_number" when args.Length >= 1 => $"(ROW_NUMBER() OVER () + ({args[0]} - 1))",
             "row_number" => "ROW_NUMBER() OVER ()",
-            "prev" => $"LAG({args[0]}) OVER ()",
-            "next" => $"LEAD({args[0]}) OVER ()",
+            // prev/next(column [, offset [, default]]) → LAG/LEAD honor the offset and default-value args.
+            "prev" => $"LAG({string.Join(", ", args)}) OVER ()",
+            "next" => $"LEAD({string.Join(", ", args)}) OVER ()",
 
             // Date/time functions
             // KQL dayofweek() returns a *timespan* = whole days since the preceding Sunday
