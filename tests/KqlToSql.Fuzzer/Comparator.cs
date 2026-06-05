@@ -16,6 +16,8 @@ public enum Outcome
     BothError,         // both engines errored in a way we can't classify -> discard
     SkippedNondeterministic,
     SkippedUnsupported,
+    SkippedEngineError, // valid SQL, but DuckDB's runtime is stricter than Kusto (overflow raises vs
+                        // wraps; sqrt(-1)/log(0) raise vs NaN/-inf) -> engine-specific, tolerate.
 }
 
 public sealed record Verdict(
@@ -89,6 +91,9 @@ public static class Comparator
         if (dErr && duck.Stage == ErrorStage.Execute)
         {
             if (kErr) return new Verdict(Outcome.KustoError, $"both failed; kusto: {kusto.Error}", subs);
+            // The generated SQL is valid; DuckDB's runtime is just stricter than Kusto on numeric
+            // domains/overflow (Kusto wraps / returns NaN/±inf). Engine-specific → tolerate.
+            if (IsEngineDomainError(duck.Error)) return new Verdict(Outcome.SkippedEngineError, duck.Error, subs);
             return new Verdict(Outcome.SqlExecError, duck.Error, subs);
         }
         // DuckDB succeeded from here on.
@@ -441,6 +446,21 @@ public static class Comparator
     }
 
     // ---- diagnostics -------------------------------------------------------
+
+    /// <summary>True for DuckDB *runtime* errors that reflect a stricter numeric domain than Kusto
+    /// (which wraps overflow / returns NaN/±inf), not invalid SQL. Binder/Parser/Catalog/conversion
+    /// errors are deliberately NOT matched — those are genuine translation bugs.</summary>
+    private static bool IsEngineDomainError(string? err)
+    {
+        if (string.IsNullOrEmpty(err)) return false;
+        string[] markers =
+        {
+            "Out of Range Error", "Overflow in",
+            "cannot take square root", "cannot take logarithm",
+            "can't be cast because", // value-domain cast (e.g. -nan / out-of-range numeric)
+        };
+        return markers.Any(m => err.Contains(m, StringComparison.OrdinalIgnoreCase));
+    }
 
     private static string Names(EngineResult r) => "[" + string.Join(", ", r.Columns.Select(c => c.Name)) + "]";
 

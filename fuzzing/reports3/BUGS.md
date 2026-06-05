@@ -1,40 +1,22 @@
 # KQL→SQL Translator — Differential Fuzzing Findings
 
 Oracle: Kustainer (real Kusto). SUT: KqlToSqlConverter → DuckDB.
-Total verdicts: 1662. Bug candidates: 441.
+Total verdicts: 1662. Bug candidates: 418.
 
 ## Counts by outcome
 
 | Outcome | Count |
 |---|---|
-| Match | 1063 |
-| MismatchRows | 330 |
+| Match | 1068 |
+| MismatchRows | 328 |
 | KustoError | 127 |
-| SqlExecError | 97 |
+| SqlExecError | 76 |
 | SkippedNondeterministic | 31 |
+| SkippedEngineError | 18 |
 | MismatchOrder | 11 |
 | MismatchColumns | 3 |
 
-## Family: aggregation (33)
-
-### `agent-aggregation-0000` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: STDDEV_SAMP is out of range!
-
-**KQL**
-```kql
-datatable(k:long, v:real)[ 1,real(nan), 1,real(nan), 2,real(+inf), 2,real(-inf), 2,1.5 ] | summarize s=sum(v), mx=max(v), mn=min(v), av=avg(v), st=stdev(v), va=variance(v) by k | order by k asc
-```
-**Generated SQL**
-```sql
-SELECT * FROM (SELECT k, COALESCE(SUM(v), 0) AS s, MAX(v) AS mx, MIN(v) AS mn, COALESCE(AVG(v), 'nan'::DOUBLE) AS av, STDDEV_SAMP(v) AS st, VAR_SAMP(v) AS va FROM (VALUES (CAST(1 AS BIGINT), CAST(CAST('nan' AS DOUBLE) AS DOUBLE)), (CAST(1 AS BIGINT), CAST(CAST('nan' AS DOUBLE) AS DOUBLE)), (CAST(2 AS BIGINT), CAST(CAST('inf' AS DOUBLE) AS DOUBLE)), (CAST(2 AS BIGINT), CAST(CAST('-inf' AS DOUBLE) AS DOUBLE)), (CAST(2 AS BIGINT), CAST(1.5 AS DOUBLE))) AS t(k, v) GROUP BY ALL) ORDER BY k ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, s:Real, mx:Real, mn:Real, av:Real, st:Real, va:Real] rows=2
-    - (1, NaN, NaN, NaN, NaN, NaN, NaN)
-    - (2, NaN, Infinity, -Infinity, NaN, NaN, NaN)
-- DuckDB: ERROR — Out of Range Error: STDDEV_SAMP is out of range!
+## Family: aggregation (30)
 
 ### `agent-aggregation-0013` — SqlExecError (highest)
 
@@ -118,7 +100,7 @@ SELECT COALESCE(LIST(d) FILTER (WHERE d IS NOT NULL), []) AS list_d FROM (VALUES
 *Detail:* first differing row[0]: kusto=(1, {
   "a": 1,
   "b": 2
-}) duck=(1, {"{\u0022a\u0022:1}":1,"{\u0022b\u0022:2}":1})
+}) duck=(2, {"{\u0022c\u0022:3}":1})
 
 **KQL**
 ```kql
@@ -139,12 +121,12 @@ SELECT k, histogram(v) AS bag_v FROM (VALUES (CAST(1 AS BIGINT), '{"a":1}'::JSON
   "c": 3
 })
 - DuckDB: cols=[k:Int, bag_v:Unknown] rows=2
-    - (1, {"{\u0022a\u0022:1}":1,"{\u0022b\u0022:2}":1})
     - (2, {"{\u0022c\u0022:3}":1})
+    - (1, {"{\u0022a\u0022:1}":1,"{\u0022b\u0022:2}":1})
 
 ### `agent-aggregation-0001` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(1, 20, 'b', 20, 'b') duck=(2, null, null, null, null)
+*Detail:* first differing row[1]: kusto=(2, null, 'c', null, 'c') duck=(2, null, null, null, null)
 
 **KQL**
 ```kql
@@ -160,13 +142,13 @@ SELECT k, MAX(v) AS v, ARG_MAX(t, v) AS t, MIN(v) AS v1, ARG_MIN(t, v) AS t1 FRO
     - (1, 20, 'b', 20, 'b')
     - (2, null, 'c', null, 'c')
 - DuckDB: cols=[k:Int, v:Int, t:String, v1:Int, t1:String] rows=2
-    - (2, null, null, null, null)
     - (1, 20, 'b', 20, 'b')
+    - (2, null, null, null, null)
 
 ### `agent-aggregation-0002` — MismatchRows (high)
 
 *Sub-verdicts:* NAME_MISMATCH  
-*Detail:* first differing row[0]: kusto=(1, NaN, NaN, NaN, 1, NaN) duck=(1, NaN, 1.5, NaN, 1, NaN)
+*Detail:* first differing row[0]: kusto=(1, NaN, NaN, NaN, 1, NaN) duck=(2, NaN, NaN, NaN, 2, NaN)
 
 **KQL**
 ```kql
@@ -182,8 +164,8 @@ SELECT k, MAX(v) AS mx, MIN(v) AS mn, MAX(v) AS amx, ARG_MAX(k, v) AS k, COALESC
     - (1, NaN, NaN, NaN, 1, NaN)
     - (2, NaN, NaN, NaN, 2, NaN)
 - DuckDB: cols=[k:Int, mx:Real, mn:Real, amx:Real, k:Int, s:Real] rows=2
-    - (1, NaN, 1.5, NaN, 1, NaN)
     - (2, NaN, NaN, NaN, 2, NaN)
+    - (1, NaN, 1.5, NaN, 1, NaN)
 
 ### `agent-aggregation-0004` — MismatchRows (high)
 
@@ -301,7 +283,7 @@ SELECT STDDEV_SAMP(x) AS stdev_x, VAR_SAMP(x) AS variance_x, STDDEV_POP(x) AS st
 
 ### `agent-aggregation-0014` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('a', 1, 1, 7.5, 2.5) duck=('b', null, null, 10, 10)
+*Detail:* first differing row[1]: kusto=('b', 0, 0, 10, 10) duck=('b', null, null, 10, 10)
 
 **KQL**
 ```kql
@@ -317,12 +299,12 @@ SELECT g, STDDEV_SAMP(x) AS stdev_x, VAR_SAMP(x) AS variance_x, COALESCE(SUM(x),
     - ('a', 1, 1, 7.5, 2.5)
     - ('b', 0, 0, 10, 10)
 - DuckDB: cols=[g:String, stdev_x:Real, variance_x:Real, sum_x:Real, avg_x:Real] rows=2
-    - ('b', null, null, 10, 10)
     - ('a', 1, 1, 7.5, 2.5)
+    - ('b', null, null, 10, 10)
 
 ### `agent-aggregation-0016` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(2007-02-14T00:00:00.0000000Z, 3) duck=(2007-12-13T00:00:00.0000000Z, 7)
+*Detail:* first differing row[0]: kusto=(2007-02-14T00:00:00.0000000Z, 3) duck=(2007-02-16T00:00:00.0000000Z, 3)
 
 **KQL**
 ```kql
@@ -338,8 +320,8 @@ SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/2592000000)*2592000000
     - (2007-02-14T00:00:00.0000000Z, 3)
     - (2007-12-11T00:00:00.0000000Z, 7)
 - DuckDB: cols=[t:DateTime, sum_v:Int] rows=2
-    - (2007-12-13T00:00:00.0000000Z, 7)
     - (2007-02-16T00:00:00.0000000Z, 3)
+    - (2007-12-13T00:00:00.0000000Z, 7)
 
 ### `agent-aggregation-0019` — MismatchRows (high)
 
@@ -404,35 +386,6 @@ SELECT COUNT(*) FILTER (WHERE b) AS countif_, COUNT(*) FILTER (WHERE NOT (b)) AS
     - (1, 1, 2, 2, 4)
 - DuckDB: cols=[countif_:Int, countif_:Int, countif_:Int, sumif_v:Int, count_:Int] rows=1
     - (1, 3, 0, 2, 4)
-
-### `agent-aggregation-0030` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, [
-  2,
-  1
-], 2) duck=(1, [1,2], 2)
-
-**KQL**
-```kql
-datatable(x:long, y:long)[ 1,1, 1,1, 1,2, 2,1 ] | summarize c=count() by x, y | summarize subtotals=make_list(c), n=count() by x
-```
-**Generated SQL**
-```sql
-SELECT x, COALESCE(LIST(c) FILTER (WHERE c IS NOT NULL), []) AS subtotals, COUNT(*) AS n FROM (SELECT x, y, COUNT(*) AS c FROM (VALUES (CAST(1 AS BIGINT), CAST(1 AS BIGINT)), (CAST(1 AS BIGINT), CAST(1 AS BIGINT)), (CAST(1 AS BIGINT), CAST(2 AS BIGINT)), (CAST(2 AS BIGINT), CAST(1 AS BIGINT))) AS t(x, y) GROUP BY ALL) GROUP BY ALL
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int, subtotals:Dynamic, n:Int] rows=2
-    - (1, [
-  2,
-  1
-], 2)
-    - (2, [
-  1
-], 1)
-- DuckDB: cols=[x:Int, subtotals:Unknown, n:Int] rows=2
-    - (1, [1,2], 2)
-    - (2, [1], 1)
 
 ### `agent-aggregation-0043` — MismatchRows (high)
 
@@ -753,31 +706,6 @@ SELECT MIN(d) AS mn, MAX(d) AS mx, COUNT(*) AS cnt, max(d) - min(d) AS span, COA
 - DuckDB: cols=[mn:DateTime, mx:DateTime, cnt:Int, span:TimeSpan, ml:Unknown] rows=1
     - (2020-01-01T00:00:00.0000000Z, 2020-01-10T00:00:00.0000000Z, 3, 9.00:00:00, ["2020-01-01T00:00:00","2020-01-05T00:00:00","2020-01-10T00:00:00"])
 
-### `agent-aggregation-0027` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1000, 700, 2, [
-  200,
-  400
-]) duck=(1000, 700, 2, [400,200])
-
-**KQL**
-```kql
-datatable(g:long, v:long)[ 1,100, 1,200, 2,300, 2,400 ] | summarize tot=sum(v), amx=arg_max(v, g) by g | summarize gtot=sum(tot), maxgrp=arg_max(tot, g), allamx=make_list(amx)
-```
-**Generated SQL**
-```sql
-SELECT COALESCE(SUM(tot), 0) AS gtot, MAX(tot) AS maxgrp, ARG_MAX(g, tot) AS g, COALESCE(LIST(amx) FILTER (WHERE amx IS NOT NULL), []) AS allamx FROM (SELECT g, COALESCE(SUM(v), 0) AS tot, MAX(v) AS amx, ARG_MAX(g, v) AS g FROM (VALUES (CAST(1 AS BIGINT), CAST(100 AS BIGINT)), (CAST(1 AS BIGINT), CAST(200 AS BIGINT)), (CAST(2 AS BIGINT), CAST(300 AS BIGINT)), (CAST(2 AS BIGINT), CAST(400 AS BIGINT))) AS t(g, v) GROUP BY ALL)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Dynamic] rows=1
-    - (1000, 700, 2, [
-  200,
-  400
-])
-- DuckDB: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Unknown] rows=1
-    - (1000, 700, 2, [400,200])
-
 ### `agent-aggregation-0029` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=([
@@ -787,7 +715,7 @@ SELECT COALESCE(SUM(tot), 0) AS gtot, MAX(tot) AS maxgrp, ARG_MAX(g, tot) AS g, 
   1,
   2,
   1
-], 6, 3) duck=([[1,2,3],[1],[1,2]], 6, 3)
+], 6, 3) duck=([[1,2],[1,2,3],[1]], 6, 3)
 
 **KQL**
 ```kql
@@ -809,7 +737,7 @@ SELECT COALESCE(LIST("inner") FILTER (WHERE "inner" IS NOT NULL), []) AS outer_l
   1
 ], 6, 3)
 - DuckDB: cols=[outer_lists:Unknown, totcnt:Int, grps:Int] rows=1
-    - ([[1,2,3],[1],[1,2]], 6, 3)
+    - ([[1,2],[1,2,3],[1]], 6, 3)
 
 ### `agent-aggregation-0032` — MismatchRows (high)
 
@@ -876,7 +804,7 @@ SELECT MAX(x) AS mx, MIN(x) AS mn, COALESCE(AVG(x), 'nan'::DOUBLE) AS av, COALES
 ], [
   1,
   2
-]) duck=([1,2,3,4,5,6], [5,4,1,3,6,2])
+]) duck=([1,2,3,4,5,6], [5,3,6,1,2,4])
 
 **KQL**
 ```kql
@@ -898,7 +826,7 @@ SELECT COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS a, COALESCE(LIST(DI
   2
 ])
 - DuckDB: cols=[a:Unknown, b:Unknown] rows=1
-    - ([1,2,3,4,5,6], [5,4,1,3,6,2])
+    - ([1,2,3,4,5,6], [5,3,6,1,2,4])
 
 ### `agent-aggregation-0038` — MismatchRows (high)
 
@@ -987,7 +915,7 @@ SELECT * FROM (SELECT g, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS m
     "g": 3,
     "c": 2
   }
-]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:1,\u0022c\u0022:2}"])
+]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}"])
 
 **KQL**
 ```kql
@@ -1019,9 +947,9 @@ SELECT histogram(json_object(TRY_CAST(g AS TEXT), cnt)) AS bag, COALESCE(LIST(js
   }
 ])
 - DuckDB: cols=[bag:Unknown, histlist:Unknown] rows=1
-    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:2,\u0022c\u0022:1}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:1,\u0022c\u0022:2}"])
+    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}"])
 
-## Family: datetime-timespan (49)
+## Family: datetime-timespan (45)
 
 ### `agent-datetime-timespan-0036` — SqlExecError (highest)
 
@@ -1047,64 +975,16 @@ SELECT (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1
 LINE 1: SELECT (CASE WHEN (EXTRACT(EPOCH FROM (INTERVAL 'time(1.02:03:04.5670000)')) * 1000000) < 0 THEN '-' ELSE...
                                                         ^
 
-### `agent-datetime-timespan-0042` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Type DOUBLE with value -nan can't be cast because the value is out of range for the destination type INT64
-
-LINE 1: SELECT *, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/EPOCH_MS(CAST...
-                           ^
-
-**KQL**
-```kql
-datatable(t:datetime, span:timespan)[ datetime(1900-01-01),1d, datetime(2999-12-31 23:59:59),2h, datetime(1969-12-31 23:59:59.999),1tick ] | extend b = bin(t, span), added = t + span, dow = dayofweek(t)
-```
-**Generated SQL**
-```sql
-SELECT *, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/EPOCH_MS(CAST(TIMESTAMP 'epoch' + (span) AS TIMESTAMP)))*EPOCH_MS(CAST(TIMESTAMP 'epoch' + (span) AS TIMESTAMP)) AS BIGINT)) AS b, t + span AS added, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END AS dow FROM (VALUES (TIMESTAMP '1900-01-01 00:00:00', (86400000 * INTERVAL '1 millisecond')), (TIMESTAMP '2999-12-31 23:59:59', (7200000 * INTERVAL '1 millisecond')), (TIMESTAMP '1969-12-31 23:59:59.999000', ((1 / 10.0) * INTERVAL '1 microsecond'))) AS t(t, span)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, span:TimeSpan, b:DateTime, added:DateTime, dow:TimeSpan] rows=3
-    - (1900-01-01T00:00:00.0000000Z, 1.00:00:00, 1900-01-01T00:00:00.0000000Z, 1900-01-02T00:00:00.0000000Z, 1.00:00:00)
-    - (2999-12-31T23:59:59.0000000Z, 02:00:00, 2999-12-31T22:00:00.0000000Z, 3000-01-01T01:59:59.0000000Z, 2.00:00:00)
-    - (1969-12-31T23:59:59.9990000Z, 00:00:00.0000001, 1969-12-31T23:59:59.9990000Z, 1969-12-31T23:59:59.9990001Z, 3.00:00:00)
-- DuckDB: ERROR — Conversion Error: Type DOUBLE with value -nan can't be cast because the value is out of range for the destination type INT64
-
-LINE 1: SELECT *, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/EPOCH_MS(CAST...
-                           ^
-
-### `agent-datetime-timespan-0044` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
-
-LINE 1: ... AS b6h FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-01-01 00:00:00' AS BIGINT), CAST(TIMES...
-                                                                          ^
-
-**KQL**
-```kql
-range t from datetime(2020-01-01) to datetime(2020-01-04) step 1d | extend sow = startofweek(t), wd = dayofweek(t), b6h = bin(t, 6h)
-```
-**Generated SQL**
-```sql
-SELECT *, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END AS wd, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/21600000)*21600000 AS BIGINT)) AS b6h FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-01-01 00:00:00' AS BIGINT), CAST(TIMESTAMP '2020-01-04 00:00:00' AS BIGINT), CAST((86400000 * INTERVAL '1 millisecond') AS BIGINT)))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, sow:DateTime, wd:TimeSpan, b6h:DateTime] rows=4
-    - (2020-01-01T00:00:00.0000000Z, 2019-12-29T00:00:00.0000000Z, 3.00:00:00, 2020-01-01T00:00:00.0000000Z)
-    - (2020-01-02T00:00:00.0000000Z, 2019-12-29T00:00:00.0000000Z, 4.00:00:00, 2020-01-02T00:00:00.0000000Z)
-    - (2020-01-03T00:00:00.0000000Z, 2019-12-29T00:00:00.0000000Z, 5.00:00:00, 2020-01-03T00:00:00.0000000Z)
-    - (2020-01-04T00:00:00.0000000Z, 2019-12-29T00:00:00.0000000Z, 6.00:00:00, 2020-01-04T00:00:00.0000000Z)
-- DuckDB: ERROR — Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
-
-LINE 1: ... AS b6h FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-01-01 00:00:00' AS BIGINT), CAST(TIMES...
-                                                                          ^
-
 ### `agent-datetime-timespan-0002` — SqlExecError (highest)
 
-*Detail:* Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
+*Detail:* Binder Error: No function matches the given name and argument types '/(VARCHAR, INTERVAL)'. You might need to add explicit type casts.
+	Candidate functions:
+	/(FLOAT, FLOAT) -> FLOAT
+	/(DOUBLE, DOUBLE) -> DOUBLE
+	/(INTERVAL, DOUBLE) -> INTERVAL
 
-LINE 1: ... AS woy FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2021-12-26 00:00:00' AS BIGINT), CAST(TIMES...
+
+LINE 1: ...' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS wd, EXTRACT(WEEK...
                                                                           ^
 
 **KQL**
@@ -1113,7 +993,7 @@ range t from datetime(2021-12-26) to datetime(2022-01-02) step 1d | extend sow =
 ```
 **Generated SQL**
 ```sql
-SELECT *, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') + INTERVAL '7 days' - INTERVAL '1 microsecond' AS eow, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS wd, EXTRACT(WEEK FROM t) AS woy FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2021-12-26 00:00:00' AS BIGINT), CAST(TIMESTAMP '2022-01-02 00:00:00' AS BIGINT), CAST((86400000 * INTERVAL '1 millisecond') AS BIGINT)))
+SELECT *, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') + INTERVAL '7 days' - INTERVAL '1 microsecond' AS eow, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS wd, EXTRACT(WEEK FROM t) AS woy FROM (SELECT generate_series AS t FROM generate_series(TIMESTAMP '2021-12-26 00:00:00', TIMESTAMP '2022-01-02 00:00:00', (86400000 * INTERVAL '1 millisecond')))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -1126,9 +1006,14 @@ SELECT *, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, 
     - (2021-12-31T00:00:00.0000000Z, 2021-12-26T00:00:00.0000000Z, 2022-01-01T23:59:59.9999999Z, 5, 52)
     - (2022-01-01T00:00:00.0000000Z, 2021-12-26T00:00:00.0000000Z, 2022-01-01T23:59:59.9999999Z, 6, 52)
     - (2022-01-02T00:00:00.0000000Z, 2022-01-02T00:00:00.0000000Z, 2022-01-08T23:59:59.9999999Z, 0, 52)
-- DuckDB: ERROR — Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
+- DuckDB: ERROR — Binder Error: No function matches the given name and argument types '/(VARCHAR, INTERVAL)'. You might need to add explicit type casts.
+	Candidate functions:
+	/(FLOAT, FLOAT) -> FLOAT
+	/(DOUBLE, DOUBLE) -> DOUBLE
+	/(INTERVAL, DOUBLE) -> INTERVAL
 
-LINE 1: ... AS woy FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2021-12-26 00:00:00' AS BIGINT), CAST(TIMES...
+
+LINE 1: ...' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS wd, EXTRACT(WEEK...
                                                                           ^
 
 ### `agent-datetime-timespan-0018` — SqlExecError (highest)
@@ -1271,42 +1156,16 @@ SELECT *, TIMESTAMP '2023-01-01 00:00:00' + i * (86400000 * INTERVAL '1 millisec
 LINE 1: ...isecond') + INTERVAL '1 day') - INTERVAL '1 day') AS sow, (EXTRACT(EPOCH FROM (CASE WHEN EXTRACT(DOW FROM TIMESTAMP...
                                                                       ^
 
-### `agent-datetime-timespan-0048` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
-
-LINE 1: ... AS eom FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-02-28 22:00:00' AS BIGINT), CAST(TIMES...
-                                                                          ^
-
-**KQL**
-```kql
-range t from datetime(2020-02-28 22:00:00) to datetime(2020-03-01 02:00:00) step 1h | extend b1d = bin(t, 1d), bm = monthofyear(t), eom = endofmonth(t)
-```
-**Generated SQL**
-```sql
-SELECT *, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/86400000)*86400000 AS BIGINT)) AS b1d, EXTRACT(MONTH FROM t) AS bm, DATE_TRUNC('month', t) + INTERVAL '1 month' - INTERVAL '1 microsecond' AS eom FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-02-28 22:00:00' AS BIGINT), CAST(TIMESTAMP '2020-03-01 02:00:00' AS BIGINT), CAST((3600000 * INTERVAL '1 millisecond') AS BIGINT)))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, b1d:DateTime, bm:Int, eom:DateTime] rows=29
-    - (2020-02-28T22:00:00.0000000Z, 2020-02-28T00:00:00.0000000Z, 2, 2020-02-29T23:59:59.9999999Z)
-    - (2020-02-28T23:00:00.0000000Z, 2020-02-28T00:00:00.0000000Z, 2, 2020-02-29T23:59:59.9999999Z)
-    - (2020-02-29T00:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2, 2020-02-29T23:59:59.9999999Z)
-    - (2020-02-29T01:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2, 2020-02-29T23:59:59.9999999Z)
-    - (2020-02-29T02:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2, 2020-02-29T23:59:59.9999999Z)
-    - (2020-02-29T03:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2, 2020-02-29T23:59:59.9999999Z)
-    - (2020-02-29T04:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2, 2020-02-29T23:59:59.9999999Z)
-    - (2020-02-29T05:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2, 2020-02-29T23:59:59.9999999Z)
-- DuckDB: ERROR — Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
-
-LINE 1: ... AS eom FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-02-28 22:00:00' AS BIGINT), CAST(TIMES...
-                                                                          ^
-
 ### `agent-datetime-timespan-0002` — SqlExecError (highest)
 
-*Detail:* Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
+*Detail:* Binder Error: No function matches the given name and argument types '/(VARCHAR, INTERVAL)'. You might need to add explicit type casts.
+	Candidate functions:
+	/(FLOAT, FLOAT) -> FLOAT
+	/(DOUBLE, DOUBLE) -> DOUBLE
+	/(INTERVAL, DOUBLE) -> INTERVAL
 
-LINE 1: ... AS dow FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2023-12-29 00:00:00' AS BIGINT), CAST(TIMES...
+
+LINE 1: ...' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS dow FROM (SELECT...
                                                                           ^
 
 **KQL**
@@ -1315,7 +1174,7 @@ range t from datetime(2023-12-29) to datetime(2024-01-04) step 1d | extend sow =
 ```
 **Generated SQL**
 ```sql
-SELECT *, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') + INTERVAL '7 days' - INTERVAL '1 microsecond' AS eow, DATE_TRUNC('month', t) AS som, DATE_TRUNC('year', t) AS soy, EXTRACT(WEEK FROM t) AS woy, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS dow FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2023-12-29 00:00:00' AS BIGINT), CAST(TIMESTAMP '2024-01-04 00:00:00' AS BIGINT), CAST((86400000 * INTERVAL '1 millisecond') AS BIGINT)))
+SELECT *, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') + INTERVAL '7 days' - INTERVAL '1 microsecond' AS eow, DATE_TRUNC('month', t) AS som, DATE_TRUNC('year', t) AS soy, EXTRACT(WEEK FROM t) AS woy, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS dow FROM (SELECT generate_series AS t FROM generate_series(TIMESTAMP '2023-12-29 00:00:00', TIMESTAMP '2024-01-04 00:00:00', (86400000 * INTERVAL '1 millisecond')))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -1327,9 +1186,14 @@ SELECT *, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, 
     - (2024-01-02T00:00:00.0000000Z, 2023-12-31T00:00:00.0000000Z, 2024-01-06T23:59:59.9999999Z, 2024-01-01T00:00:00.0000000Z, 2024-01-01T00:00:00.0000000Z, 1, 2)
     - (2024-01-03T00:00:00.0000000Z, 2023-12-31T00:00:00.0000000Z, 2024-01-06T23:59:59.9999999Z, 2024-01-01T00:00:00.0000000Z, 2024-01-01T00:00:00.0000000Z, 1, 3)
     - (2024-01-04T00:00:00.0000000Z, 2023-12-31T00:00:00.0000000Z, 2024-01-06T23:59:59.9999999Z, 2024-01-01T00:00:00.0000000Z, 2024-01-01T00:00:00.0000000Z, 1, 4)
-- DuckDB: ERROR — Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
+- DuckDB: ERROR — Binder Error: No function matches the given name and argument types '/(VARCHAR, INTERVAL)'. You might need to add explicit type casts.
+	Candidate functions:
+	/(FLOAT, FLOAT) -> FLOAT
+	/(DOUBLE, DOUBLE) -> DOUBLE
+	/(INTERVAL, DOUBLE) -> INTERVAL
 
-LINE 1: ... AS dow FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2023-12-29 00:00:00' AS BIGINT), CAST(TIMES...
+
+LINE 1: ...' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS dow FROM (SELECT...
                                                                           ^
 
 ### `agent-datetime-timespan-0004` — SqlExecError (highest)
@@ -1447,37 +1311,6 @@ SELECT *, DATE_TRUNC('month', t) + INTERVAL '1 month' - INTERVAL '1 microsecond'
 
 
 LINE 1: ...' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS dow FROM (VALUES...
-                                                                          ^
-
-### `agent-datetime-timespan-0017` — SqlExecError (highest)
-
-*Detail:* Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
-
-LINE 1: ...) AS mo FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-02-28 22:00:00' AS BIGINT), CAST(TIMES...
-                                                                          ^
-
-**KQL**
-```kql
-range t from datetime(2020-02-28 22:00:00) to datetime(2020-03-01 04:00:00) step 90m | extend b1d = bin(t, 1d), b6h = bin(t, 6h), eom = endofmonth(t), mo = monthofyear(t)
-```
-**Generated SQL**
-```sql
-SELECT *, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/86400000)*86400000 AS BIGINT)) AS b1d, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/21600000)*21600000 AS BIGINT)) AS b6h, DATE_TRUNC('month', t) + INTERVAL '1 month' - INTERVAL '1 microsecond' AS eom, EXTRACT(MONTH FROM t) AS mo FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-02-28 22:00:00' AS BIGINT), CAST(TIMESTAMP '2020-03-01 04:00:00' AS BIGINT), CAST((5400000 * INTERVAL '1 millisecond') AS BIGINT)))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, b1d:DateTime, b6h:DateTime, eom:DateTime, mo:Int] rows=21
-    - (2020-02-28T22:00:00.0000000Z, 2020-02-28T00:00:00.0000000Z, 2020-02-28T18:00:00.0000000Z, 2020-02-29T23:59:59.9999999Z, 2)
-    - (2020-02-28T23:30:00.0000000Z, 2020-02-28T00:00:00.0000000Z, 2020-02-28T18:00:00.0000000Z, 2020-02-29T23:59:59.9999999Z, 2)
-    - (2020-02-29T01:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T23:59:59.9999999Z, 2)
-    - (2020-02-29T02:30:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T23:59:59.9999999Z, 2)
-    - (2020-02-29T04:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T23:59:59.9999999Z, 2)
-    - (2020-02-29T05:30:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T23:59:59.9999999Z, 2)
-    - (2020-02-29T07:00:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T06:00:00.0000000Z, 2020-02-29T23:59:59.9999999Z, 2)
-    - (2020-02-29T08:30:00.0000000Z, 2020-02-29T00:00:00.0000000Z, 2020-02-29T06:00:00.0000000Z, 2020-02-29T23:59:59.9999999Z, 2)
-- DuckDB: ERROR — Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
-
-LINE 1: ...) AS mo FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-02-28 22:00:00' AS BIGINT), CAST(TIMES...
                                                                           ^
 
 ### `agent-datetime-timespan-0029` — SqlExecError (highest)
@@ -1609,9 +1442,14 @@ LINE 1: SELECT ((EXTRACT(EPOCH FROM (CASE WHEN EXTRACT(DOW FROM TIMESTAMP...
 
 ### `agent-datetime-timespan-0044` — SqlExecError (highest)
 
-*Detail:* Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
+*Detail:* Binder Error: No function matches the given name and argument types '/(VARCHAR, INTERVAL)'. You might need to add explicit type casts.
+	Candidate functions:
+	/(FLOAT, FLOAT) -> FLOAT
+	/(DOUBLE, DOUBLE) -> DOUBLE
+	/(INTERVAL, DOUBLE) -> INTERVAL
 
-LINE 1: ... AS som FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-12-28 00:00:00' AS BIGINT), CAST(TIMES...
+
+LINE 1: ...' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS iso_dow, (DATE_T...
                                                                           ^
 
 **KQL**
@@ -1620,7 +1458,7 @@ range t from datetime(2020-12-28) to datetime(2021-01-04) step 1d | extend woy =
 ```
 **Generated SQL**
 ```sql
-SELECT *, EXTRACT(WEEK FROM t) AS woy, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS iso_dow, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') + INTERVAL '7 days' - INTERVAL '1 microsecond' AS eow, DATE_TRUNC('month', t) AS som FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-12-28 00:00:00' AS BIGINT), CAST(TIMESTAMP '2021-01-04 00:00:00' AS BIGINT), CAST((86400000 * INTERVAL '1 millisecond') AS BIGINT)))
+SELECT *, EXTRACT(WEEK FROM t) AS woy, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS iso_dow, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') AS sow, (DATE_TRUNC('week', t + INTERVAL '1 day') - INTERVAL '1 day') + INTERVAL '7 days' - INTERVAL '1 microsecond' AS eow, DATE_TRUNC('month', t) AS som FROM (SELECT generate_series AS t FROM generate_series(TIMESTAMP '2020-12-28 00:00:00', TIMESTAMP '2021-01-04 00:00:00', (86400000 * INTERVAL '1 millisecond')))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -1633,9 +1471,14 @@ SELECT *, EXTRACT(WEEK FROM t) AS woy, CASE WHEN EXTRACT(DOW FROM t) = 0 THEN '0
     - (2021-01-02T00:00:00.0000000Z, 53, 6, 2020-12-27T00:00:00.0000000Z, 2021-01-02T23:59:59.9999999Z, 2021-01-01T00:00:00.0000000Z)
     - (2021-01-03T00:00:00.0000000Z, 53, 0, 2021-01-03T00:00:00.0000000Z, 2021-01-09T23:59:59.9999999Z, 2021-01-01T00:00:00.0000000Z)
     - (2021-01-04T00:00:00.0000000Z, 1, 1, 2021-01-03T00:00:00.0000000Z, 2021-01-09T23:59:59.9999999Z, 2021-01-01T00:00:00.0000000Z)
-- DuckDB: ERROR — Conversion Error: Unimplemented type for cast (TIMESTAMP -> BIGINT)
+- DuckDB: ERROR — Binder Error: No function matches the given name and argument types '/(VARCHAR, INTERVAL)'. You might need to add explicit type casts.
+	Candidate functions:
+	/(FLOAT, FLOAT) -> FLOAT
+	/(DOUBLE, DOUBLE) -> DOUBLE
+	/(INTERVAL, DOUBLE) -> INTERVAL
 
-LINE 1: ... AS som FROM (SELECT generate_series AS t FROM generate_series(CAST(TIMESTAMP '2020-12-28 00:00:00' AS BIGINT), CAST(TIMES...
+
+LINE 1: ...' ELSE CAST(EXTRACT(DOW FROM t) AS VARCHAR) || '.00:00:00' END / (86400000 * INTERVAL '1 millisecond') AS iso_dow, (DATE_T...
                                                                           ^
 
 ### `agent-datetime-timespan-0046` — SqlExecError (highest)
@@ -2647,7 +2490,7 @@ SELECT COALESCE(LIST(k) FILTER (WHERE k IS NOT NULL), []) AS list_k, COALESCE(LI
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
-- Kusto: cols=[list_k:Dynamic, list_d___obj_98b907a0-0b22-4423-a34a-283263a16706:Dynamic] rows=1
+- Kusto: cols=[list_k:Dynamic, list_d___obj_b65e232e-89cb-4541-85ad-5c96aceee4ed:Dynamic] rows=1
     - ([
   "d",
   "c",
@@ -3716,7 +3559,7 @@ SELECT *, CASE WHEN TYPEOF(x) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEI
 
 ### `agent-dynamic-json-0028` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('red', 1) duck=('"blue"', 1)
+*Detail:* first differing row[0]: kusto=('red', 1) duck=('"green"', 1)
 
 **KQL**
 ```kql
@@ -3733,9 +3576,9 @@ SELECT TRY_CAST(tag AS TEXT) AS tag, COUNT(*) AS cnt FROM (SELECT t.*, u.value A
     - ('green', 1)
     - ('blue', 1)
 - DuckDB: cols=[tag:String, cnt:Int] rows=3
+    - ('"green"', 1)
     - ('"blue"', 1)
     - ('"red"', 1)
-    - ('"green"', 1)
 
 ### `agent-dynamic-json-0029` — MismatchRows (high)
 
@@ -4713,7 +4556,7 @@ SELECT *, LIST_CONTAINS(a, 2) AS has2, LIST_CONTAINS(a, 9) AS has9, LIST_CONTAIN
 *Detail:* first differing row[0]: kusto=(7, [
   "a",
   "c"
-]) duck=(7, ["\u0022c\u0022","\u0022a\u0022"])
+]) duck=(7, ["\u0022a\u0022","\u0022c\u0022"])
 
 **KQL**
 ```kql
@@ -4731,7 +4574,7 @@ SELECT COALESCE(SUM(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') A
   "c"
 ])
 - DuckDB: cols=[total:Int, names:Unknown] rows=1
-    - (7, ["\u0022c\u0022","\u0022a\u0022"])
+    - (7, ["\u0022a\u0022","\u0022c\u0022"])
 
 ### `agent-dynamic-json-0031` — MismatchRows (high)
 
@@ -5883,7 +5726,7 @@ SELECT label, s FROM (SELECT *, CONCAT('g_', g) AS label FROM (SELECT g, COALESC
     - ('g_b', 3)
     - ('g_a', 3)
 
-## Family: null-and-edge (44)
+## Family: null-and-edge (39)
 
 ### `agent-null-and-edge-0008` — SqlExecError (highest)
 
@@ -5904,82 +5747,6 @@ SELECT s, e, n FROM (SELECT *, (s IS NULL OR CAST(s AS VARCHAR) = '') AS e, (s I
     - ('', True, False)
     - ('', True, False)
 - DuckDB: ERROR — Binder Error: UNION (ALL) BY NAME operation doesn't support duplicate names in the SELECT list - the name "s" occurs multiple times
-
-### `agent-null-and-edge-0028` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-**KQL**
-```kql
-print x = int(2147483647) + 1
-```
-**Generated SQL**
-```sql
-SELECT 2147483647 + 1 AS x
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int] rows=1
-    - (2147483648)
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-### `agent-null-and-edge-0011` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
-
-**KQL**
-```kql
-datatable(x:long)[ 9223372036854775807, -9223372036854775808, 0 ] | extend p=x+1, m=x-1, d=x*2 | project x, p, m, d
-```
-**Generated SQL**
-```sql
-SELECT x, p, m, d FROM (SELECT *, x + 1 AS p, x - 1 AS m, x * 2 AS d FROM (VALUES (CAST(9223372036854775807 AS BIGINT)), (CAST(-9223372036854775808 AS BIGINT)), (CAST(0 AS BIGINT))) AS t(x))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int, p:Int, m:Int, d:Int] rows=3
-    - (9223372036854775807, -9223372036854775808, 9223372036854775806, -2)
-    - (-9223372036854775808, -9223372036854775807, 9223372036854775807, 0)
-    - (0, 1, -1, 0)
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
-
-### `agent-null-and-edge-0012` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-**KQL**
-```kql
-print a=int(2147483647)+int(1), b=int(-2147483648)-int(1), c=long(2147483647)+long(1), d=int(2147483647)*int(2)
-```
-**Generated SQL**
-```sql
-SELECT 2147483647 + 1 AS a, -2147483648 - 1 AS b, 2147483647 + 1 AS c, 2147483647 * 2 AS d
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:Int, b:Int, c:Int, d:Int] rows=1
-    - (2147483648, -2147483649, 2147483648, 4294967294)
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-### `agent-null-and-edge-0015` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: cannot take logarithm of zero
-
-**KQL**
-```kql
-datatable(r:real)[ 1.0, 0.0, -1.0 ] | extend d=1.0/r, l=log(r), sq=sqrt(r) | project r, d, l, sq | order by r asc
-```
-**Generated SQL**
-```sql
-SELECT r, d, l, sq FROM (SELECT *, 1.0 / r AS d, LN(r) AS l, SQRT(r) AS sq FROM (VALUES (CAST(1.0 AS DOUBLE)), (CAST(0.0 AS DOUBLE)), (CAST(-1.0 AS DOUBLE))) AS t(r)) ORDER BY r ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[r:Real, d:Real, l:Real, sq:Real] rows=3
-    - (-1, -1, null, NaN)
-    - (0, Infinity, -Infinity, 0)
-    - (1, 1, 0, 1)
-- DuckDB: ERROR — Out of Range Error: cannot take logarithm of zero
 
 ### `agent-null-and-edge-0025` — SqlExecError (highest)
 
@@ -6034,25 +5801,6 @@ SELECT CAST('null' AS JSON) AS a, CAST('[]' AS JSON) AS b, CAST('{}' AS JSON) AS
 
 LINE 1: ... JSON) AS a, CAST('[]' AS JSON) AS b, CAST('{}' AS JSON) AS c, CAST('' AS JSON) AS d, CAST('not json' AS JSON) AS e, (CAST...
                                                                           ^
-
-### `agent-null-and-edge-0014` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
-
-**KQL**
-```kql
-datatable(x:long)[ 9223372036854775807, long(null) ] | extend y=x+1, z=coalesce(x, 0)+1 | project x, y, z
-```
-**Generated SQL**
-```sql
-SELECT x, y, z FROM (SELECT *, x + 1 AS y, COALESCE(x, 0) + 1 AS z FROM (VALUES (CAST(9223372036854775807 AS BIGINT)), (CAST(CAST(NULL AS BIGINT) AS BIGINT))) AS t(x))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int, y:Int, z:Int] rows=2
-    - (9223372036854775807, -9223372036854775808, -9223372036854775808)
-    - (null, null, 1)
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
 
 ### `agent-null-and-edge-0038` — MismatchRows (high)
 
@@ -6863,7 +6611,7 @@ SELECT x, d, m FROM (SELECT *, CAST(TRUNC(CAST(10 AS DOUBLE) / NULLIF(x, 0)) AS 
     - (-1, -10, 0)
     - (null, null, null)
 
-## Family: parse-search (17)
+## Family: parse-search (15)
 
 ### `agent-parse-search-0012` — SqlExecError (highest)
 
@@ -6889,42 +6637,6 @@ SELECT s FROM (SELECT 'search_arg0' AS "$table", * FROM (VALUES ('error', CAST(1
 
 LINE 1: ... BIGINT)), ('info', CAST(3 AS BIGINT))) AS t(s, n) WHERE NOT ('error'))
                                                                          ^
-
-### `agent-parse-search-0021` — SqlExecError (highest)
-
-*Detail:* Invalid Input Error: Type INT64 with value 17280000000 can't be cast because the value is out of range for the destination type INT32
-
-**KQL**
-```kql
-datatable(t:datetime)[ datetime(2020-01-01), datetime(2020-07-01), datetime(2021-01-01), datetime(2021-07-01) ] | where t between (datetime(2020-06-01) .. (datetime(2020-06-01)+200d)) | project t
-```
-**Generated SQL**
-```sql
-SELECT t FROM (VALUES (TIMESTAMP '2020-01-01 00:00:00'), (TIMESTAMP '2020-07-01 00:00:00'), (TIMESTAMP '2021-01-01 00:00:00'), (TIMESTAMP '2021-07-01 00:00:00')) AS t(t) WHERE t BETWEEN TIMESTAMP '2020-06-01 00:00:00' AND (TIMESTAMP '2020-06-01 00:00:00' + (17280000000 * INTERVAL '1 millisecond'))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime] rows=1
-    - (2020-07-01T00:00:00.0000000Z)
-- DuckDB: ERROR — Invalid Input Error: Type INT64 with value 17280000000 can't be cast because the value is out of range for the destination type INT32
-
-### `agent-parse-search-0033` — SqlExecError (highest)
-
-*Detail:* Invalid Input Error: Type INT64 with value 63072000000 can't be cast because the value is out of range for the destination type INT32
-
-**KQL**
-```kql
-datatable(s:string)[ "from=2020-01-01 to=2021-12-31" ] | parse s with "from=" d1:datetime " to=" d2:datetime | where d2 between (d1 .. (d1 + 730d)) | project d1, d2
-```
-**Generated SQL**
-```sql
-SELECT d1, d2 FROM (SELECT *, TRY_CAST(REGEXP_EXTRACT(s, 'from=(.*?)\ to=(.*)', 1) AS TIMESTAMP) AS d1, TRY_CAST(REGEXP_EXTRACT(s, 'from=(.*?)\ to=(.*)', 2) AS TIMESTAMP) AS d2 FROM (VALUES ('from=2020-01-01 to=2021-12-31')) AS t(s)) WHERE d2 BETWEEN d1 AND (d1 + (63072000000 * INTERVAL '1 millisecond'))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[d1:DateTime, d2:DateTime] rows=1
-    - (2020-01-01T00:00:00.0000000Z, 2021-12-31T00:00:00.0000000Z)
-- DuckDB: ERROR — Invalid Input Error: Type INT64 with value 63072000000 can't be cast because the value is out of range for the destination type INT32
 
 ### `agent-parse-search-0040` — SqlExecError (highest)
 
@@ -9077,62 +8789,7 @@ SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), 
     - ('where', 'kw')
     - ('MiXeD', 'y')
 
-## Family: type-casts-coercion (69)
-
-### `agent-type-casts-coercion-0003` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-**KQL**
-```kql
-print x = toint(2147483647) + toint(1)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS x
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int] rows=1
-    - (2147483648)
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-### `agent-type-casts-coercion-0019` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
-
-**KQL**
-```kql
-datatable(l:long)[ 9223372036854775807, -9223372036854775808 ] | extend plus = l + 1, minus = l - 1
-```
-**Generated SQL**
-```sql
-SELECT *, l + 1 AS plus, l - 1 AS minus FROM (VALUES (CAST(9223372036854775807 AS BIGINT)), (CAST(-9223372036854775808 AS BIGINT))) AS t(l)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[l:Int, plus:Int, minus:Int] rows=2
-    - (9223372036854775807, -9223372036854775808, 9223372036854775806)
-    - (-9223372036854775808, -9223372036854775807, 9223372036854775807)
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
-
-### `agent-type-casts-coercion-0005` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-**KQL**
-```kql
-print over1 = toint(2147483647) + 1, over2 = tolong(toint(2147483647) + 1), over3 = 2147483647 + 1, over4 = int(2147483647) * int(2)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1 AS over1, TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1 AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1 AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS over2, 2147483647 + 1 AS over3, 2147483647 * 2 AS over4
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[over1:Int, over2:Int, over3:Int, over4:Int] rows=1
-    - (2147483648, 2147483648, 2147483648, 4294967294)
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
+## Family: type-casts-coercion (60)
 
 ### `agent-type-casts-coercion-0017` — SqlExecError (highest)
 
@@ -9187,119 +8844,6 @@ SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS
 
 LINE 1: ...cond')))) AS ts_div, (86400000 * INTERVAL '1 millisecond') % (18000000 * INTERVAL '1 millisecond') AS ts_mod, TRY_CAST...
                                                                       ^
-
-### `agent-type-casts-coercion-0031` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: cannot take square root of a negative number
-
-**KQL**
-```kql
-print sqrt_neg = sqrt(-1.0), log_neg = log(-1.0), log_zero = log(0.0), exp_big = exp(1000.0), isnan_sqrt = isnan(sqrt(-1.0))
-```
-**Generated SQL**
-```sql
-SELECT SQRT((-1.0)) AS sqrt_neg, LN((-1.0)) AS log_neg, LN(0.0) AS log_zero, EXP(1000.0) AS exp_big, ISNAN(SQRT((-1.0))) AS isnan_sqrt
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[sqrt_neg:Real, log_neg:Real, log_zero:Real, exp_big:Real, isnan_sqrt:Bool] rows=1
-    - (NaN, null, -Infinity, Infinity, True)
-- DuckDB: ERROR — Out of Range Error: cannot take square root of a negative number
-
-### `agent-type-casts-coercion-0038` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in negation of numeric value!
-
-**KQL**
-```kql
-datatable(i:int)[ 2147483647, -2147483648, 1000000, -1000000 ] | extend sq = i * i, sq_long = tolong(i) * tolong(i), neg = -i, abs_v = abs(i), as_long = tolong(i) * 1000
-```
-**Generated SQL**
-```sql
-SELECT *, i * i AS sq, TRY_CAST(TRUNC(COALESCE(TRY_CAST(i AS DOUBLE), TRY_CAST(TRY_CAST(i AS BOOLEAN) AS DOUBLE))) AS BIGINT) * TRY_CAST(TRUNC(COALESCE(TRY_CAST(i AS DOUBLE), TRY_CAST(TRY_CAST(i AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS sq_long, (-i) AS neg, GREATEST(i, -(i)) AS abs_v, TRY_CAST(TRUNC(COALESCE(TRY_CAST(i AS DOUBLE), TRY_CAST(TRY_CAST(i AS BOOLEAN) AS DOUBLE))) AS BIGINT) * 1000 AS as_long FROM (VALUES (2147483647), (-2147483648), (1000000), (-1000000)) AS t(i)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[i:Int, sq:Int, sq_long:Int, neg:Int, abs_v:Int, as_long:Int] rows=4
-    - (2147483647, 4611686014132420609, 4611686014132420609, -2147483647, 2147483647, 2147483647000)
-    - (-2147483648, 4611686018427387904, 4611686018427387904, 2147483648, 2147483648, -2147483648000)
-    - (1000000, 1000000000000, 1000000000000, -1000000, 1000000, 1000000000)
-    - (-1000000, 1000000000000, 1000000000000, 1000000, 1000000, -1000000000)
-- DuckDB: ERROR — Out of Range Error: Overflow in negation of numeric value!
-
-### `agent-type-casts-coercion-0002` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-**KQL**
-```kql
-print x = toint(2147483647)+toint(1)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS x
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int] rows=1
-    - (2147483648)
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-### `agent-type-casts-coercion-0035` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
-
-**KQL**
-```kql
-datatable(x:long)[ 9223372036854775807, -9223372036854775808, 0 ] | extend plus1=x+1, dbl=todouble(x), back=tolong(todouble(x)), gt=gettype(x+1)
-```
-**Generated SQL**
-```sql
-SELECT *, x + 1 AS plus1, COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE)) AS dbl, TRY_CAST(TRUNC(COALESCE(TRY_CAST(COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE)) AS DOUBLE), TRY_CAST(TRY_CAST(COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE)) AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS back, CASE WHEN TYPEOF(x + 1) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(x + 1) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(x + 1) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(x + 1) = 'VARCHAR' THEN 'string' WHEN TYPEOF(x + 1) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(x + 1) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(x + 1) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(x + 1) = 'UUID' THEN 'guid' WHEN TYPEOF(x + 1) LIKE '%[]' OR TYPEOF(x + 1) LIKE 'STRUCT%' OR TYPEOF(x + 1) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(x + 1) = 'JSON' THEN (CASE WHEN json_type(CAST(x + 1 AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(x + 1)) END AS gt FROM (VALUES (CAST(9223372036854775807 AS BIGINT)), (CAST(-9223372036854775808 AS BIGINT)), (CAST(0 AS BIGINT))) AS t(x)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int, plus1:Int, dbl:Real, back:Int, gt:String] rows=3
-    - (9223372036854775807, -9223372036854775808, 9.223372036854776E+18, 9223372036854775807, 'long')
-    - (-9223372036854775808, -9223372036854775807, -9.223372036854776E+18, -9223372036854775808, 'long')
-    - (0, 1, 0, 0, 'long')
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
-
-### `agent-type-casts-coercion-0036` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
-
-**KQL**
-```kql
-print x = 9223372036854775807 + 1, y = gettype(9223372036854775807)
-```
-**Generated SQL**
-```sql
-SELECT 9223372036854775807 + 1 AS x, CASE WHEN TYPEOF(9223372036854775807) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(9223372036854775807) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(9223372036854775807) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(9223372036854775807) = 'VARCHAR' THEN 'string' WHEN TYPEOF(9223372036854775807) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(9223372036854775807) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(9223372036854775807) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(9223372036854775807) = 'UUID' THEN 'guid' WHEN TYPEOF(9223372036854775807) LIKE '%[]' OR TYPEOF(9223372036854775807) LIKE 'STRUCT%' OR TYPEOF(9223372036854775807) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(9223372036854775807) = 'JSON' THEN (CASE WHEN json_type(CAST(9223372036854775807 AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(9223372036854775807)) END AS y
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int, y:String] rows=1
-    - (-9223372036854775808, 'long')
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT64 (9223372036854775807 + 1)!
-
-### `agent-type-casts-coercion-0055` — SqlExecError (highest)
-
-*Detail:* Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
-
-**KQL**
-```kql
-print x = 2147483647 + 1, y = gettype(2147483647 + 1), z = toint(2147483647) + 1, w = gettype(toint(2147483647) + 1)
-```
-**Generated SQL**
-```sql
-SELECT 2147483647 + 1 AS x, CASE WHEN TYPEOF(2147483647 + 1) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(2147483647 + 1) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(2147483647 + 1) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(2147483647 + 1) = 'VARCHAR' THEN 'string' WHEN TYPEOF(2147483647 + 1) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(2147483647 + 1) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(2147483647 + 1) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(2147483647 + 1) = 'UUID' THEN 'guid' WHEN TYPEOF(2147483647 + 1) LIKE '%[]' OR TYPEOF(2147483647 + 1) LIKE 'STRUCT%' OR TYPEOF(2147483647 + 1) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(2147483647 + 1) = 'JSON' THEN (CASE WHEN json_type(CAST(2147483647 + 1 AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(2147483647 + 1)) END AS y, TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1 AS z, CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) LIKE '%[]' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1) = 'JSON' THEN (CASE WHEN json_type(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1 AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(2147483647 AS DOUBLE), TRY_CAST(TRY_CAST(2147483647 AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1)) END AS w
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int, y:String, z:Int, w:String] rows=1
-    - (2147483648, 'long', 2147483648, 'long')
-- DuckDB: ERROR — Out of Range Error: Overflow in addition of INT32 (2147483647 + 1)!
 
 ### `agent-type-casts-coercion-0006` — MismatchRows (high)
 

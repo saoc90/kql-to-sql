@@ -774,6 +774,10 @@ public class DuckDbDialect : ISqlDialect
 
     public string GenerateSeries(string alias, string start, string end, string step)
     {
+        // Datetime/timespan range: the step is an INTERVAL, so generate a timestamp series directly
+        // (casting a TIMESTAMP to BIGINT is invalid). generate_series is end-inclusive, matching KQL range.
+        if (step.Contains("INTERVAL", StringComparison.OrdinalIgnoreCase))
+            return $"SELECT generate_series AS {alias} FROM generate_series({start}, {end}, {step})";
         return $"SELECT generate_series AS {alias} FROM generate_series(CAST({start} AS BIGINT), CAST({end} AS BIGINT), CAST({step} AS BIGINT))";
     }
 
