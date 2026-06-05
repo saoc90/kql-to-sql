@@ -385,9 +385,14 @@ internal class ExpressionSqlBuilder
         var child = de.Expression;
 
         // dynamic([...]) → LIST_VALUE so native array functions keep working on top-level arrays.
-        // Nested objects/arrays inside the array are serialized to JSON so they remain navigable.
+        // BUT if any element is itself an array/object, the elements are JSON and a native LIST_VALUE
+        // of JSON values can't be re-coerced (mv-expand of the unnested element would see a bare JSON
+        // value). Render the whole nested array as one JSON value so it's tracked & coerced uniformly.
         if (child is JsonArrayExpression topArr)
         {
+            bool hasNested = topArr.Values.Any(v => v.Element is JsonArrayExpression or JsonObjectExpression);
+            if (hasNested)
+                return $"'{SerializeDynamicJson(topArr).Replace("'", "''")}'::JSON";
             var elements = topArr.Values
                 .Select(v => ConvertDynamicElementSql(v.Element, leftAlias, rightAlias))
                 .ToArray();

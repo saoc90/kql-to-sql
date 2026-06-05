@@ -1,0 +1,7 @@
+{"Id":"bd-0","Tier":2,"Family":"bd","Kql":"print s = '[{\"id\":1,\"vals\":[10,20]},{\"id\":2,\"vals\":[30]}]' | extend d = parse_json(s) | mv-expand o = d | mv-expand v = o.vals | summarize sum(toint(v)) by oid = tostring(o.id)"}
+{"Id":"bd-1","Tier":2,"Family":"bd","Kql":"print d = dynamic({\"x\":[1,2],\"y\":[3,4],\"z\":[5,6]}) | extend flat = array_concat(d.x, d.y, d.z) | mv-expand f = flat to typeof(long) | summarize sum(f), avg(f)"}
+{"Id":"bd-2","Tier":2,"Family":"bd","Kql":"print d = dynamic([[1,2,3],[4,5,6]]) | mv-expand row = d | mv-expand cell = row to typeof(long) | summarize grand = sum(cell)"}
+{"Id":"bd-3","Tier":2,"Family":"bd","Kql":"let d = datatable(d:dynamic)[ dynamic({\"a\":1,\"b\":[1,2,3]}), dynamic({\"a\":2,\"b\":[4,5]}), dynamic({\"a\":3,\"b\":[6]}) ]; let e = d | extend a = toint(d.a), arr = d.b; let f = e | mv-expand x = arr to typeof(long); f | summarize s = sum(x), cnt = count() by a | sort by a asc"}
+{"Id":"bd-4","Tier":2,"Family":"bd","Kql":"print arr = dynamic([10,20,30,40,50]) | mv-expand with_itemindex=idx v = arr | project idx, v, prod = toint(v) * idx"}
+{"Id":"bd-5","Tier":2,"Family":"bd","Kql":"print d = dynamic([10,20,30]) | mv-expand with_itemindex=i x = d | extend cum = array_sum(array_slice(d, 0, i)) + toint(x) | project i, x = toint(x), cum"}
+{"Id":"bd-6","Tier":2,"Family":"bd","Kql":"print arr = dynamic([{\"k\":1},{\"k\":2},{\"k\":3}]) | mv-expand with_itemindex=i e = arr | extend tagged = bag_merge(e, pack(\"idx\", i)) | project ki = toint(tagged.k), idx = toint(tagged.idx)"}

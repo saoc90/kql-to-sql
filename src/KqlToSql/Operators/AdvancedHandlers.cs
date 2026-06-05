@@ -437,11 +437,15 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
     internal string ApplyMvExpand(string leftSql, MvExpandOperator mvExpand)
     {
+        string sourceAlias = "t";
+
         // Each mv-expand slot is either a bare column, `name = expr`, or a bare expression.
         // For a bare expression Kusto names the output as the innermost identifier (same rule
         // toreal/tostring/parse_json auto-naming uses) — treat that identifier as the column
-        // being replaced in place so EXCLUDE picks it up.
-        var columns = new List<(string Name, string Source, bool ExcludeName, string? Cast)>();
+        // being replaced in place so EXCLUDE picks it up. Source/IsJson are resolved so a JSON
+        // value (datatable dynamic column, parse_json/d.field result, chained mv-expand output) is
+        // coerced to a list before UNNEST regardless of whether the slot renames its source.
+        var columns = new List<(string Name, string Source, bool IsJson, bool ExcludeName, string? Cast)>();
         int fallbackIndex = 0;
         foreach (var se in mvExpand.Expressions)
         {
@@ -454,45 +458,60 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
             if (mve.Expression is SimpleNamedExpression sne)
             {
-                var name = sne.Name.SimpleName;
-                var sourceSql = Expr.ConvertExpression(sne.Expression);
-                columns.Add((name, sourceSql, false, cast));
+                var (src, isJson) = ResolveMvSource(sne.Expression, sourceAlias, leftSql);
+                columns.Add((sne.Name.SimpleName, src, isJson, false, cast));
             }
             else if (mve.Expression is NameReference nr)
             {
-                var bare = nr.SimpleName;
-                columns.Add((bare, bare, true, cast));
+                var (src, isJson) = ResolveMvSource(nr, sourceAlias, leftSql);
+                columns.Add((nr.SimpleName, src, isJson, true, cast));
             }
             else
             {
-                var sourceSql = Expr.ConvertExpression(mve.Expression);
+                var (src, isJson) = ResolveMvSource(mve.Expression, sourceAlias, leftSql);
                 var innerName = TryGetInnerIdentifier(mve.Expression);
                 if (innerName != null)
-                    columns.Add((innerName, sourceSql, true, cast));
+                    columns.Add((innerName, src, isJson, true, cast));
                 else
-                    columns.Add(($"col_{fallbackIndex++}", sourceSql, false, cast));
+                    columns.Add(($"col_{fallbackIndex++}", src, isJson, false, cast));
             }
         }
 
-        // Single-column case: simple unnest.
+        // mv-expand with_itemindex=<col> exposes the 0-based position of each expanded element.
+        string? itemIndexName = ExtractWithItemIndex(mvExpand);
+
+        // An uncast mv-expand output stays *dynamic* in Kusto; when the source was JSON the element
+        // is a JSON value, so mark the output column JSON for downstream coercion (chained mv-expand).
+        foreach (var c in columns)
+            if (c.Cast == null && c.IsJson)
+                Expr.MarkJsonColumn(c.Name);
+
         // Wrap leftSql as a derived table with a single fresh alias. (ExtractFromAsRelation can return
         // a relation that already carries its own alias — e.g. `(VALUES ...) AS t(d)` for a datatable —
         // which would produce an invalid double alias `... AS t(d) AS t`.)
-        string sourceAlias = "t";
         var aliasedFrom = $"({leftSql}) AS {sourceAlias}";
 
+        // Single-column case: simple unnest (with optional with_itemindex).
         if (columns.Count == 1)
         {
-            var (name, source, excludeName, cast) = columns[0];
+            var (name, source, isJson, excludeName, cast) = columns[0];
             var unnestAlias = "u";
-            var bareRef = source == name;
-            var unnestSource = CoerceToUnnestable(
-                bareRef ? $"{sourceAlias}.{name}" : source,
-                forceJsonCoerce: bareRef && ColumnDefinedAsJson(leftSql, name));
-            var unnestClause = $"CROSS JOIN UNNEST({unnestSource}) AS {unnestAlias}(value)";
+            var coerced = CoerceToUnnestable(source, forceJsonCoerce: isJson);
             var excludePart = excludeName
                 ? $"{sourceAlias}.{Dialect.SelectExclude(new[] { name })}"
                 : $"{sourceAlias}.*";
+
+            if (itemIndexName != null)
+            {
+                // with_itemindex: zip each element with its 0-based position. DuckDB combines multiple
+                // UNNESTs in one SELECT positionally, so UNNEST(list) and UNNEST(range(0,len)) align.
+                var valExpr = cast != null ? $"CAST({unnestAlias}.val AS {cast})" : $"{unnestAlias}.val";
+                return $"SELECT {excludePart}, {unnestAlias}.idx AS {itemIndexName}, {valExpr} AS {name} " +
+                       $"FROM {aliasedFrom}, LATERAL (SELECT UNNEST({coerced}) AS val, " +
+                       $"UNNEST(range(0, len({coerced}))) AS idx) AS {unnestAlias}";
+            }
+
+            var unnestClause = $"CROSS JOIN UNNEST({coerced}) AS {unnestAlias}(value)";
             var valueExpr = cast != null ? $"CAST({unnestAlias}.value AS {cast})" : $"{unnestAlias}.value";
             return $"SELECT {excludePart}, {valueExpr} AS {name} FROM {aliasedFrom} {unnestClause}";
         }
@@ -501,11 +520,8 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var clauses = new List<string>();
         for (int i = 0; i < columns.Count; i++)
         {
-            var (name, source, _, _) = columns[i];
-            var bareRef = source == name;
-            var unnestSource = CoerceToUnnestable(
-                bareRef ? $"{sourceAlias}.{name}" : source,
-                forceJsonCoerce: bareRef && ColumnDefinedAsJson(leftSql, name));
+            var c = columns[i];
+            var unnestSource = CoerceToUnnestable(c.Source, forceJsonCoerce: c.IsJson);
             clauses.Add($"CROSS JOIN UNNEST({unnestSource}) AS u{i}(value)");
         }
         var existingNames = columns.Where(c => c.ExcludeName).Select(c => c.Name).ToArray();
@@ -513,6 +529,33 @@ internal class AdvancedHandlers : OperatorHandlerBase
         var selectCols = string.Join(", ", columns.Select((c, i) =>
             c.Cast != null ? $"CAST(u{i}.value AS {c.Cast}) AS {c.Name}" : $"u{i}.value AS {c.Name}"));
         return $"SELECT {sourceAlias}.{excludeAll}, {selectCols} FROM {aliasedFrom} {string.Join(" ", clauses)}";
+    }
+
+    /// <summary>Resolves an mv-expand/mv-apply source expression to (unnestSql, isJson). A bare column
+    /// reference is qualified with the table alias and classified via tracked JSON columns / upstream SQL;
+    /// any other expression is converted and classified by its JSON markers.</summary>
+    private (string Sql, bool IsJson) ResolveMvSource(Expression sourceNode, string sourceAlias, string leftSql)
+    {
+        if (sourceNode is NameReference nr)
+        {
+            var col = nr.SimpleName;
+            var isJson = Expr.IsJsonColumn(col) || ColumnDefinedAsJson(leftSql, col);
+            return ($"{sourceAlias}.{Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(col)}", isJson);
+        }
+        var sql = Expr.ConvertExpression(sourceNode);
+        return (sql, Expressions.ExpressionSqlBuilder.LooksLikeJsonResult(sql));
+    }
+
+    /// <summary>Extracts the column name from an mv-expand `with_itemindex=<name>` parameter, or null.</summary>
+    private static string? ExtractWithItemIndex(MvExpandOperator mvExpand)
+    {
+        for (int i = 0; i < mvExpand.Parameters.Count; i++)
+        {
+            if (mvExpand.Parameters[i] is NamedParameter np &&
+                np.Name.SimpleName.Equals("with_itemindex", StringComparison.OrdinalIgnoreCase))
+                return (np.Expression as NameReference)?.SimpleName ?? np.Expression.ToString().Trim();
+        }
+        return null;
     }
 
     /// <summary>Maps an mv-expand `to typeof(T)` clause to the SQL cast type (null = no cast / dynamic).</summary>
@@ -547,31 +590,28 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
         // mv-apply alias = expr on (...) — the LHS name is the column inside the subquery;
         // the RHS is the source expression in the outer scope.
+        string sourceAlias = "t";
         string columnName;
-        string sourceSql;
+        string unnestSource;
         if (mae.Expression is SimpleNamedExpression sne)
         {
             columnName = sne.Name.SimpleName;
-            sourceSql = Expr.ConvertExpression(sne.Expression);
+            var (src, isJson) = ResolveMvSource(sne.Expression, sourceAlias, leftSql);
+            unnestSource = CoerceToUnnestable(src, forceJsonCoerce: isJson);
         }
         else
         {
-            var bare = mae.Expression.ToString().Trim();
-            columnName = bare;
-            sourceSql = bare;
+            var (src, isJson) = ResolveMvSource(mae.Expression, sourceAlias, leftSql);
+            columnName = mae.Expression is NameReference nrc ? nrc.SimpleName : mae.Expression.ToString().Trim();
+            unnestSource = CoerceToUnnestable(src, forceJsonCoerce: isJson);
         }
 
         var subquerySql = Converter.ConvertNode(mvApply.Subquery.Expression);
 
-        string sourceAlias = "t";
         var fromSql = ExtractFromAsRelation(leftSql);
         var aliasedFrom = $"{fromSql} AS {sourceAlias}";
 
         var unnestAlias = "u";
-        var bareRef = sourceSql == columnName;
-        var unnestSource = CoerceToUnnestable(
-            bareRef ? $"{sourceAlias}.{columnName}" : sourceSql,
-            forceJsonCoerce: bareRef && ColumnDefinedAsJson(leftSql, columnName));
         var unnestClause = $"CROSS JOIN UNNEST({unnestSource}) AS {unnestAlias}(value)";
 
         // KQL's mv-apply subquery operates on an implicit "virtual table" named after the element column.
