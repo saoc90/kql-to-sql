@@ -55,12 +55,19 @@ internal class ExpressionSqlBuilder
     /// <summary>Returns true if the named column was previously marked as interval-typed.</summary>
     internal bool IsIntervalColumn(string name) => _intervalColumns.Contains(name);
     /// <summary>Clears interval column tracking — call once per top-level Convert() to avoid cross-query stale state.</summary>
-    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); _jsonColumns.Clear(); _dateTimeColumns.Clear(); _stringColumns.Clear(); _dynamicTextColumns.Clear(); }
+    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); _jsonColumns.Clear(); _dateTimeColumns.Clear(); _stringColumns.Clear(); _dynamicTextColumns.Clear(); _boolColumns.Clear(); }
 
     private readonly HashSet<string> _integerColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as KQL-integer-typed (e.g. a summarize count()/dcount() result) so a
     /// downstream `col / N` uses KQL integer (truncating) division instead of DuckDB real division.</summary>
     internal void MarkIntegerColumn(string name) => _integerColumns.Add(name);
+
+    private readonly HashSet<string> _boolColumns = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Records a column as bool-typed (datatable bool column / boolean extend result) so
+    /// tostring(col) renders Kusto's capitalized 'True'/'False' instead of DuckDB's lowercase.</summary>
+    internal void MarkBoolColumn(string name) => _boolColumns.Add(name);
+    /// <summary>Returns true if the named column was previously marked as bool-typed.</summary>
+    internal bool IsBoolColumn(string name) => _boolColumns.Contains(name);
 
     private readonly HashSet<string> _dynamicTextColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column whose values are dynamic text of unknown type (e.g. bag_unpack outputs,
@@ -588,6 +595,46 @@ internal class ExpressionSqlBuilder
         return $"'{text}'";
     }
 
+    // KQL tostring(): unquote JSON string scalars, render bools capitalized, and map null → '' (Kusto
+    // returns the empty string for tostring(null), never SQL NULL). Other types fall back to a VARCHAR cast.
+    private string ConvertToString(Expression element, string? leftAlias, string? rightAlias)
+    {
+        var node = element is SimpleNamedExpression sne ? sne.Expression : element;
+        var a = ConvertExpression(node, leftAlias, rightAlias);
+
+        bool isJson = (node is NameReference jnr && IsJsonColumn(jnr.SimpleName))
+            || IsJsonBaseExpr(a) || LooksLikeJsonResult(a);
+        if (isJson)
+            // json_extract_string('$') yields the unquoted scalar text (or JSON text for objects/arrays).
+            return $"COALESCE(json_extract_string({a}, '$'), '')";
+
+        if (ExpressionReturnsBool(node))
+            return $"COALESCE(CASE WHEN {a} THEN 'True' WHEN NOT {a} THEN 'False' END, '')";
+
+        return $"COALESCE({_dialect.SafeCast(a, "TEXT")}, '')";
+    }
+
+    // Best-effort: does this expression evaluate to a boolean? Used so tostring() can capitalize True/False.
+    // A false negative just falls back to a plain cast (no regression), so we only flag clear bool shapes.
+    private bool ExpressionReturnsBool(Expression node)
+    {
+        node = node is ParenthesizedExpression pe ? pe.Expression : node;
+        switch (node)
+        {
+            case LiteralExpression lit when lit.Kind == SyntaxKind.BooleanLiteralExpression: return true;
+            case NameReference nr: return IsBoolColumn(nr.SimpleName);
+            case BinaryExpression be:
+                return be.Kind is SyntaxKind.EqualExpression or SyntaxKind.NotEqualExpression
+                    or SyntaxKind.LessThanExpression or SyntaxKind.LessThanOrEqualExpression
+                    or SyntaxKind.GreaterThanExpression or SyntaxKind.GreaterThanOrEqualExpression
+                    or SyntaxKind.AndExpression or SyntaxKind.OrExpression;
+            case FunctionCallExpression fce:
+                var fn = fce.Name.SimpleName.ToLowerInvariant();
+                return fn is "isnull" or "isempty" or "isnotnull" or "isnotempty" or "not";
+            default: return false;
+        }
+    }
+
     private static string ConvertTimespanLiteral(LiteralExpression lit)
     {
         var text = lit.ToString().Trim();
@@ -624,6 +671,8 @@ internal class ExpressionSqlBuilder
     {
         var name = fce.Name.SimpleName;
         var lower = name.ToLowerInvariant();
+        if (lower == "tostring" && fce.ArgumentList.Expressions.Count == 1)
+            return ConvertToString(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
         if (CastFunctionMap.TryGetValue(lower, out var sqlType))
         {
             if (fce.ArgumentList.Expressions.Count != 1)

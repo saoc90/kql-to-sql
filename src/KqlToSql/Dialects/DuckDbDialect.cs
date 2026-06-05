@@ -898,17 +898,24 @@ public class DuckDbDialect : ISqlDialect
     private static string GetTypeKusto(string arg)
     {
         var t = $"TYPEOF({arg})";
+        // For a JSON value, disambiguate the runtime type via json_type so JSON scalars report their
+        // actual Kusto type (long/real/string/bool/null) instead of defaulting to 'dictionary'.
+        var jt = $"json_type(CAST({arg} AS VARCHAR))";
         return
             $"CASE " +
             $"WHEN {t} IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' " +
-            $"WHEN {t} IN ('FLOAT','DOUBLE','REAL') OR {t} LIKE 'DECIMAL%' THEN 'real' " +
+            $"WHEN {t} LIKE 'DECIMAL%' THEN 'decimal' " +
+            $"WHEN {t} IN ('FLOAT','DOUBLE','REAL') THEN 'real' " +
             $"WHEN {t} = 'VARCHAR' THEN 'string' " +
             $"WHEN {t} = 'BOOLEAN' THEN 'bool' " +
             $"WHEN {t} IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' " +
             $"WHEN {t} LIKE 'INTERVAL%' THEN 'timespan' " +
             $"WHEN {t} = 'UUID' THEN 'guid' " +
             $"WHEN {t} LIKE '%[]' OR {t} LIKE 'STRUCT%' OR {t} LIKE 'MAP%' THEN 'array' " +
-            $"WHEN {t} = 'JSON' THEN (CASE WHEN json_type(CAST({arg} AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) " +
+            $"WHEN {t} = 'JSON' THEN (CASE {jt} " +
+                $"WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' " +
+                $"WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' " +
+                $"WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) " +
             $"ELSE LOWER({t}) END";
     }
 

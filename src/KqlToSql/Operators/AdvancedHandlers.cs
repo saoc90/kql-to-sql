@@ -931,6 +931,13 @@ internal class AdvancedHandlers : OperatorHandlerBase
                     colCastTypes.Add(null);
                     isDynamicCol.Add(false);
                 }
+                else if (string.Equals(typeName, "bool", StringComparison.OrdinalIgnoreCase)
+                      || string.Equals(typeName, "boolean", StringComparison.OrdinalIgnoreCase))
+                {
+                    Expr.MarkBoolColumn(cname);
+                    colCastTypes.Add(null);
+                    isDynamicCol.Add(false);
+                }
                 // Propagate integer columns so '/' and '%' use KQL's truncating/Euclidean semantics.
                 else if (string.Equals(typeName, "long", StringComparison.OrdinalIgnoreCase))
                 {
