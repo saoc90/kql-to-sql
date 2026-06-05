@@ -311,6 +311,11 @@ public class DuckDbDialect : ISqlDialect
             "extract_json" or "extractjson" => $"JSON_EXTRACT({args[1]}, {args[0]})",
 
             // Window functions (beyond row_number/prev/next)
+            // row_cumsum(value [, restart]) — running sum; with a restart predicate it resets at each
+            // true row. A window can't partition by another window, so emit a __RESETGRP__(<pred>) marker
+            // that the extend handler hoists into a reset-group column (running count of the predicate).
+            "row_cumsum" when args.Length >= 2 =>
+                $"SUM({args[0]}) OVER (PARTITION BY __RESETGRP__({args[1]}) ROWS UNBOUNDED PRECEDING)",
             "row_cumsum" => $"SUM({args[0]}) OVER (ROWS UNBOUNDED PRECEDING)",
             "row_rank_dense" => "DENSE_RANK() OVER ()",
             "row_rank_min" => "RANK() OVER ()",

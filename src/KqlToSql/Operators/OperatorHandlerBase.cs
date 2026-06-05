@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using KqlToSql.Expressions;
 
 namespace KqlToSql.Operators;
@@ -23,6 +24,51 @@ internal abstract class OperatorHandlerBase
 
     protected static bool IsSimpleSelectStar(string sql)
         => sql.StartsWith(SelectStarPrefix, StringComparison.OrdinalIgnoreCase);
+
+    protected const string ResetGroupMarker = "__RESETGRP__(";
+
+    /// <summary>True when an extend/serialize projection contains restart-window reset-group markers.</summary>
+    protected static bool HasResetGroupMarker(string joined) =>
+        joined.Contains(ResetGroupMarker, StringComparison.Ordinal);
+
+    /// <summary>Lowers __RESETGRP__(&lt;pred&gt;) markers (emitted by row_cumsum(value, restart) and friends)
+    /// into a partitioned window. A window can't reference another window, and the predicate itself may be
+    /// a window (g != prev(g) → g != LAG(g) OVER ()), so we layer three SELECTs:
+    ///   L1: evaluate each distinct predicate to a boolean column _rbN  (one window level — LAG is fine)
+    ///   L2: reset-group _rgN = running count of _rbN (SUM(CASE…) OVER rows — no nested window)
+    ///   out: the marker becomes _rgN so the outer window partitions by it; helper cols are EXCLUDEd.</summary>
+    protected string HoistResetGroups(string leftSql, string joined, params string[] alsoExclude)
+    {
+        var preds = new List<string>();
+        var rewritten = new System.Text.StringBuilder();
+        int i = 0;
+        while (i < joined.Length)
+        {
+            int at = joined.IndexOf(ResetGroupMarker, i, StringComparison.Ordinal);
+            if (at < 0) { rewritten.Append(joined, i, joined.Length - i); break; }
+            rewritten.Append(joined, i, at - i);
+            int start = at + ResetGroupMarker.Length, depth = 1, j = start;
+            for (; j < joined.Length && depth > 0; j++)
+            {
+                if (joined[j] == '(') depth++;
+                else if (joined[j] == ')') depth--;
+            }
+            var pred = joined.Substring(start, j - 1 - start);
+            int idx = preds.IndexOf(pred);
+            if (idx < 0) { idx = preds.Count; preds.Add(pred); }
+            rewritten.Append($"_rg{idx}");
+            i = j;
+        }
+
+        var l1Defs = preds.Select((p, n) => $"({p}) AS _rb{n}");
+        var l1 = $"SELECT *, {string.Join(", ", l1Defs)} FROM ({leftSql})";
+        var l2Defs = preds.Select((_, n) =>
+            $"SUM(CASE WHEN _rb{n} THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING) AS _rg{n}");
+        var l2 = $"SELECT *, {string.Join(", ", l2Defs)} FROM ({l1})";
+        var dropCols = Enumerable.Range(0, preds.Count).SelectMany(n => new[] { $"_rb{n}", $"_rg{n}" })
+            .Concat(alsoExclude).ToArray();
+        return $"SELECT {Dialect.SelectExclude(dropCols)}, {rewritten} FROM ({l2})";
+    }
 
     /// <summary>Extracts the FROM source, or wraps in parens as subquery.</summary>
     protected static string ExtractFrom(string sql)

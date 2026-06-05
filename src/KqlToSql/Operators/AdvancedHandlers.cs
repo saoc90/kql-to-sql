@@ -827,6 +827,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
         var joined = string.Join(", ", extras);
 
+        // serialize col = row_cumsum(v, restart) emits reset-group markers — hoist them like extend does.
+        if (HasResetGroupMarker(joined))
+            return HoistResetGroups(leftSql, joined);
+
         if (HasLimit(leftSql))
             return $"SELECT *, {joined} FROM ({leftSql})";
 

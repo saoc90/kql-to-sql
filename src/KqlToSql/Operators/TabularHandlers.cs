@@ -324,6 +324,12 @@ internal class TabularHandlers : OperatorHandlerBase
 
         var joined = string.Join(", ", extras.Select(e => e.Expr));
 
+        // A scan-window function with a restart predicate (e.g. row_cumsum(v, g != prev(g))) emits a
+        // __RESETGRP__(<pred>) marker; hoist each into a reset-group column in an inner SELECT and
+        // partition the window by it (a window can't reference another window directly).
+        if (HasResetGroupMarker(joined))
+            return HoistResetGroups(leftSql, joined, columnsToExclude);
+
         if (columnsToExclude.Length > 0)
         {
             var exclude = Dialect.SelectExclude(columnsToExclude);
@@ -333,6 +339,7 @@ internal class TabularHandlers : OperatorHandlerBase
 
         return AppendToSelectStar(leftSql, joined);
     }
+
 
     internal string ApplySort(string leftSql, SortOperator sort)
     {
