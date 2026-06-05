@@ -94,4 +94,68 @@ public class GeneratedRegressionTests
         Assert.False(verdict.IsBug,
             $"[{id}] regressed: {verdict.Outcome}.\nKQL: {kql}\nSQL: {diff.Sql}\nDetail: {verdict.Detail}");
     }
+
+    /// <summary>
+    /// Cases from the differential campaign that previously produced INVALID SQL (SqlExecError) or threw
+    /// in the translator (TranslateError) — the two outcomes that must never happen for valid KQL. These
+    /// now translate to executable SQL. Value-correctness here is engine-tolerant: a residual row/value
+    /// difference (set order, sub-microsecond datetime precision, dynamic-vs-string JSON formatting, etc.)
+    /// is acceptable, so this guardrail asserts only that the SQL translates and executes, not that every
+    /// cell matches. (Full value-match cases live in <see cref="FixedCases"/>.)
+    /// </summary>
+    public static TheoryData<string, string> ExecutableCases() => new()
+    {
+        // Cluster B — dynamic/JSON mv-expand + array functions.
+        { "mvexpand-mixed-dynamic", "datatable(d:dynamic)[ dynamic({\"a\":1,\"b\":[1,2,3]}), dynamic([10,20,30]), dynamic(null) ] | mv-expand d" },
+        { "mvexpand-object-bag", "datatable(d:dynamic)[ dynamic({\"x\":1}), dynamic({\"y\":2}) ] | mv-expand d" },
+        { "mvexpand-renamed-json", "print d = dynamic({\"x\":[1,2],\"y\":[3,4]}) | extend flat = array_concat(d.x, d.y) | mv-expand f = flat to typeof(long) | summarize sum(f)" },
+        { "mvexpand-chained", "print d = dynamic([[1,2,3],[4,5,6]]) | mv-expand row = d | mv-expand cell = row to typeof(long) | summarize grand = sum(cell)" },
+        { "array-funcs-on-json-col", "datatable(d:dynamic)[ dynamic([10,20,30]), dynamic({\"a\":1}), dynamic(null) ] | project v = array_sort_asc(d), c = array_concat(d, dynamic([99]))" },
+        { "array-sum-empty-json", "print s = '[]' | extend e = parse_json(s) | extend al = array_length(e), s2 = array_sum(e), keys = bag_keys(e)" },
+        { "mvapply-array-sum", "print d = dynamic({\"matrix\":[[1,2,3],[4,5,6]]}) | mv-apply row = d.matrix on (extend rs = array_sum(row)) | summarize total = sum(rs)" },
+        // Cluster A — INTERVAL/INTERVAL division.
+        { "dayofweek-over-1d", "range t from datetime(2021-12-26) to datetime(2022-01-02) step 1d | extend wd = dayofweek(t) / 1d" },
+        { "timespan-over-tick", "datatable(a:datetime, b:datetime)[ datetime(2020-01-01 00:00:01),datetime(2020-01-01 00:00:00) ] | extend ticks = (a - b) / 1tick" },
+        // Cluster C — dynamic object index by string key.
+        { "object-index-bagkey", "print d = dynamic({\"x\":1,\"y\":2,\"z\":3}) | extend ks = bag_keys(d) | mv-expand k = ks to typeof(string) | extend val = toint(d[k]) | summarize sum(val)" },
+        // Cluster D — mv-expand with_itemindex.
+        { "with-itemindex", "print arr = dynamic([10,20,30,40,50]) | mv-expand with_itemindex=idx v = arr | project idx, v, prod = toint(v) * idx" },
+        { "with-itemindex-objs", "print arr = dynamic([{\"k\":1},{\"k\":2}]) | mv-expand with_itemindex=i e = arr | extend tagged = bag_merge(e, pack(\"idx\", i)) | project ki = toint(tagged.k), idx = toint(tagged.idx)" },
+        // Cluster E — join / as-stage / range column collision suffixing.
+        { "join-collision-count1", "let a = datatable(k:long, v:long)[ 1,10, 2,20 ]; let b = a | summarize count() by k; b | join kind=inner (b) on k | project k, count_, count_1" },
+        { "as-stage-collision", "datatable(k:long, v:long)[ 1,10, 2,20 ] | summarize count() by k | as Stage1 | extend count_ = count_ + 100 | join kind=inner (Stage1) on k | project k, count_, count_1" },
+        { "range-selfjoin-collision", "let m1 = materialize(range x from 1 to 4 step 1 | extend y = x * x); m1 | join kind=inner (m1) on x | project x, y, y1" },
+        // Cluster F — zip / array_iff list coercion.
+        { "zip-json", "print d = dynamic({\"a\":[1,2,3],\"b\":[4,5,6]}) | extend zipped = zip(d.a, d.b) | mv-expand z = zipped | project lhs = toint(z[0]), rhs = toint(z[1])" },
+        { "array-iff", "print d = dynamic({\"vals\":[1,2,3]}) | extend doubled = array_iff(dynamic([true,false,true]), d.vals, dynamic([0,0,0]))" },
+        // Cluster G — assorted singles.
+        { "union-extend-redefine", "datatable(s:string)[ \"a\", \"\" ] | union (datatable(s:string)[ \"c\" ] | extend s=tostring(dynamic(null))) | project s" },
+        { "datetime_diff-nanosecond", "print d2 = datetime_diff('nanosecond', datetime(2020-01-01 00:00:00.0000002), datetime(2020-01-01 00:00:00))" },
+        { "guid-literal-join", "let L = datatable(k:guid, lv:string)[ guid(11111111-1111-1111-1111-111111111111),\"a\" ]; let R = datatable(k:guid, rv:string)[ guid(11111111-1111-1111-1111-111111111111),\"x\" ]; L | join kind=leftouter R on k" },
+        { "reserved-alias-both", "print outer = 1 | extend inner = 2 | extend both = outer + inner | project outer, inner, both" },
+        { "series_fill_const", "datatable(t:long, v:long)[ 1,10, 2,20 ] | make-series s = sum(v) default = 0 on t from 1 to 4 step 1 | extend f = series_fill_const(s, 5)" },
+        { "strcat_array-make_list", "datatable(k:long, s:string)[ 1,\"a\", 1,\"b\", 2,\"c\" ] | summarize joined = strcat_array(make_list(s), \"|\") by k | sort by k asc" },
+        { "array_split-multi", "print d = dynamic([1,2,3,4,5,6,7,8]) | extend parts = array_split(d, dynamic([2,5])) | extend np = array_length(parts)" },
+        { "array_sum-constructed", "print d = dynamic([[1,2],[3,4],[5,6]]) | extend cols = array_concat(pack_array(d[0][0],d[1][0]), pack_array(d[0][1],d[1][1])) | extend colsum = array_sum(cols)" },
+        { "bag_unpack-sum", "datatable(d:dynamic)[ dynamic({\"type\":\"A\",\"v\":1}), dynamic({\"type\":\"B\",\"v\":2}) ] | evaluate bag_unpack(d) | summarize sum(v) by type" },
+        { "partition-by-summarize", "datatable(i:int)[ 1, 2, 3, 4, 5, 6 ] | extend grp = i % 2 | partition by grp (summarize s = sum(i) | extend tag = \"p\")" },
+        { "mvexpand-multi-typeof", "datatable(t:long, v:long)[ 2,20, 4,40 ] | make-series s = sum(v) default = 0 on t from 1 to 4 step 1 | mv-expand idx = range(0, array_length(s)-1, 1) to typeof(long), s to typeof(long)" },
+        { "extract_all-capturegroups", "datatable(s:string)[ \"2020-01-02\" ] | project parts = extract_all(@\"(\\d)(\\d)\", dynamic([1,2]), s)" },
+        // extend redefining a column shadowed by an intermediate summarize must not over-EXCLUDE.
+        { "extend-redefine-after-summarize", "datatable(k:long, v:long)[ 1,10, 2,20 ] | extend v = v + 1 | summarize sum_v = sum(v) by k | extend v = sum_v | summarize sum(v) by k | project k, sum_v1 = sum_v" },
+    };
+
+    [SkippableTheory]
+    [MemberData(nameof(ExecutableCases))]
+    public async Task Valid_kql_translates_to_executable_sql(string id, string kql)
+    {
+        _fx.SkipIfUnavailable();
+        var q = QueryAnalyzer.Enrich(new GeneratedQuery { Id = id, Kql = kql });
+        var (diff, verdict) = await _fx.Runner!.RunAsync(q);
+
+        // Translation must never throw and the generated SQL must always execute. Value-level
+        // differences are engine-tolerated and intentionally not asserted here.
+        Assert.False(verdict.Outcome is Outcome.TranslateError or Outcome.SqlExecError,
+            $"[{id}] {verdict.Outcome}.\nKQL: {kql}\nSQL: {diff.Sql}\nDetail: {verdict.Detail}");
+    }
 }
