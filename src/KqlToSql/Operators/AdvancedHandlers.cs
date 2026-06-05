@@ -234,8 +234,12 @@ internal class AdvancedHandlers : OperatorHandlerBase
         // objects/arrays as their JSON text — matching how Kusto surfaces the unpacked values.
         var projected = keys.Select(k =>
         {
-            var outName = ExpressionSqlBuilder.QuoteIdentifierIfReserved(prefix + k);
+            var rawName = prefix + k;
+            var outName = ExpressionSqlBuilder.QuoteIdentifierIfReserved(rawName);
             var path = "'$." + k.Replace("'", "''") + "'";
+            // Values come out as VARCHAR (clean text). Their KQL type is unknown, so tag them dynamic-text:
+            // a later numeric aggregate (sum/avg) coerces them, while string ops keep them as text.
+            Expr.MarkDynamicTextColumn(rawName);
             return $"{column}->>{path} AS {outName}";
         });
 
@@ -521,19 +525,22 @@ internal class AdvancedHandlers : OperatorHandlerBase
             return $"SELECT {excludePart}, {valueExpr} AS {name} FROM {aliasedFrom} {unnestClause}";
         }
 
-        // Multi-column: chain unnests, each as a separate CROSS JOIN
-        var clauses = new List<string>();
+        // Multi-column mv-expand expands the lists in PARALLEL (positionally zipped, shorter padded
+        // with null) — not as a cross product. DuckDB combines multiple UNNESTs in one SELECT
+        // positionally, so emit them together inside a single LATERAL subquery.
+        var unnests = new List<string>();
         for (int i = 0; i < columns.Count; i++)
         {
             var c = columns[i];
             var unnestSource = CoerceToUnnestable(c.Source, forceJsonCoerce: c.IsJson);
-            clauses.Add($"CROSS JOIN UNNEST({unnestSource}) AS u{i}(value)");
+            unnests.Add($"UNNEST({unnestSource}) AS v{i}");
         }
         var existingNames = columns.Where(c => c.ExcludeName).Select(c => c.Name).ToArray();
         var excludeAll = existingNames.Length > 0 ? Dialect.SelectExclude(existingNames) : "*";
         var selectCols = string.Join(", ", columns.Select((c, i) =>
-            c.Cast != null ? $"CAST(u{i}.value AS {c.Cast}) AS {c.Name}" : $"u{i}.value AS {c.Name}"));
-        return $"SELECT {sourceAlias}.{excludeAll}, {selectCols} FROM {aliasedFrom} {string.Join(" ", clauses)}";
+            c.Cast != null ? $"CAST(u.v{i} AS {c.Cast}) AS {c.Name}" : $"u.v{i} AS {c.Name}"));
+        return $"SELECT {sourceAlias}.{excludeAll}, {selectCols} FROM {aliasedFrom}, " +
+               $"LATERAL (SELECT {string.Join(", ", unnests)}) AS u";
     }
 
     /// <summary>Resolves an mv-expand/mv-apply source expression to (unnestSql, isJson). A bare column
@@ -598,18 +605,26 @@ internal class AdvancedHandlers : OperatorHandlerBase
         string sourceAlias = "t";
         string columnName;
         string unnestSource;
+        bool elementIsJson;
         if (mae.Expression is SimpleNamedExpression sne)
         {
             columnName = sne.Name.SimpleName;
             var (src, isJson) = ResolveMvSource(sne.Expression, sourceAlias, leftSql);
             unnestSource = CoerceToUnnestable(src, forceJsonCoerce: isJson);
+            elementIsJson = isJson;
         }
         else
         {
             var (src, isJson) = ResolveMvSource(mae.Expression, sourceAlias, leftSql);
             columnName = mae.Expression is NameReference nrc ? nrc.SimpleName : mae.Expression.ToString().Trim();
             unnestSource = CoerceToUnnestable(src, forceJsonCoerce: isJson);
+            elementIsJson = isJson;
         }
+
+        // The unnested element column is a JSON value when the source was JSON; mark it so array
+        // functions inside the on-subquery (e.g. array_sum(row)) coerce it. Mark BEFORE converting
+        // the subquery so the marking is visible while it is translated.
+        if (elementIsJson) Expr.MarkJsonColumn(columnName);
 
         var subquerySql = Converter.ConvertNode(mvApply.Subquery.Expression);
 

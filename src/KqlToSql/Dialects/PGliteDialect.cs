@@ -155,7 +155,8 @@ public class PGliteDialect : ISqlDialect
             "binary_shift_right" => $"({args[0]} >> {args[1]})",
 
             // Additional string functions
-            "extract_all" => $"(SELECT ARRAY_AGG(m[1]) FROM REGEXP_MATCHES({args[0]}, {args[1]}, 'g') m)",
+            // KQL extract_all(regex, text); Postgres REGEXP_MATCHES(text, pattern) takes the text first.
+            "extract_all" => $"(SELECT ARRAY_AGG(m[1]) FROM REGEXP_MATCHES({args[1]}, {args[0]}, 'g') m)",
             "replace_regex" => $"REGEXP_REPLACE({args[0]}, {args[1]}, {args[2]}, 'g')",
             "parse_csv" => $"STRING_TO_ARRAY({args[0]}, ',')",
             "dynamic_to_json" => $"TO_JSON({args[0]})",
@@ -270,7 +271,8 @@ public class PGliteDialect : ISqlDialect
             // CASE (array_agg keeps the CASE's NULLs, leaking nulls into the array).
             "make_list_if" or "makelistif" => $"COALESCE(array_agg({args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), '{{}}')",
             "make_list_with_nulls" => $"COALESCE(array_agg({args[0]}), '{{}}')",
-            "strcat_array" => $"string_agg({args[0]}, {args[1]})",
+            // Scalar join over an array (its arg is the make_list aggregate); array_to_string, not string_agg.
+            "strcat_array" => $"array_to_string({args[0]}, {args[1]})",
             "make_set" => $"COALESCE(array_agg(DISTINCT {args[0]}) FILTER (WHERE {args[0]} IS NOT NULL), '{{}}')",
             "make_set_if" => $"COALESCE(array_agg(DISTINCT {args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), '{{}}')",
             "min" => $"MIN({args[0]})",

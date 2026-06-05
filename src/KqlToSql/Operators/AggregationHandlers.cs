@@ -294,11 +294,14 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
             if (name is "sum" or "sumif" or "avg" or "avgif" or "stdev" or "stdevif"
                 or "stdevp" or "variance" or "varianceif" or "variancep")
             {
-                static bool LooksDynamicText(string a) =>
+                bool LooksDynamicText(string a) =>
                     a.Contains("json_extract(", StringComparison.OrdinalIgnoreCase)
                     || a.TrimEnd().EndsWith("::JSON", StringComparison.OrdinalIgnoreCase)
+                    || a.TrimEnd().EndsWith(" AS JSON)", StringComparison.OrdinalIgnoreCase)
                     || a.Contains("::VARCHAR", StringComparison.OrdinalIgnoreCase)
-                    || (a.StartsWith("trim(", StringComparison.OrdinalIgnoreCase) && a.Contains("json", StringComparison.OrdinalIgnoreCase));
+                    || (a.StartsWith("trim(", StringComparison.OrdinalIgnoreCase) && a.Contains("json", StringComparison.OrdinalIgnoreCase))
+                    // A bare bag_unpack value column (dynamic text of unknown type).
+                    || Expr.IsDynamicTextColumn(a);
                 args = args.Select(a => LooksDynamicText(a) ? $"TRY_CAST({a} AS DOUBLE)" : a).ToArray();
             }
 

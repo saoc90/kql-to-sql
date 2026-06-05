@@ -55,12 +55,20 @@ internal class ExpressionSqlBuilder
     /// <summary>Returns true if the named column was previously marked as interval-typed.</summary>
     internal bool IsIntervalColumn(string name) => _intervalColumns.Contains(name);
     /// <summary>Clears interval column tracking — call once per top-level Convert() to avoid cross-query stale state.</summary>
-    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); _jsonColumns.Clear(); _dateTimeColumns.Clear(); _stringColumns.Clear(); }
+    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); _jsonColumns.Clear(); _dateTimeColumns.Clear(); _stringColumns.Clear(); _dynamicTextColumns.Clear(); }
 
     private readonly HashSet<string> _integerColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as KQL-integer-typed (e.g. a summarize count()/dcount() result) so a
     /// downstream `col / N` uses KQL integer (truncating) division instead of DuckDB real division.</summary>
     internal void MarkIntegerColumn(string name) => _integerColumns.Add(name);
+
+    private readonly HashSet<string> _dynamicTextColumns = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Records a column whose values are dynamic text of unknown type (e.g. bag_unpack outputs,
+    /// extracted as VARCHAR). A numeric aggregate over such a column coerces it (TRY_CAST AS DOUBLE),
+    /// but it is NOT treated as JSON elsewhere (so string functions on it stay correct).</summary>
+    internal void MarkDynamicTextColumn(string name) => _dynamicTextColumns.Add(name);
+    /// <summary>Returns true if the named column was marked as dynamic-text (bag_unpack value).</summary>
+    internal bool IsDynamicTextColumn(string name) => _dynamicTextColumns.Contains(name.Trim().Trim('"'));
 
     private readonly HashSet<string> _stringColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as string-typed (e.g. an mv-expand `to typeof(string)` result, often a

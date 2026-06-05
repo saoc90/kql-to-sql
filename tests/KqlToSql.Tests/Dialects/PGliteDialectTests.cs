@@ -543,7 +543,8 @@ public class PGliteDialectTests
     public void PGlite_ExtractAll_Uses_RegexpMatches()
     {
         var dialect = new PGliteDialect();
-        var result = dialect.TryTranslateFunction("extract_all", new[] { "text_col", "'\\d+'" });
+        // KQL arg order is extract_all(regex, text); REGEXP_MATCHES wants (text, regex).
+        var result = dialect.TryTranslateFunction("extract_all", new[] { "'\\d+'", "text_col" });
         Assert.Contains("REGEXP_MATCHES(text_col, '\\d+', 'g')", result);
         Assert.Contains("ARRAY_AGG", result);
     }

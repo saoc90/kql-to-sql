@@ -267,10 +267,10 @@ public class DuckDbDialect : ISqlDialect
             "array_concat" => WrapArr(args.Any(IsJsonArg), $"LIST_CONCAT({string.Join(", ", args.Select(CoerceArr))})"),
             "array_reverse" => WrapArr(IsJsonArg(args[0]), $"LIST_REVERSE({CoerceArr(args[0])})"),
             "array_slice" when args.Length == 3 => WrapArr(IsJsonArg(args[0]), $"LIST_SLICE({CoerceArr(args[0])}, {args[1]} + 1, {args[2]} + 1)"),
-            // array_sum: elements may be JSON text — cast each to DOUBLE before summing.
-            "array_sum" => IsJsonArg(args[0])
-                ? $"LIST_SUM(LIST_TRANSFORM({CoerceArr(args[0])}, x -> CAST(x AS DOUBLE)))"
-                : $"LIST_SUM({args[0]})",
+            // array_sum: elements may be JSON values (from dynamic navigation / pack_array of JSON) or
+            // native numbers. TRY_CAST each element to DOUBLE so both forms sum (and non-numerics → null).
+            "array_sum" => $"LIST_SUM(LIST_TRANSFORM({CoerceArr(args[0])}, x -> TRY_CAST(x AS DOUBLE)))",
+            "array_avg" => $"LIST_AVG(LIST_TRANSFORM({CoerceArr(args[0])}, x -> TRY_CAST(x AS DOUBLE)))",
             "bag_keys" => $"JSON_KEYS({args[0]})",
             "bag_has_key" => $"(JSON_EXTRACT({args[0]}, '$.' || TRIM({args[1]}, '\"''')) IS NOT NULL)",
             "bag_merge" => $"JSON_MERGE_PATCH({args[0]}, {args[1]})",
@@ -289,7 +289,10 @@ public class DuckDbDialect : ISqlDialect
             "binary_shift_right" => $"({args[0]} >> {args[1]})",
 
             // Additional string functions
-            "extract_all" => $"REGEXP_EXTRACT_ALL({args[0]}, {args[1]})",
+            // KQL extract_all(regex, text) / extract_all(regex, captureGroups, text). DuckDB's
+            // REGEXP_EXTRACT_ALL(string, pattern[, group]) takes the text first, then the pattern.
+            "extract_all" when args.Length == 2 => $"REGEXP_EXTRACT_ALL({args[1]}, {args[0]})",
+            "extract_all" when args.Length >= 3 => BuildExtractAllGroups(args),
             "replace_regex" => $"REGEXP_REPLACE({args[0]}, {args[1]}, {args[2]})",
             "parse_csv" => $"STRING_SPLIT({args[0]}, ',')",
             "dynamic_to_json" => $"CAST({args[0]} AS JSON)",
@@ -323,7 +326,7 @@ public class DuckDbDialect : ISqlDialect
             "array_iff" or "array_when" => BuildArrayIff(args),
             "array_rotate_left" => $"LIST_CONCAT(LIST_SLICE({args[0]}, {args[1]} + 1, LEN({args[0]})), LIST_SLICE({args[0]}, 1, {args[1]}))",
             "array_rotate_right" => $"LIST_CONCAT(LIST_SLICE({args[0]}, LEN({args[0]}) - {args[1]} + 1, LEN({args[0]})), LIST_SLICE({args[0]}, 1, LEN({args[0]}) - {args[1]}))",
-            "array_split" when args.Length == 2 => $"[LIST_SLICE({args[0]}, 1, {args[1]}), LIST_SLICE({args[0]}, {args[1]} + 1, LEN({args[0]}))]",
+            "array_split" when args.Length == 2 => BuildArraySplit(args[0], args[1]),
             "bag_set_key" => $"JSON_MERGE_PATCH({args[0]}, JSON_OBJECT({args[1]}, {args[2]}))",
             "pack_dictionary" => $"JSON_OBJECT({string.Join(", ", args)})",
 
@@ -460,7 +463,9 @@ public class DuckDbDialect : ISqlDialect
             "stdevif" => $"STDDEV_SAMP({args[0]}) FILTER (WHERE {args[1]})",
             "stdevp" => $"STDDEV_POP({args[0]})",
             "any" or "take_any" => $"ANY_VALUE({args[0]})",
-            "strcat_array" => $"STRING_AGG({args[0]}, {args[1]})",
+            // strcat_array is a SCALAR join over an array; in a summarize slot its argument is itself an
+            // aggregate (make_list), so wrap that in ARRAY_TO_STRING — STRING_AGG would nest aggregates.
+            "strcat_array" => $"ARRAY_TO_STRING({args[0]}, {args[1]})",
             "anyif" or "take_anyif" => $"ANY_VALUE({args[0]}) FILTER (WHERE {args[1]})",
             "variance" => $"VAR_SAMP({args[0]})",
             "varianceif" => $"VAR_SAMP({args[0]}) FILTER (WHERE {args[1]})",
@@ -610,6 +615,45 @@ public class DuckDbDialect : ISqlDialect
     /// converted to a native LIST&lt;JSON&gt; by extracting all elements with the '$[*]' wildcard path.</summary>
     private static string CoerceArr(string sql) =>
         IsJsonArg(sql) ? $"json_extract({sql}, '$[*]')" : sql;
+
+    /// <summary>extract_all(regex, captureGroups, text): for each match, return an array of the selected
+    /// capture groups → an array of arrays. Built by zipping REGEXP_EXTRACT_ALL(text, regex, g) per group.
+    /// If the captureGroups literal can't be parsed, falls back to all-matches of group 1.</summary>
+    private static string BuildExtractAllGroups(string[] args)
+    {
+        var regex = args[0];
+        var text = args[2];
+        var groups = System.Text.RegularExpressions.Regex.Matches(args[1], @"-?\d+")
+            .Select(m => m.Value).ToArray();
+        if (groups.Length == 0)
+            return $"REGEXP_EXTRACT_ALL({text}, {regex}, 1)";
+        if (groups.Length == 1)
+            return $"REGEXP_EXTRACT_ALL({text}, {regex}, {groups[0]})";
+        // Zip per-group match arrays into [[g1,g2,..], ...] (Kusto's array-of-arrays result).
+        var perGroup = groups.Select(g => $"REGEXP_EXTRACT_ALL({text}, {regex}, {g})").ToArray();
+        return BuildZip(perGroup);
+    }
+
+    /// <summary>array_split(arr, idx) → split arr at the 0-based index/indices. A scalar index yields two
+    /// chunks; an array of indices yields N+1 chunks ([0,p1),[p1,p2),…,[pk,end)). JSON inputs are coerced
+    /// to LISTs (split points cast to BIGINT so they're valid slice bounds).</summary>
+    private static string BuildArraySplit(string arrArg, string idxArg)
+    {
+        var arr = CoerceArr(arrArg);
+        bool jsonOut = IsJsonArg(arrArg);
+        if (IsJsonArg(idxArg) || IsArrayLikeText(idxArg))
+        {
+            var pts = $"LIST_TRANSFORM({CoerceArr(idxArg)}, x -> CAST(x AS BIGINT))";
+            // For i in 0..len(pts): slice [start,end) where start = (i==0?0:pts[i]) and end = (i==len?LEN:pts[i+1]).
+            var body =
+                $"LIST_TRANSFORM(range(0, LEN({pts}) + 1), i -> LIST_SLICE({arr}, " +
+                $"CASE WHEN i = 0 THEN 1 ELSE {pts}[i] + 1 END, " +
+                $"CASE WHEN i = LEN({pts}) THEN LEN({arr}) ELSE {pts}[i + 1] END))";
+            return WrapArr(jsonOut, body);
+        }
+        var scalar = $"[LIST_SLICE({arr}, 1, {idxArg}), LIST_SLICE({arr}, {idxArg} + 1, LEN({arr}))]";
+        return WrapArr(jsonOut, scalar);
+    }
 
     /// <summary>zip(a, b, ...) → an array of tuples [[a0,b0,..],[a1,b1,..],..] (Kusto semantics), padded
     /// to the longest input with nulls. DuckDB's LIST_ZIP yields STRUCTs (not position-indexable), so we

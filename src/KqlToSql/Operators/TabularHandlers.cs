@@ -280,7 +280,7 @@ internal class TabularHandlers : OperatorHandlerBase
         // (paren depth 0). Inner-scope AS aliases (from deeply nested subqueries) may not be visible
         // to the enclosing FROM, so using EXCLUDE on them would cause 'column not found' errors.
         var columnsToExclude = extras
-            .Where(e => HasTopLevelAlias(leftSql, e.Name))
+            .Where(e => HasTopLevelAlias(leftSql, e.Name) || HasRelationAliasColumn(leftSql, e.Name))
             .Select(e => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(e.Name))
             .ToArray();
 
@@ -329,6 +329,21 @@ internal class TabularHandlers : OperatorHandlerBase
 
     /// <summary>Returns true if 'AS name' appears at paren depth 0 in sql (outer SELECT level),
     /// meaning the column is visible from an enclosing FROM.</summary>
+    // Detects a column introduced via a relation-alias column list, e.g. a datatable's
+    // `... AS t(s)` / `... AS t(d, k)`. extend redefining such a column must EXCLUDE it (same as a
+    // top-level `AS name`) so it isn't emitted twice (which UNION BY NAME rejects as a duplicate).
+    private static bool HasRelationAliasColumn(string sql, string name)
+    {
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                     sql, @"\bAS\s+""?\w+""?\s*\(([^()]*)\)"))
+        {
+            foreach (var col in m.Groups[1].Value.Split(','))
+                if (col.Trim().Trim('"').Equals(name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+        }
+        return false;
+    }
+
     private static bool HasTopLevelAlias(string sql, string name)
     {
         var patterns = new[] { $" AS {name} ", $" AS {name},", $" AS {name}\n", $" AS {name}\r",

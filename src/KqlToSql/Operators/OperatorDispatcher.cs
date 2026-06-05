@@ -140,15 +140,21 @@ internal sealed class OperatorDispatcher
                 return ApplyOperator(leftSql, qOp);
             if (sub.Subquery is PipeExpression pipe)
             {
-                // Reconstruct the pipeline by walking the pipe chain
+                // Reconstruct the pipeline by walking the pipe chain right-to-left.
                 var sql = leftSql;
-                var current = pipe;
                 var ops = new List<QueryOperator>();
-                // Collect operators left-to-right
+                PipeExpression? current = pipe;
                 while (current != null)
                 {
                     ops.Insert(0, current.Operator);
-                    current = current.Expression as PipeExpression;
+                    if (current.Expression is PipeExpression pe) { current = pe; }
+                    else
+                    {
+                        // The chain's head is the first operator (e.g. `summarize` in
+                        // `summarize ... | extend ...`); it is a QueryOperator, not a PipeExpression.
+                        if (current.Expression is QueryOperator headOp) ops.Insert(0, headOp);
+                        current = null;
+                    }
                 }
                 foreach (var op in ops)
                     sql = ApplyOperator(sql, op);

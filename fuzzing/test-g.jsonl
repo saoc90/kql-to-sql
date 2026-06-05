@@ -1,0 +1,9 @@
+{"Id":"g-0","Tier":2,"Family":"g","Kql":"datatable(s:string)[ \"a\", \"\" ] | union (datatable(s:string)[ \"c\" ] | extend s=tostring(dynamic(null))) | extend e=isempty(s), n=isnull(s) | project s, e, n"}
+{"Id":"g-1","Tier":2,"Family":"g","Kql":"datatable(s:string)[ \"2020-01-02 03:04\",\"a1b2c3d4\",\"nope\" ] | project s, all=extract_all(@\"(\\d+)\",s), all2=extract_all(@\"(\\d)(\\d)\",dynamic([1,2]),s)"}
+{"Id":"g-2","Tier":2,"Family":"g","Kql":"datatable(k:long, s:string)[ 1,\"a\", 1,\"\", 1,\"b\", 2,\"\", 2,\"\" ] | summarize ml=make_list(s), ms=make_set(s), joined=strcat_array(make_list(s), \"|\") by k | order by k asc"}
+{"Id":"g-3","Tier":2,"Family":"g","Kql":"print d = dynamic([1,2,3,4,5,6,7,8]) | extend parts = array_split(d, dynamic([2,5])) | extend p0 = parts[0], p1 = parts[1], p2 = parts[2], np = array_length(parts)"}
+{"Id":"g-4","Tier":2,"Family":"g","Kql":"print d = dynamic([[1,2],[3,4],[5,6]]) | extend cols = array_concat(pack_array(d[0][0],d[1][0],d[2][0]), pack_array(d[0][1],d[1][1],d[2][1])) | extend colsum = array_sum(cols)"}
+{"Id":"g-5","Tier":2,"Family":"g","Kql":"datatable(d:dynamic)[ dynamic({\"type\":\"A\",\"v\":1}), dynamic({\"type\":\"B\",\"v\":2}), dynamic({\"type\":\"A\",\"v\":3}) ] | evaluate bag_unpack(d) | summarize sum(v) by type | sort by type asc"}
+{"Id":"g-6","Tier":2,"Family":"g","Kql":"print d = dynamic({\"matrix\":[[1,2,3],[4,5,6]]}) | mv-apply row = d.matrix on (extend rs = array_sum(row)) | summarize total = sum(rs)"}
+{"Id":"g-7","Tier":2,"Family":"g","Kql":"datatable(i:int)[ 1, 2, 3, 4, 5, 6 ] | extend grp = i % 2 | partition by grp (summarize s = sum(i) | extend tag = \"p\") | sort by s asc"}
+{"Id":"g-8","Tier":2,"Family":"g","Kql":"datatable(t:long, v:long)[ 2,20, 4,40, 6,60 ] | make-series s = sum(v) default = -7 on t from 1 to 8 step 1 | mv-expand idx = range(0, array_length(s)-1, 1) to typeof(long), s to typeof(long) | sort by idx asc"}
