@@ -905,6 +905,12 @@ internal class AdvancedHandlers : OperatorHandlerBase
                     colCastTypes.Add(null);
                     isDynamicCol.Add(false);
                 }
+                else if (string.Equals(typeName, "datetime", StringComparison.OrdinalIgnoreCase))
+                {
+                    Expr.MarkDateTimeColumn(cname);
+                    colCastTypes.Add(null);
+                    isDynamicCol.Add(false);
+                }
                 // Propagate integer columns so '/' and '%' use KQL's truncating/Euclidean semantics.
                 else if (string.Equals(typeName, "long", StringComparison.OrdinalIgnoreCase))
                 {

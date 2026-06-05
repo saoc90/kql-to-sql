@@ -55,12 +55,19 @@ internal class ExpressionSqlBuilder
     /// <summary>Returns true if the named column was previously marked as interval-typed.</summary>
     internal bool IsIntervalColumn(string name) => _intervalColumns.Contains(name);
     /// <summary>Clears interval column tracking — call once per top-level Convert() to avoid cross-query stale state.</summary>
-    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); _jsonColumns.Clear(); }
+    internal void ClearIntervalColumns() { _intervalColumns.Clear(); _integerColumns.Clear(); _jsonColumns.Clear(); _dateTimeColumns.Clear(); }
 
     private readonly HashSet<string> _integerColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as KQL-integer-typed (e.g. a summarize count()/dcount() result) so a
     /// downstream `col / N` uses KQL integer (truncating) division instead of DuckDB real division.</summary>
     internal void MarkIntegerColumn(string name) => _integerColumns.Add(name);
+
+    private readonly HashSet<string> _dateTimeColumns = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Records a column as datetime-typed (from a datatable schema or extend) so that
+    /// `col - col` infers as a timespan and `(col - col) / 1tick` hits the interval-division path.</summary>
+    internal void MarkDateTimeColumn(string name) => _dateTimeColumns.Add(name);
+    /// <summary>Returns true if the named column was previously marked as datetime-typed.</summary>
+    internal bool IsDateTimeColumn(string name) => _dateTimeColumns.Contains(name);
 
     private readonly HashSet<string> _jsonColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as JSON/dynamic-typed (datatable dynamic column, or an extend/project
@@ -1414,14 +1421,38 @@ internal class ExpressionSqlBuilder
         //   A whole expression that is only a pure aggregate call over numerics (no trailing
         //   binary op that could re-introduce interval) — e.g. SUM(DOUBLE * EPOCH_MS(..)/..).
         var trimmed = sql.TrimStart('(').TrimStart();
-        if (trimmed.StartsWith("EXTRACT(", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("EPOCH_MS(", StringComparison.OrdinalIgnoreCase))
+        // A *pure* EXTRACT(...)/EPOCH_MS(...) is a number — but `EXTRACT(DOW FROM t) * INTERVAL '1 day'`
+        // (dayofweek) starts with EXTRACT yet multiplies by an INTERVAL, so it IS an interval. Only
+        // early-return when the EXTRACT/EPOCH_MS call's closing paren reaches the end (no trailing op).
+        if ((trimmed.StartsWith("EXTRACT(", StringComparison.OrdinalIgnoreCase) ||
+             trimmed.StartsWith("EPOCH_MS(", StringComparison.OrdinalIgnoreCase))
+            && CallSpansToEnd(trimmed))
             return false;
         if (IsPureAggregateCall(trimmed))
             return false;
         return sql.Contains("INTERVAL ", StringComparison.OrdinalIgnoreCase)
                || sql.Contains("AS INTERVAL", StringComparison.OrdinalIgnoreCase)
                || (IsBareIdentifier(sql) && IsIntervalColumn(sql.Trim('"')));
+    }
+
+    // True when the first parenthesized call in `trimmed` closes at the very end of the string
+    // (allowing trailing whitespace) — i.e. the whole expression is that single call, with no
+    // trailing arithmetic like `* INTERVAL '1 day'`.
+    private static bool CallSpansToEnd(string trimmed)
+    {
+        int openIdx = trimmed.IndexOf('(');
+        if (openIdx < 0) return false;
+        int depth = 0;
+        for (int i = openIdx; i < trimmed.Length; i++)
+        {
+            if (trimmed[i] == '(') depth++;
+            else if (trimmed[i] == ')')
+            {
+                depth--;
+                if (depth == 0) return trimmed[(i + 1)..].Trim().Length == 0;
+            }
+        }
+        return false;
     }
 
     private static bool IsPureAggregateCall(string trimmed)
@@ -1642,6 +1673,7 @@ internal class ExpressionSqlBuilder
                 };
             case NameReference nr:
                 if (IsIntervalColumn(nr.SimpleName)) return ScalarKind.TimeSpan;
+                if (IsDateTimeColumn(nr.SimpleName)) return ScalarKind.DateTime;
                 // A scalar `let` resolves to our own generated SQL — classify it from that text
                 // (deterministic, self-produced; not user-token munging).
                 if (_scalarLets != null && _scalarLets.TryGetValue(nr.SimpleName, out var s))
@@ -1695,7 +1727,8 @@ internal class ExpressionSqlBuilder
                     or "startofday" or "startofweek" or "startofmonth" or "startofyear"
                     or "endofday" or "endofweek" or "endofmonth" or "endofyear" or "bin_at")
                     return ScalarKind.DateTime;
-                if (fn is "totimespan" or "timespan" or "make_timespan" or "format_timespan")
+                if (fn is "totimespan" or "timespan" or "make_timespan" or "format_timespan"
+                    or "dayofweek")  // KQL dayofweek returns a timespan (days since Sunday)
                     return ScalarKind.TimeSpan;
                 if (fn is "datetime_diff" or "toint" or "tolong" or "todouble" or "toreal"
                     or "tofloat" or "todecimal" or "abs" or "floor" or "ceiling" or "round")
