@@ -99,6 +99,8 @@ public class PGliteDialect : ISqlDialect
                 $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
             "make_timespan" when args.Length == 2 =>
                 $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute')",
+            "make_timespan" when args.Length == 4 =>
+                $"({args[0]} * INTERVAL '1 day' + {args[1]} * INTERVAL '1 hour' + {args[2]} * INTERVAL '1 minute' + {args[3]} * INTERVAL '1 second')",
             // to_timestamp returns timestamptz; KQL datetime is tz-agnostic → project to UTC wall-clock.
             "unixtime_seconds_todatetime" => $"(TO_TIMESTAMP({args[0]}) AT TIME ZONE 'UTC')",
             "unixtime_milliseconds_todatetime" => $"TO_TIMESTAMP({args[0]}::double precision / 1000)",
@@ -262,14 +264,15 @@ public class PGliteDialect : ISqlDialect
             // Kusto make_list/make_set (and *_if) over an empty group -> [] (empty array); Postgres
             // array_agg -> NULL. COALESCE to an untyped '{}' literal (Postgres coerces it to the
             // array_agg element type). array_agg(DISTINCT ...) already returns sorted distinct values.
-            "make_list" or "makelist" => $"COALESCE(array_agg({args[0]}), '{{}}')",
+            // Kusto make_list/make_set ignore nulls (make_list_with_nulls keeps them).
+            "make_list" or "makelist" => $"COALESCE(array_agg({args[0]}) FILTER (WHERE {args[0]} IS NOT NULL), '{{}}')",
             // *_if must SKIP non-matching rows (Kusto), not include them as NULL — use FILTER, not
             // CASE (array_agg keeps the CASE's NULLs, leaking nulls into the array).
-            "make_list_if" or "makelistif" => $"COALESCE(array_agg({args[0]}) FILTER (WHERE {args[1]}), '{{}}')",
+            "make_list_if" or "makelistif" => $"COALESCE(array_agg({args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), '{{}}')",
             "make_list_with_nulls" => $"COALESCE(array_agg({args[0]}), '{{}}')",
             "strcat_array" => $"string_agg({args[0]}, {args[1]})",
-            "make_set" => $"COALESCE(array_agg(DISTINCT {args[0]}), '{{}}')",
-            "make_set_if" => $"COALESCE(array_agg(DISTINCT {args[0]}) FILTER (WHERE {args[1]}), '{{}}')",
+            "make_set" => $"COALESCE(array_agg(DISTINCT {args[0]}) FILTER (WHERE {args[0]} IS NOT NULL), '{{}}')",
+            "make_set_if" => $"COALESCE(array_agg(DISTINCT {args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), '{{}}')",
             "min" => $"MIN({args[0]})",
             "minif" => $"MIN(CASE WHEN {args[1]} THEN {args[0]} END)",
             "max" => $"MAX({args[0]})",

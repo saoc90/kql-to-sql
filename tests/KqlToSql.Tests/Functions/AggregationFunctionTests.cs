@@ -346,7 +346,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_list(State)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COALESCE(LIST(State), []) AS list_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(LIST(State) FILTER (WHERE State IS NOT NULL), []) AS list_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -363,7 +363,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_list_if(State, InjuriesDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COALESCE(LIST(State) FILTER (WHERE InjuriesDirect > 0), []) AS list_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(LIST(State) FILTER (WHERE (InjuriesDirect > 0) AND State IS NOT NULL), []) AS list_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -397,7 +397,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_set(State)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COALESCE(LIST(DISTINCT State), []) AS set_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(LIST(DISTINCT State) FILTER (WHERE State IS NOT NULL), []) AS set_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -414,7 +414,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_set_if(State, InjuriesDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT COALESCE(LIST(DISTINCT State) FILTER (WHERE InjuriesDirect > 0), []) AS set_State FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(LIST(DISTINCT State) FILTER (WHERE (InjuriesDirect > 0) AND State IS NOT NULL), []) AS set_State FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

@@ -75,6 +75,12 @@ public class GeneratedRegressionTests
         { "bag_keys-mv-expand", "print d = dynamic({\"x\":1,\"y\":2,\"z\":3}) | extend ks = bag_keys(d) | mv-expand k = ks to typeof(string)" },
         { "format_timespan-fmt", "print ft = format_timespan(2d + 3h + 4m + 5s, \"d.hh:mm:ss\")" },
         { "gettype", "print a=gettype(1), b=gettype(1.5), c=gettype(\"x\"), d=gettype(true), e=gettype(dynamic([1,2]))" },
+        // datetime(null)/timespan(null) literals, make_timespan 4-arg, make_list/make_set drop nulls.
+        { "null-temporal-arith", "print a=datetime(2020-01-01)+timespan(null), b=datetime(null)+1d, c=datetime(2020-01-01)-datetime(null), d=isnull(timespan(null))" },
+        { "datetime-null-col", "datatable(t:datetime)[ datetime(2020-01-01), datetime(null) ] | extend isn = isnull(t)" },
+        { "make_timespan-4", "print a = make_timespan(1,2,3,4)" },
+        { "make_list-drops-nulls", "datatable(x:int)[ int(null), 1, 2, int(null), 3 ] | summarize lst=make_list(x)" },
+        { "make_list-by-group", "datatable(g:string,v:long)[ \"a\",1,\"a\",2,\"b\",3 ] | summarize l=make_list(v) by g | sort by g asc" },
     };
 
     [SkippableTheory]

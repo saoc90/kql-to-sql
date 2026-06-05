@@ -505,6 +505,16 @@ internal class ExpressionSqlBuilder
     private static string ConvertTimespanLiteral(LiteralExpression lit)
     {
         var text = lit.ToString().Trim();
+        // timespan(null) / time(null) → typed SQL NULL (INTERVAL 'timespan(null)' is invalid).
+        var bare = text;
+        if (bare.EndsWith(")", StringComparison.Ordinal))
+        {
+            var open = bare.IndexOf('(');
+            if (open >= 0) bare = bare[(open + 1)..^1].Trim().Trim('"', '\'').Trim();
+        }
+        if (string.Equals(bare, "null", StringComparison.OrdinalIgnoreCase))
+            return "CAST(NULL AS INTERVAL)";
+
         // KQL 'tick' = 100ns. DuckDB INTERVAL has no 'tick' unit (and is µs-resolution), so express
         // N ticks as N/10 microseconds. (Sub-µs values round to 0µs, within comparison tolerance.)
         var tickMatch = System.Text.RegularExpressions.Regex.Match(
@@ -1182,6 +1192,10 @@ internal class ExpressionSqlBuilder
             text = text[9..^1];
         }
         text = text.Trim('"', '\'').Trim();
+
+        // datetime(null) → typed SQL NULL (TIMESTAMP 'null' is invalid).
+        if (string.Equals(text, "null", StringComparison.OrdinalIgnoreCase))
+            return "CAST(NULL AS TIMESTAMP)";
 
         // KQL allows partial datetime literals that DateTime.TryParse rejects or mis-parses:
         //   datetime(0001)        → year-only → 0001-01-01 00:00:00

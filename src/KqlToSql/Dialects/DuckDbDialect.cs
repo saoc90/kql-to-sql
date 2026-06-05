@@ -132,6 +132,9 @@ public class DuckDbDialect : ISqlDialect
             // make_timespan(hours, minutes)
             "make_timespan" when args.Length == 2 =>
                 $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute')",
+            // make_timespan(days, hours, minutes, seconds)
+            "make_timespan" when args.Length == 4 =>
+                $"({args[0]} * INTERVAL '1 day' + {args[1]} * INTERVAL '1 hour' + {args[2]} * INTERVAL '1 minute' + {args[3]} * INTERVAL '1 second')",
             // TO_TIMESTAMP returns TIMESTAMP WITH TIME ZONE; KQL datetime is tz-agnostic and our
             // Timestamp columns are naive TIMESTAMP. Project to UTC wall-clock so comparisons don't
             // depend on the DuckDB session TimeZone (the ms/us/ns variants below are already naive).
@@ -302,10 +305,10 @@ public class DuckDbDialect : ISqlDialect
             // — alias to the DuckDB aggregate so the enclosing GROUP BY remains valid.
             "any" or "take_any" => $"ANY_VALUE({args[0]})",
             "anyif" or "take_anyif" => $"ANY_VALUE({args[0]}) FILTER (WHERE {args[1]})",
-            "make_list" or "makelist" => $"LIST({args[0]})",
+            "make_list" or "makelist" => $"LIST({args[0]}) FILTER (WHERE {args[0]} IS NOT NULL)",
             // make_set is an unordered aggregate: canonicalize order so DuckDB output is
             // deterministic and matches Kusto's set content (LIST_SORT == Kusto array_sort_asc ordinal order).
-            "make_set" or "makeset" => $"LIST_SORT(LIST(DISTINCT {args[0]}))",
+            "make_set" or "makeset" => $"LIST_SORT(LIST(DISTINCT {args[0]}) FILTER (WHERE {args[0]} IS NOT NULL))",
             "sumif" => SumPossiblyInterval(args[0], args[1]),
             "countif" => $"COUNT(*) FILTER (WHERE {args[0]})",
             "avgif" when args.Length >= 2 => $"AVG({args[0]}) FILTER (WHERE {args[1]})",
@@ -358,12 +361,13 @@ public class DuckDbDialect : ISqlDialect
             "hll_merge" => $"hll_merge({args[0]})",
             "make_bag" => $"histogram({args[0]})",
             "make_bag_if" => $"histogram({args[0]}) FILTER (WHERE {args[1]})",
-            // Kusto make_list/make_set (and *_if) over an empty group -> [] (empty array); DuckDB LIST -> NULL. COALESCE to [].
-            "make_list" or "makelist" => $"COALESCE(LIST({args[0]}), [])",
-            "make_list_if" or "makelistif" => $"COALESCE(LIST({args[0]}) FILTER (WHERE {args[1]}), [])",
+            // Kusto make_list/make_set IGNORE null values (only make_list_with_nulls keeps them).
+            // Over an empty/all-null group Kusto -> [] (empty array); DuckDB LIST -> NULL, so COALESCE to [].
+            "make_list" or "makelist" => $"COALESCE(LIST({args[0]}) FILTER (WHERE {args[0]} IS NOT NULL), [])",
+            "make_list_if" or "makelistif" => $"COALESCE(LIST({args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), [])",
             "make_list_with_nulls" => $"COALESCE(LIST({args[0]}), [])",
-            "make_set" or "makeset" => $"COALESCE(LIST(DISTINCT {args[0]}), [])",
-            "make_set_if" or "makesetif" => $"COALESCE(LIST(DISTINCT {args[0]}) FILTER (WHERE {args[1]}), [])",
+            "make_set" or "makeset" => $"COALESCE(LIST(DISTINCT {args[0]}) FILTER (WHERE {args[0]} IS NOT NULL), [])",
+            "make_set_if" or "makesetif" => $"COALESCE(LIST(DISTINCT {args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), [])",
             "min" => $"MIN({args[0]})",
             "minif" => $"MIN({args[0]}) FILTER (WHERE {args[1]})",
             "max" => $"MAX({args[0]})",
