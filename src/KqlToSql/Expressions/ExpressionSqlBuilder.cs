@@ -570,14 +570,19 @@ internal class ExpressionSqlBuilder
 
     private static string ConvertStringLiteral(LiteralExpression lit)
     {
-        var text = lit.ToString().Trim().Trim('"', '\'');
-        text = text.Replace("'", "''");
-        return $"'{text}'";
+        // Use the parser-decoded value, not the raw source text: this strips the verbatim `@"…"` prefix
+        // and the surrounding quotes, and turns KQL escapes (\t \n \r \\ \" \uXXXX) into real characters.
+        // Emitting the raw text instead leaked `@"\s"` as the literal `'@"\s'` (breaking regex/parse/etc.).
+        var text = (lit.LiteralValue as string) ?? lit.ToString().Trim().Trim('"', '\'');
+        return $"'{text.Replace("'", "''")}'";
     }
 
     private static string ConvertCompoundString(CompoundStringLiteralExpression cs)
     {
-        // KQL escaped quotes: 'O''Brien' is parsed as CompoundStringLiteralExpression
+        // KQL escaped quotes: 'O''Brien' is parsed as CompoundStringLiteralExpression. Prefer the
+        // parser-decoded value (handles escapes/concatenated segments); fall back to text unwrapping.
+        if (cs.LiteralValue is string decoded)
+            return $"'{decoded.Replace("'", "''")}'";
         var text = cs.ToString().Trim().Trim('\'', '"');
         text = text.Replace("''", "'").Replace("'", "''");
         return $"'{text}'";
