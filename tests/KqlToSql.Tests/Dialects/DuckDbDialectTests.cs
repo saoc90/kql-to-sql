@@ -94,9 +94,11 @@ public class DuckDbDialectTests
     [Fact]
     public void DuckDb_DayOfWeek_Renders_Kusto_Timespan()
     {
-        // KQL dayofweek() returns a timespan: "00:00:00" for Sunday, "N.00:00:00" otherwise.
+        // KQL dayofweek() returns a *timespan* = whole days since the preceding Sunday.
+        // We render it as an INTERVAL (not a string) so it compares as a timespan and
+        // arithmetic like dayofweek(t)/1d works. EXTRACT(DOW) gives 0=Sun..6=Sat, matching Kusto.
         var sql = _converter.Convert("StormEvents | extend d = dayofweek(StartTime)");
-        Assert.Contains("CASE WHEN EXTRACT(DOW FROM StartTime) = 0 THEN '00:00:00' ELSE CAST(EXTRACT(DOW FROM StartTime) AS VARCHAR) || '.00:00:00' END", sql);
+        Assert.Contains("(EXTRACT(DOW FROM StartTime) * INTERVAL '1 day')", sql);
     }
 
     [Fact]

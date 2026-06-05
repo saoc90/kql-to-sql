@@ -250,7 +250,8 @@ public class ScalarFunctionImprovementTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("T | extend j = parse_json(Data)");
-        Assert.Equal("SELECT *, CAST(Data AS JSON) AS j FROM T", sql);
+        // TRY_CAST (not CAST): Kusto parse_json returns null on invalid JSON instead of throwing.
+        Assert.Equal("SELECT *, TRY_CAST(Data AS JSON) AS j FROM T", sql);
     }
 
     [Fact]

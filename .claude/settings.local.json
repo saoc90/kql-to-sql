@@ -35,7 +35,8 @@
       "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/Kusto.Language.Bridge.min.js | tr ';' '\\\\n' | grep 'block.v\\\\|blockText\\\\|GetService\\\\|TryGetService\\\\|block={' | head -10)",
       "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/Kusto.Language.Bridge.min.js | tr ';' '\\\\n' | grep 'GetBlockAtPosition')",
       "Bash(cat C:/Git/kql-to-sql/src/WebDemo/wwwroot/vs/language/kusto/Kusto.Language.Bridge.min.js | tr ';' '\\\\n' | grep -A3 'GetBlockAtPosition:function')",
-      "Bash(grep -r \"contains\" /c/Git/kql-to-sql/tests/KqlToSql.IntegrationTests/*.cs -i -l)"
+      "Bash(grep -r \"contains\" /c/Git/kql-to-sql/tests/KqlToSql.IntegrationTests/*.cs -i -l)",
+      "mcp__chrome-devtools__press_key"
     ]
   }
 }
