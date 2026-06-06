@@ -66,7 +66,8 @@ public class ScalarFunctionImprovementTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("T | extend t = trim(' ', State)");
-        Assert.Equal("SELECT *, TRIM(State, ' ') AS t FROM T", sql);
+        // KQL trim's first arg is a regex; anchor it and remove one leading + one trailing match.
+        Assert.Equal("SELECT *, REGEXP_REPLACE(REGEXP_REPLACE(State, '^( )', ''), '( )$', '') AS t FROM T", sql);
     }
 
     [Fact]
@@ -74,7 +75,7 @@ public class ScalarFunctionImprovementTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("T | extend t = trim_start(' ', State)");
-        Assert.Equal("SELECT *, LTRIM(State, ' ') AS t FROM T", sql);
+        Assert.Equal("SELECT *, REGEXP_REPLACE(State, '^( )', '') AS t FROM T", sql);
     }
 
     [Fact]
@@ -82,7 +83,7 @@ public class ScalarFunctionImprovementTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("T | extend t = trim_end(' ', State)");
-        Assert.Equal("SELECT *, RTRIM(State, ' ') AS t FROM T", sql);
+        Assert.Equal("SELECT *, REGEXP_REPLACE(State, '( )$', '') AS t FROM T", sql);
     }
 
     [Fact]

@@ -55,8 +55,17 @@ public class DuckDbDialect : ISqlDialect
             "not" => $"NOT ({args[0]})",
             "strcat" => $"CONCAT({string.Join(", ", args)})",
             "replace_string" => $"REPLACE({string.Join(", ", args)})",
+            // indexof(source, lookup [, start]) — 0-based first index, -1 if absent. With a start offset,
+            // search the suffix from `start` and re-add the offset (INSTR is 1-based; 0 means not found).
+            "indexof" when args.Length >= 3 =>
+                $"(CASE WHEN INSTR(SUBSTR(CAST({args[0]} AS VARCHAR), ({args[2]}) + 1), {args[1]}) = 0 THEN -1 " +
+                $"ELSE ({args[2]}) + INSTR(SUBSTR(CAST({args[0]} AS VARCHAR), ({args[2]}) + 1), {args[1]}) - 1 END)",
             "indexof" => $"(INSTR(CAST({args[0]} AS VARCHAR), {args[1]}) - 1)",
             "coalesce" => $"COALESCE({string.Join(", ", args)})",
+            // countof(source, search [, kind]): 'normal' (default) counts substring occurrences; 'regex'
+            // counts regex matches.
+            "countof" when args.Length >= 3 && args[2].Contains("regex", StringComparison.OrdinalIgnoreCase) =>
+                $"LEN(REGEXP_EXTRACT_ALL(CAST({args[0]} AS VARCHAR), {args[1]}))",
             "countof" => $"(LENGTH({args[0]}) - LENGTH(REPLACE({args[0]}, {args[1]}, ''))) / LENGTH({args[1]})",
             "reverse" => $"REVERSE({args[0]})",
             "split" => $"STRING_SPLIT(CAST({args[0]} AS VARCHAR), {args[1]})",

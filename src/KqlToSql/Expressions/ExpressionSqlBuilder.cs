@@ -945,13 +945,17 @@ internal class ExpressionSqlBuilder
 
         var text = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
         var start = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
-        var startExpr = $"({start}) + 1";
+        // KQL substring start is 0-based; a negative start counts from the end (start = len + start).
+        // DuckDB SUBSTR is 1-based but also treats negative positions as from-the-end, so add 1 only
+        // to non-negative starts and pass negatives through unchanged.
+        var startExpr = $"(CASE WHEN ({start}) < 0 THEN ({start}) ELSE ({start}) + 1 END)";
         // KQL substring() accepts numeric/other types and coerces to string; DuckDB's SUBSTR requires VARCHAR.
         var textCast = $"CAST({text} AS VARCHAR)";
         if (fce.ArgumentList.Expressions.Count == 3)
         {
             var length = ConvertExpression(fce.ArgumentList.Expressions[2].Element, leftAlias, rightAlias);
-            return $"SUBSTR({textCast}, {startExpr}, {length})";
+            // KQL returns '' for a negative length (DuckDB SUBSTR would error / behave differently).
+            return $"(CASE WHEN ({length}) < 0 THEN '' ELSE SUBSTR({textCast}, {startExpr}, {length}) END)";
         }
 
         return $"SUBSTR({textCast}, {startExpr})";
@@ -1928,31 +1932,36 @@ internal class ExpressionSqlBuilder
         };
     }
 
+    // KQL trim/trim_start/trim_end take a REGEX as the first arg and remove its leading/trailing matches
+    // (trim('x', 'xxabcxx') -> 'xabcx' — one 'x' match each end, not the whole 'x' run). When the regex is
+    // a string literal we anchor it with ^()/()$ in REGEXP_REPLACE; otherwise fall back to charset TRIM
+    // (DuckDB regexp patterns must be constant, so a non-literal regex can't drive REGEXP_REPLACE).
     private string ConvertTrim(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
-    {
-        if (fce.ArgumentList.Expressions.Count != 2)
-            throw new NotSupportedException("trim() expects two arguments");
-        var chars = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
-        var text = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
-        return $"TRIM({text}, {chars})";
-    }
+        => ConvertTrimCore(fce, leftAlias, rightAlias, start: true, end: true, "TRIM");
 
     private string ConvertTrimStart(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
-    {
-        if (fce.ArgumentList.Expressions.Count != 2)
-            throw new NotSupportedException("trim_start() expects two arguments");
-        var chars = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
-        var text = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
-        return $"LTRIM({text}, {chars})";
-    }
+        => ConvertTrimCore(fce, leftAlias, rightAlias, start: true, end: false, "LTRIM");
 
     private string ConvertTrimEnd(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
+        => ConvertTrimCore(fce, leftAlias, rightAlias, start: false, end: true, "RTRIM");
+
+    private string ConvertTrimCore(FunctionCallExpression fce, string? leftAlias, string? rightAlias,
+        bool start, bool end, string charsetFallback)
     {
         if (fce.ArgumentList.Expressions.Count != 2)
-            throw new NotSupportedException("trim_end() expects two arguments");
+            throw new NotSupportedException($"{fce.Name.SimpleName}() expects two arguments");
         var chars = ConvertExpression(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
         var text = ConvertExpression(fce.ArgumentList.Expressions[1].Element, leftAlias, rightAlias);
-        return $"RTRIM({text}, {chars})";
+        var t = chars.Trim();
+        if (t.Length >= 2 && t[0] == '\'' && t[^1] == '\'')
+        {
+            var rx = t[1..^1]; // SQL-literal content (already '-escaped); usable inside a new '...' literal
+            var sql = text;
+            if (start) sql = $"REGEXP_REPLACE({sql}, '^({rx})', '')";
+            if (end) sql = $"REGEXP_REPLACE({sql}, '({rx})$', '')";
+            return sql;
+        }
+        return $"{charsetFallback}({text}, {chars})";
     }
 
     private string ConvertStrcatDelim(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
