@@ -265,8 +265,26 @@ internal sealed class ParseHandlers : OperatorHandlerBase
         // boundary too, so the class is strictly [A-Za-z0-9]).
         // Case-insensitive (the default) is implemented by lowercasing both the input and the term.
         var matchTerm = caseSensitive ? term : term.ToLowerInvariant();
-        var escaped = Regex.Escape(matchTerm);
-        var pattern = $"(^|[^A-Za-z0-9]){escaped}([^A-Za-z0-9]|$)".Replace("'", "''");
+        string pattern;
+        if (matchTerm.Contains('*') || matchTerm.Contains('?'))
+        {
+            // Search wildcards: '*' matches any run of term characters, '?' a single one. A leading/
+            // trailing '*' drops that side's term-boundary anchor (so web* = a term starting with "web").
+            bool anchorStart = !matchTerm.StartsWith("*", StringComparison.Ordinal);
+            bool anchorEnd = !matchTerm.EndsWith("*", StringComparison.Ordinal);
+            var core = string.Concat(matchTerm.Select(ch => ch switch
+            {
+                '*' => "[A-Za-z0-9]*",
+                '?' => "[A-Za-z0-9]",
+                _ => Regex.Escape(ch.ToString()),
+            }));
+            pattern = ((anchorStart ? "(^|[^A-Za-z0-9])" : "") + core + (anchorEnd ? "([^A-Za-z0-9]|$)" : "")).Replace("'", "''");
+        }
+        else
+        {
+            var escaped = Regex.Escape(matchTerm);
+            pattern = $"(^|[^A-Za-z0-9]){escaped}([^A-Za-z0-9]|$)".Replace("'", "''");
+        }
         var subject = caseSensitive ? valueExpr : $"LOWER({valueExpr})";
         return $"REGEXP_MATCHES({subject}, '{pattern}')";
     }
