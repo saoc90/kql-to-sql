@@ -294,12 +294,12 @@ internal class JoinHandlers : OperatorHandlerBase
                     if (!own.Contains(sc))
                         pads.Add($"'' AS {ExpressionSqlBuilder.QuoteIdentifierIfReserved(sc)}");
 
+            // Kusto places the withsource column FIRST in the output schema, so project it before '*'.
+            var prefix = sourceColumn != null ? $"'{label}' AS {sourceColumn}, " : "";
             var selectExtras = string.Join("", pads.Select(p => ", " + p));
-            if (sourceColumn != null)
-                selectExtras += $", '{label}' AS {sourceColumn}";
 
-            var sql = selectExtras.Length > 0
-                ? $"SELECT *{selectExtras} FROM ({op.Sql})"
+            var sql = (prefix.Length > 0 || selectExtras.Length > 0)
+                ? $"SELECT {prefix}*{selectExtras} FROM ({op.Sql})"
                 : op.Sql;
             parts.Add($"({sql})");
         }
