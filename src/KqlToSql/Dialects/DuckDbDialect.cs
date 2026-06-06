@@ -344,7 +344,14 @@ public class DuckDbDialect : ISqlDialect
                 $"SUM(CASE WHEN __RB__(({args[1]}) OR ({args[0]} IS DISTINCT FROM LAG({args[0]}) OVER ())) THEN 1 ELSE 0 END) " +
                 $"OVER (PARTITION BY __RESETGRP__({args[1]}) ROWS UNBOUNDED PRECEDING)",
             "row_rank_dense" => $"__RESETGRP__({args[0]} IS DISTINCT FROM LAG({args[0]}) OVER ())",
-            "row_rank_min" => "RANK() OVER ()",
+            // row_rank_min(Term [, restart]): the serialized position of the first row of the current
+            // Term-run. No restart → MIN(row#) within each Term-change group. With restart → the run-start
+            // position within the restart-group, carried forward (MAX-of-position at each increment).
+            "row_rank_min" when args.Length >= 2 =>
+                $"MAX(CASE WHEN __RB__(({args[1]}) OR ({args[0]} IS DISTINCT FROM LAG({args[0]}) OVER ())) " +
+                $"THEN __RNP__({args[1]}) ELSE NULL END) OVER (PARTITION BY __RESETGRP__({args[1]}) ROWS UNBOUNDED PRECEDING)",
+            "row_rank_min" =>
+                $"MIN(__RN__()) OVER (PARTITION BY __RESETGRP__({args[0]} IS DISTINCT FROM LAG({args[0]}) OVER ()))",
             "row_window_session" => $"SUM(CASE WHEN {args[0]} > LAG({args[0]}) OVER () + {args[1]} THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING)",
 
             // Math functions

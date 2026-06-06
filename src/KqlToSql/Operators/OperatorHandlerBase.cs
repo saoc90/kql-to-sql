@@ -28,58 +28,80 @@ internal abstract class OperatorHandlerBase
     protected const string ResetGroupMarker = "__RESETGRP__(";
 
     protected const string RawBoolMarker = "__RB__(";
+    protected const string RowNumMarker = "__RN__(";
+    protected const string RowNumPartMarker = "__RNP__(";
 
     /// <summary>True when an extend/serialize projection contains scan-window hoist markers.</summary>
     protected static bool HasResetGroupMarker(string joined) =>
         joined.Contains(ResetGroupMarker, StringComparison.Ordinal) ||
-        joined.Contains(RawBoolMarker, StringComparison.Ordinal);
+        joined.Contains(RawBoolMarker, StringComparison.Ordinal) ||
+        joined.Contains(RowNumMarker, StringComparison.Ordinal);
 
     /// <summary>Lowers scan-window markers into layered windows (a window can't reference another window,
     /// and a predicate may itself be a window such as g != prev(g) → g != LAG(g) OVER ()):
-    ///   __RB__(&lt;pred&gt;)        → a boolean column _rbN (the predicate evaluated once, one window level)
-    ///   __RESETGRP__(&lt;pred&gt;)  → a reset-group column _rgN = running count of the predicate
-    /// Layers: L1 evaluates every distinct predicate to _rbN; L2 builds _rgN (SUM(CASE _rbN…) OVER rows)
-    /// for the reset-group predicates; the rewritten outer expression references those plain columns
-    /// (e.g. ROW_NUMBER()/SUM() OVER (PARTITION BY _rgN), or SUM(CASE _rbN…) OVER (PARTITION BY _rgN)).
-    /// Helper columns are EXCLUDEd from the output.</summary>
+    ///   __RB__(&lt;pred&gt;)        → boolean column _rbN (the predicate evaluated once; one window level)
+    ///   __RESETGRP__(&lt;pred&gt;)  → reset-group column _rgN = running count of the predicate
+    ///   __RN__()             → _rn = serialized ROW_NUMBER() OVER ()
+    ///   __RNP__(&lt;pred&gt;)       → _rnpN = ROW_NUMBER() OVER (PARTITION BY _rgN) (per reset-group position)
+    /// Layers: L1 evaluates predicates → _rbN (+ _rn); L2 builds _rgN; L3 builds _rnpN (partitioned by its
+    /// reset-group). The rewritten outer expression references those plain columns; helpers are EXCLUDEd.</summary>
     protected string HoistResetGroups(string leftSql, string joined, params string[] alsoExclude)
     {
         var preds = new List<string>();           // distinct predicate text
-        var needsRg = new HashSet<int>();         // predicate indexes that need a reset-group column
+        var needsRg = new HashSet<int>();         // predicate indexes needing a reset-group column
+        var needsRnp = new HashSet<int>();        // predicate indexes needing a partitioned row-number
+        bool needRn = false;
+        var markers = new (string Token, int Kind)[]  // Kind: 0=resetgrp 1=rawbool 2=rownum 3=rownum-part
+        { (ResetGroupMarker, 0), (RawBoolMarker, 1), (RowNumMarker, 2), (RowNumPartMarker, 3) };
         var rewritten = new System.Text.StringBuilder();
         int i = 0;
         while (i < joined.Length)
         {
-            int rg = joined.IndexOf(ResetGroupMarker, i, StringComparison.Ordinal);
-            int rb = joined.IndexOf(RawBoolMarker, i, StringComparison.Ordinal);
-            if (rg < 0 && rb < 0) { rewritten.Append(joined, i, joined.Length - i); break; }
-            bool isRg = rb < 0 || (rg >= 0 && rg < rb);
-            int at = isRg ? rg : rb;
-            int markerLen = (isRg ? ResetGroupMarker : RawBoolMarker).Length;
+            int at = -1, kind = -1, mlen = 0;
+            foreach (var m in markers)
+            {
+                int p = joined.IndexOf(m.Token, i, StringComparison.Ordinal);
+                if (p >= 0 && (at < 0 || p < at)) { at = p; kind = m.Kind; mlen = m.Token.Length; }
+            }
+            if (at < 0) { rewritten.Append(joined, i, joined.Length - i); break; }
             rewritten.Append(joined, i, at - i);
-            int start = at + markerLen, depth = 1, j = start;
+            int start = at + mlen, depth = 1, j = start;
             for (; j < joined.Length && depth > 0; j++)
             {
                 if (joined[j] == '(') depth++;
                 else if (joined[j] == ')') depth--;
             }
             var pred = joined.Substring(start, j - 1 - start);
+            if (kind == 2) { needRn = true; rewritten.Append("_rn"); i = j; continue; }
             int idx = preds.IndexOf(pred);
             if (idx < 0) { idx = preds.Count; preds.Add(pred); }
-            if (isRg) { needsRg.Add(idx); rewritten.Append($"_rg{idx}"); }
-            else rewritten.Append($"_rb{idx}");
+            switch (kind)
+            {
+                case 0: needsRg.Add(idx); rewritten.Append($"_rg{idx}"); break;
+                case 1: rewritten.Append($"_rb{idx}"); break;
+                case 3: needsRg.Add(idx); needsRnp.Add(idx); rewritten.Append($"_rnp{idx}"); break;
+            }
             i = j;
         }
 
-        var l1Defs = preds.Select((p, n) => $"({p}) AS _rb{n}");
+        // Capture the (serialized) input order so the layered subqueries below don't lose it — the
+        // outer SELECT re-applies ORDER BY _ord (scan/serialize results are order-sensitive).
+        var l1Defs = preds.Select((p, n) => $"({p}) AS _rb{n}").ToList();
+        l1Defs.Add("ROW_NUMBER() OVER () AS _ord");
+        if (needRn) l1Defs.Add("ROW_NUMBER() OVER () AS _rn");
         var l1 = $"SELECT *, {string.Join(", ", l1Defs)} FROM ({leftSql})";
         var rgIdx = needsRg.OrderBy(n => n).ToList();
         var l2Defs = rgIdx.Select(n =>
             $"SUM(CASE WHEN _rb{n} THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING) AS _rg{n}");
         var l2 = rgIdx.Count > 0 ? $"SELECT *, {string.Join(", ", l2Defs)} FROM ({l1})" : l1;
+        var rnpIdx = needsRnp.OrderBy(n => n).ToList();
+        var l3Defs = rnpIdx.Select(n => $"ROW_NUMBER() OVER (PARTITION BY _rg{n}) AS _rnp{n}");
+        var l3 = rnpIdx.Count > 0 ? $"SELECT *, {string.Join(", ", l3Defs)} FROM ({l2})" : l2;
         var dropCols = Enumerable.Range(0, preds.Count).Select(n => $"_rb{n}")
-            .Concat(rgIdx.Select(n => $"_rg{n}")).Concat(alsoExclude).ToArray();
-        return $"SELECT {Dialect.SelectExclude(dropCols)}, {rewritten} FROM ({l2})";
+            .Concat(rgIdx.Select(n => $"_rg{n}")).Concat(rnpIdx.Select(n => $"_rnp{n}"))
+            .Concat(needRn ? new[] { "_rn", "_ord" } : new[] { "_ord" })
+            .Concat(alsoExclude).ToArray();
+        return $"SELECT {Dialect.SelectExclude(dropCols)}, {rewritten} FROM ({l3}) ORDER BY _ord";
     }
 
     /// <summary>Extracts the FROM source, or wraps in parens as subquery.</summary>
