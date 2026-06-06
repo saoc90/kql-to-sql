@@ -657,24 +657,25 @@ internal class ExpressionSqlBuilder
         }
         if (string.Equals(bare, "null", StringComparison.OrdinalIgnoreCase))
             return "CAST(NULL AS INTERVAL)";
+        return TimespanTextToSql(bare, literalFallback: true);
+    }
 
-        // Use the unwrapped inner so the time(...)/timespan(...) constructor parses like a bare
-        // timespan literal (e.g. time(1.02:03:04.567) → 1.02:03:04.567).
-        // KQL 'tick' = 100ns. DuckDB INTERVAL has no 'tick' unit (and is µs-resolution), so express
-        // N ticks as N/10 microseconds. (Sub-µs values round to 0µs, within comparison tolerance.)
+    // Converts a timespan's textual form (1tick / 1d / 1.02:03:04.567 / 01:00:00) to an INTERVAL SQL
+    // expression. KQL 'tick' = 100ns; DuckDB INTERVAL is µs-resolution so ticks become µs. For a genuine
+    // timespan literal, an unrecognized form falls back to INTERVAL '...'; for totimespan(<string>) it
+    // falls back to a null-safe TRY_CAST (Kusto totimespan('abc') is null).
+    private static string TimespanTextToSql(string bare, bool literalFallback)
+    {
         var tickMatch = System.Text.RegularExpressions.Regex.Match(
             bare, @"^(-?\d+(?:\.\d+)?)\s*ticks?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (tickMatch.Success)
             return $"(({tickMatch.Groups[1].Value} / 10.0) * INTERVAL '1 microsecond')";
         if (TryParseTimespan(bare, out var ms))
-        {
             return $"({ms} * INTERVAL '1 millisecond')";
-        }
-        // Colon form d.hh:mm:ss[.fffffff] (e.g. 1.02:03:04.567) — .NET TimeSpan parses it; emit as µs
-        // (DuckDB can't parse 'd.hh:mm:ss' as an INTERVAL literal directly).
+        // Colon form d.hh:mm:ss[.fffffff] — .NET TimeSpan parses it; emit as µs.
         if (TimeSpan.TryParse(bare, CultureInfo.InvariantCulture, out var tsLit))
             return $"(CAST({tsLit.Ticks / 10} AS BIGINT) * INTERVAL '1 microsecond')";
-        return $"INTERVAL '{bare}'";
+        return literalFallback ? $"INTERVAL '{bare}'" : $"TRY_CAST('{bare.Replace("'", "''")}' AS INTERVAL)";
     }
 
     private string ConvertFunctionCall(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
@@ -683,6 +684,16 @@ internal class ExpressionSqlBuilder
         var lower = name.ToLowerInvariant();
         if (lower == "tostring" && fce.ArgumentList.Expressions.Count == 1)
             return ConvertToString(fce.ArgumentList.Expressions[0].Element, leftAlias, rightAlias);
+        // totimespan/timespan of a string literal: parse the Kusto timespan text (1d, 1.02:03:04, …).
+        if ((lower == "totimespan" || lower == "timespan") && fce.ArgumentList.Expressions.Count == 1
+            && fce.ArgumentList.Expressions[0].Element is LiteralExpression tsLit
+            && tsLit.Kind == SyntaxKind.StringLiteralExpression)
+        {
+            var inner = (tsLit.LiteralValue as string ?? "").Trim();
+            return inner.Length == 0 || inner.Equals("null", StringComparison.OrdinalIgnoreCase)
+                ? "CAST(NULL AS INTERVAL)"
+                : TimespanTextToSql(inner, literalFallback: false);
+        }
         if (CastFunctionMap.TryGetValue(lower, out var sqlType))
         {
             if (fce.ArgumentList.Expressions.Count != 1)
