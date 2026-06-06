@@ -97,15 +97,24 @@ public class DuckDbDialect : ISqlDialect
             // TRY_CAST so invalid/empty JSON input yields NULL (Kusto's parse_json behavior) instead of raising.
             "parse_json" or "todynamic" => IsArrayLikeText(args[0]) ? args[0] : $"TRY_CAST({args[0]} AS JSON)",
             "format_datetime" => $"STRFTIME({args[0]}, {TranslateDateTimeFormat(args[1])})",
+            // startof*/endof* take an optional period offset (e.g. startofmonth(d, -1) = previous month).
+            "startofday" when args.Length >= 2 => $"(DATE_TRUNC('day', {args[0]}) + ({args[1]}) * INTERVAL '1 day')",
             "startofday" => $"DATE_TRUNC('day', {args[0]})",
             // KQL weeks start on SUNDAY; DuckDB's DATE_TRUNC('week') starts on Monday. Shift the
             // input forward a day before truncating and back a day after, so Sunday becomes the anchor.
+            "startofweek" when args.Length >= 2 => $"((DATE_TRUNC('week', {args[0]} + INTERVAL '1 day') - INTERVAL '1 day') + ({args[1]}) * INTERVAL '7 days')",
             "startofweek" => $"(DATE_TRUNC('week', {args[0]} + INTERVAL '1 day') - INTERVAL '1 day')",
+            "startofmonth" when args.Length >= 2 => $"(DATE_TRUNC('month', {args[0]}) + ({args[1]}) * INTERVAL '1 month')",
             "startofmonth" => $"DATE_TRUNC('month', {args[0]})",
+            "startofyear" when args.Length >= 2 => $"(DATE_TRUNC('year', {args[0]}) + ({args[1]}) * INTERVAL '1 year')",
             "startofyear" => $"DATE_TRUNC('year', {args[0]})",
+            "endofday" when args.Length >= 2 => $"(DATE_TRUNC('day', {args[0]}) + (({args[1]}) + 1) * INTERVAL '1 day' - INTERVAL '1 microsecond')",
             "endofday" => $"DATE_TRUNC('day', {args[0]}) + INTERVAL '1 day' - INTERVAL '1 microsecond'",
+            "endofweek" when args.Length >= 2 => $"((DATE_TRUNC('week', {args[0]} + INTERVAL '1 day') - INTERVAL '1 day') + (({args[1]}) + 1) * INTERVAL '7 days' - INTERVAL '1 microsecond')",
             "endofweek" => $"(DATE_TRUNC('week', {args[0]} + INTERVAL '1 day') - INTERVAL '1 day') + INTERVAL '7 days' - INTERVAL '1 microsecond'",
+            "endofmonth" when args.Length >= 2 => $"(DATE_TRUNC('month', {args[0]}) + (({args[1]}) + 1) * INTERVAL '1 month' - INTERVAL '1 microsecond')",
             "endofmonth" => $"DATE_TRUNC('month', {args[0]}) + INTERVAL '1 month' - INTERVAL '1 microsecond'",
+            "endofyear" when args.Length >= 2 => $"(DATE_TRUNC('year', {args[0]}) + (({args[1]}) + 1) * INTERVAL '1 year' - INTERVAL '1 microsecond')",
             "endofyear" => $"DATE_TRUNC('year', {args[0]}) + INTERVAL '1 year' - INTERVAL '1 microsecond'",
             "min_of" => $"LEAST({string.Join(", ", args)})",
             "max_of" => $"GREATEST({string.Join(", ", args)})",
