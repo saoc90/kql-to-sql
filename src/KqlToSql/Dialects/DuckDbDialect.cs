@@ -53,7 +53,8 @@ public class DuckDbDialect : ISqlDialect
             "isnotnull" => $"({args[0]} IS NOT NULL)",
             "isnull" => $"({args[0]} IS NULL)",
             "not" => $"NOT ({args[0]})",
-            "strcat" => $"CONCAT({string.Join(", ", args)})",
+            // CONCAT of a boolean yields DuckDB's lowercase 'true'/'false'; Kusto strcat uses 'True'/'False'.
+            "strcat" => $"CONCAT({string.Join(", ", args.Select(a => a == "TRUE" ? "'True'" : a == "FALSE" ? "'False'" : a))})",
             "replace_string" => $"REPLACE({string.Join(", ", args)})",
             // indexof(source, lookup [, start]) — 0-based first index, -1 if absent. With a start offset,
             // search the suffix from `start` and re-add the offset (INSTR is 1-based; 0 means not found).
@@ -316,7 +317,9 @@ public class DuckDbDialect : ISqlDialect
             // REGEXP_EXTRACT_ALL(string, pattern[, group]) takes the text first, then the pattern.
             "extract_all" when args.Length == 2 => $"REGEXP_EXTRACT_ALL({args[1]}, {args[0]})",
             "extract_all" when args.Length >= 3 => BuildExtractAllGroups(args),
-            "replace_regex" => $"REGEXP_REPLACE({args[0]}, {args[1]}, {args[2]})",
+            // Kusto replace_regex replaces ALL matches; DuckDB REGEXP_REPLACE defaults to the first, so
+            // pass the 'g' (global) flag.
+            "replace_regex" => $"REGEXP_REPLACE({args[0]}, {args[1]}, {args[2]}, 'g')",
             "parse_csv" => $"STRING_SPLIT({args[0]}, ',')",
             "dynamic_to_json" => $"CAST({args[0]} AS JSON)",
             "tohex" => $"PRINTF('%x', {args[0]})",
