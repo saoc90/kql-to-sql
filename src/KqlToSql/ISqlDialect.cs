@@ -36,6 +36,26 @@ public interface ISqlDialect
     string JsonIndexByKey(string baseSql, string keyExpr) =>
         $"json_extract({baseSql}, '$.' || {keyExpr})";
 
+    /// <summary>Formats a timespan/INTERVAL value as Kusto's tostring() text: [-][d.]hh:mm:ss[.fffffff]
+    /// (day part only when non-zero; 7-digit fraction only when non-zero). Used by tostring(timespan).</summary>
+    string TimespanToString(string intervalSql)
+    {
+        var totalUs = $"(EXTRACT(EPOCH FROM ({intervalSql})) * 1000000)";
+        var absUs = $"ABS({totalUs})";
+        string comp(string expr) => $"CAST(FLOOR({expr}) AS BIGINT)";
+        var days = comp($"{absUs} / 86400000000");
+        var hh = comp($"MOD({absUs}, 86400000000) / 3600000000");
+        var mm = comp($"MOD({absUs}, 3600000000) / 60000000");
+        var ss = comp($"MOD({absUs}, 60000000) / 1000000");
+        var fracUs = comp($"MOD({absUs}, 1000000)");
+        return
+            $"((CASE WHEN {totalUs} < 0 THEN '-' ELSE '' END) || " +
+            $"(CASE WHEN {days} > 0 THEN CAST({days} AS VARCHAR) || '.' ELSE '' END) || " +
+            $"LPAD(CAST({hh} AS VARCHAR), 2, '0') || ':' || LPAD(CAST({mm} AS VARCHAR), 2, '0') || ':' || " +
+            $"LPAD(CAST({ss} AS VARCHAR), 2, '0') || " +
+            $"(CASE WHEN {fracUs} > 0 THEN '.' || LPAD(CAST({fracUs} * 10 AS VARCHAR), 7, '0') ELSE '' END))";
+    }
+
     /// <summary>Index a JSON array by a 0-based (possibly dynamic) integer position expression,
     /// returning the navigable JSON element. A negative index counts from the end (Kusto d[-1] = last),
     /// rendered with DuckDB's '$[#-N]' length-relative path syntax.</summary>

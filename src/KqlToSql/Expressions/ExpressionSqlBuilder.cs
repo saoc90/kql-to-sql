@@ -608,6 +608,10 @@ internal class ExpressionSqlBuilder
             // json_extract_string('$') yields the unquoted scalar text (or JSON text for objects/arrays).
             return $"COALESCE(json_extract_string({a}, '$'), '')";
 
+        // A timespan renders as Kusto's [-][d.]hh:mm:ss[.fffffff], not DuckDB's '26:00:00' INTERVAL text.
+        if (InferScalarKind(node) == ScalarKind.TimeSpan || IsIntervalExpression(a))
+            return $"COALESCE({_dialect.TimespanToString(a)}, '')";
+
         if (ExpressionReturnsBool(node))
             return $"COALESCE(CASE WHEN {a} THEN 'True' WHEN NOT {a} THEN 'False' END, '')";
 
@@ -1436,6 +1440,14 @@ internal class ExpressionSqlBuilder
         }
     }
 
+    // Kusto bins datetimes relative to 0001-01-01 (ticks since year 1), not the Unix epoch. For spans
+    // that don't evenly divide the 0001→1970 day offset (e.g. 7d) this shifts the grid, so floor against
+    // the 0001 origin (a constant DuckDB folds) before adding it back. 1d/1h/… are unaffected (the offset
+    // is a whole number of days).
+    private const string Origin0001Ms = "(EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00') * 1000)";
+    private static string BinToOrigin(string epochMs, string sizeMs) =>
+        $"FLOOR((({epochMs}) - {Origin0001Ms})/{sizeMs})*{sizeMs} + {Origin0001Ms}";
+
     internal string ConvertBin(FunctionCallExpression fce, string? leftAlias, string? rightAlias)
     {
         if (fce.ArgumentList.Expressions.Count != 2)
@@ -1450,10 +1462,7 @@ internal class ExpressionSqlBuilder
         {
             var text = lit.ToString().Trim().Trim('"', '\'');
             if (TryParseTimespan(text, out var ms))
-            {
-                var em = _dialect.EpochMillis(value);
-                return _dialect.TimestampFromMillis($"FLOOR({em}/{ms})*{ms}");
-            }
+                return _dialect.TimestampFromMillis(BinToOrigin(_dialect.EpochMillis(value), ms.ToString(CultureInfo.InvariantCulture)));
         }
 
         var size = ConvertExpression(sizeExpr, leftAlias, rightAlias);
@@ -1462,8 +1471,7 @@ internal class ExpressionSqlBuilder
         if (IsIntervalExpression(size))
         {
             var sizeMs = _dialect.IntervalMillis(size);
-            var em = _dialect.EpochMillis(value);
-            return _dialect.TimestampFromMillis($"FLOOR({em}/{sizeMs})*{sizeMs}");
+            return _dialect.TimestampFromMillis(BinToOrigin(_dialect.EpochMillis(value), sizeMs));
         }
         return $"FLOOR(({value})/({size}))*({size})";
     }
