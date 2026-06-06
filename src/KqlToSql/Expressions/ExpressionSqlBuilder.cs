@@ -1246,12 +1246,21 @@ internal class ExpressionSqlBuilder
         }
 
         var left = ConvertExpression(bin.Left, leftAlias, rightAlias);
-        var term = RegexEscape(lit.ToString().Trim().Trim('\'', '"'));
+        // Use the decoded literal value (handles \t / verbatim) and an empty term matches everything.
+        var rawTerm = (lit.LiteralValue as string) ?? lit.ToString().Trim().Trim('\'', '"');
+        if (string.IsNullOrEmpty(rawTerm))
+            return negated ? "FALSE" : "TRUE";
+        var term = RegexEscape(rawTerm);
+        // A KQL "term" is a maximal run of alphanumerics; everything else is a delimiter. RE2's \b is
+        // ASCII-only (breaks on accented/Cyrillic chars and treats '_' as a word char), so delimit with a
+        // Unicode-aware non-alphanumeric class instead (RE2 supports \p{L}/\p{N}; it has no lookaround,
+        // so consume an optional delimiter on each side — regexp_matches only needs one match to exist).
+        const string D = "[^\\p{L}\\p{N}]";
         var body = kind switch
         {
-            "prefix" => $"\\b{term}",
-            "suffix" => $"{term}\\b",
-            _ => $"\\b{term}\\b",
+            "prefix" => $"(?:^|{D}){term}",
+            "suffix" => $"{term}(?:{D}|$)",
+            _ => $"(?:^|{D}){term}(?:{D}|$)",
         };
         var pattern = (caseSensitive ? "" : "(?i)") + body;
         var sqlPattern = "'" + pattern.Replace("'", "''") + "'";
