@@ -982,6 +982,8 @@ public class DuckDbDialect : ISqlDialect
         var jt = $"json_type(CAST({arg} AS VARCHAR))";
         return
             $"CASE " +
+            // A null dynamic / null value is gettype 'null' in Kusto (also JSON-null via json_type below).
+            $"WHEN {arg} IS NULL THEN 'null' " +
             $"WHEN {t} IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' " +
             // KQL real literals (1.5) surface as DuckDB DECIMAL, and KQL gettype(1.5) is 'real', so map
             // DECIMAL -> 'real' too. (gettype(todecimal(x)) therefore also reports 'real' — accepted.)
