@@ -27,27 +27,37 @@ internal abstract class OperatorHandlerBase
 
     protected const string ResetGroupMarker = "__RESETGRP__(";
 
-    /// <summary>True when an extend/serialize projection contains restart-window reset-group markers.</summary>
-    protected static bool HasResetGroupMarker(string joined) =>
-        joined.Contains(ResetGroupMarker, StringComparison.Ordinal);
+    protected const string RawBoolMarker = "__RB__(";
 
-    /// <summary>Lowers __RESETGRP__(&lt;pred&gt;) markers (emitted by row_cumsum(value, restart) and friends)
-    /// into a partitioned window. A window can't reference another window, and the predicate itself may be
-    /// a window (g != prev(g) → g != LAG(g) OVER ()), so we layer three SELECTs:
-    ///   L1: evaluate each distinct predicate to a boolean column _rbN  (one window level — LAG is fine)
-    ///   L2: reset-group _rgN = running count of _rbN (SUM(CASE…) OVER rows — no nested window)
-    ///   out: the marker becomes _rgN so the outer window partitions by it; helper cols are EXCLUDEd.</summary>
+    /// <summary>True when an extend/serialize projection contains scan-window hoist markers.</summary>
+    protected static bool HasResetGroupMarker(string joined) =>
+        joined.Contains(ResetGroupMarker, StringComparison.Ordinal) ||
+        joined.Contains(RawBoolMarker, StringComparison.Ordinal);
+
+    /// <summary>Lowers scan-window markers into layered windows (a window can't reference another window,
+    /// and a predicate may itself be a window such as g != prev(g) → g != LAG(g) OVER ()):
+    ///   __RB__(&lt;pred&gt;)        → a boolean column _rbN (the predicate evaluated once, one window level)
+    ///   __RESETGRP__(&lt;pred&gt;)  → a reset-group column _rgN = running count of the predicate
+    /// Layers: L1 evaluates every distinct predicate to _rbN; L2 builds _rgN (SUM(CASE _rbN…) OVER rows)
+    /// for the reset-group predicates; the rewritten outer expression references those plain columns
+    /// (e.g. ROW_NUMBER()/SUM() OVER (PARTITION BY _rgN), or SUM(CASE _rbN…) OVER (PARTITION BY _rgN)).
+    /// Helper columns are EXCLUDEd from the output.</summary>
     protected string HoistResetGroups(string leftSql, string joined, params string[] alsoExclude)
     {
-        var preds = new List<string>();
+        var preds = new List<string>();           // distinct predicate text
+        var needsRg = new HashSet<int>();         // predicate indexes that need a reset-group column
         var rewritten = new System.Text.StringBuilder();
         int i = 0;
         while (i < joined.Length)
         {
-            int at = joined.IndexOf(ResetGroupMarker, i, StringComparison.Ordinal);
-            if (at < 0) { rewritten.Append(joined, i, joined.Length - i); break; }
+            int rg = joined.IndexOf(ResetGroupMarker, i, StringComparison.Ordinal);
+            int rb = joined.IndexOf(RawBoolMarker, i, StringComparison.Ordinal);
+            if (rg < 0 && rb < 0) { rewritten.Append(joined, i, joined.Length - i); break; }
+            bool isRg = rb < 0 || (rg >= 0 && rg < rb);
+            int at = isRg ? rg : rb;
+            int markerLen = (isRg ? ResetGroupMarker : RawBoolMarker).Length;
             rewritten.Append(joined, i, at - i);
-            int start = at + ResetGroupMarker.Length, depth = 1, j = start;
+            int start = at + markerLen, depth = 1, j = start;
             for (; j < joined.Length && depth > 0; j++)
             {
                 if (joined[j] == '(') depth++;
@@ -56,17 +66,19 @@ internal abstract class OperatorHandlerBase
             var pred = joined.Substring(start, j - 1 - start);
             int idx = preds.IndexOf(pred);
             if (idx < 0) { idx = preds.Count; preds.Add(pred); }
-            rewritten.Append($"_rg{idx}");
+            if (isRg) { needsRg.Add(idx); rewritten.Append($"_rg{idx}"); }
+            else rewritten.Append($"_rb{idx}");
             i = j;
         }
 
         var l1Defs = preds.Select((p, n) => $"({p}) AS _rb{n}");
         var l1 = $"SELECT *, {string.Join(", ", l1Defs)} FROM ({leftSql})";
-        var l2Defs = preds.Select((_, n) =>
+        var rgIdx = needsRg.OrderBy(n => n).ToList();
+        var l2Defs = rgIdx.Select(n =>
             $"SUM(CASE WHEN _rb{n} THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING) AS _rg{n}");
-        var l2 = $"SELECT *, {string.Join(", ", l2Defs)} FROM ({l1})";
-        var dropCols = Enumerable.Range(0, preds.Count).SelectMany(n => new[] { $"_rb{n}", $"_rg{n}" })
-            .Concat(alsoExclude).ToArray();
+        var l2 = rgIdx.Count > 0 ? $"SELECT *, {string.Join(", ", l2Defs)} FROM ({l1})" : l1;
+        var dropCols = Enumerable.Range(0, preds.Count).Select(n => $"_rb{n}")
+            .Concat(rgIdx.Select(n => $"_rg{n}")).Concat(alsoExclude).ToArray();
         return $"SELECT {Dialect.SelectExclude(dropCols)}, {rewritten} FROM ({l2})";
     }
 

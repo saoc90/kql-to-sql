@@ -110,7 +110,11 @@ public class DuckDbDialect : ISqlDialect
             "max_of" => $"GREATEST({string.Join(", ", args)})",
             // row_number([StartingIndex]) — offset the 1-based count to the requested start.
             // (A 2nd 'restart' argument needs a reset-group and is handled by the scan/extend hoister.)
-            "row_number" when args.Length >= 1 => $"(ROW_NUMBER() OVER () + ({args[0]} - 1))",
+            // row_number([start [, restart]]): a restart predicate resets the count per group (the
+            // reset-group is hoisted from the __RESETGRP__ marker); start offsets the 1-based count.
+            "row_number" when args.Length >= 2 =>
+                $"(ROW_NUMBER() OVER (PARTITION BY __RESETGRP__({args[1]})) + ({args[0]} - 1))",
+            "row_number" when args.Length == 1 => $"(ROW_NUMBER() OVER () + ({args[0]} - 1))",
             "row_number" => "ROW_NUMBER() OVER ()",
             // prev/next(column [, offset [, default]]) → LAG/LEAD honor the offset and default-value args.
             "prev" => $"LAG({string.Join(", ", args)}) OVER ()",
@@ -332,7 +336,14 @@ public class DuckDbDialect : ISqlDialect
             "row_cumsum" when args.Length >= 2 =>
                 $"SUM({args[0]}) OVER (PARTITION BY __RESETGRP__({args[1]}) ROWS UNBOUNDED PRECEDING)",
             "row_cumsum" => $"SUM({args[0]}) OVER (ROWS UNBOUNDED PRECEDING)",
-            "row_rank_dense" => "DENSE_RANK() OVER ()",
+            // row_rank_dense(Term [, restart]): a dense rank in SERIALIZED order that increments when Term
+            // changes (not a sort-based DENSE_RANK). No restart → running count of Term-changes. With a
+            // restart predicate → count of (restart OR Term-changed), reset per restart-group (so each
+            // group starts at 1). __RB__/__RESETGRP__ markers are hoisted by the extend/serialize handler.
+            "row_rank_dense" when args.Length >= 2 =>
+                $"SUM(CASE WHEN __RB__(({args[1]}) OR ({args[0]} IS DISTINCT FROM LAG({args[0]}) OVER ())) THEN 1 ELSE 0 END) " +
+                $"OVER (PARTITION BY __RESETGRP__({args[1]}) ROWS UNBOUNDED PRECEDING)",
+            "row_rank_dense" => $"__RESETGRP__({args[0]} IS DISTINCT FROM LAG({args[0]}) OVER ())",
             "row_rank_min" => "RANK() OVER ()",
             "row_window_session" => $"SUM(CASE WHEN {args[0]} > LAG({args[0]}) OVER () + {args[1]} THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING)",
 
