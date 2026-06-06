@@ -576,7 +576,10 @@ public class DuckDbDialect : ISqlDialect
         // semantics and only genuine boolean text routes through the fallback.
         if (string.Equals(sqlType, "INTEGER", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(sqlType, "BIGINT", StringComparison.OrdinalIgnoreCase))
-            return $"TRY_CAST(TRUNC(COALESCE(TRY_CAST({expr} AS DOUBLE), TRY_CAST(TRY_CAST({expr} AS BOOLEAN) AS DOUBLE))) AS {sqlType})";
+            // DOUBLE+TRUNC truncates reals toward zero (Kusto semantics) and coerces dynamic bools, but a
+            // big integer string (e.g. int64-max) loses precision through DOUBLE and overflows to NULL —
+            // so fall back to a direct integer cast (also parses hex like '0xFF' where DuckDB supports it).
+            return $"COALESCE(TRY_CAST(TRUNC(COALESCE(TRY_CAST({expr} AS DOUBLE), TRY_CAST(TRY_CAST({expr} AS BOOLEAN) AS DOUBLE))) AS {sqlType}), TRY_CAST({expr} AS {sqlType}))";
         if (string.Equals(sqlType, "DOUBLE", StringComparison.OrdinalIgnoreCase))
             return $"COALESCE(TRY_CAST({expr} AS DOUBLE), TRY_CAST(TRY_CAST({expr} AS BOOLEAN) AS DOUBLE))";
         return $"TRY_CAST({expr} AS {sqlType})";

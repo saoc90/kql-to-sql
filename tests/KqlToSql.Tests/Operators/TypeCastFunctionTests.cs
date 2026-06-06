@@ -17,7 +17,7 @@ public class TypeCastFunctionTests
         var sql = converter.Convert(kql);
         // toint truncates toward zero (Kusto), unlike DuckDB's rounding CAST — route through TRUNC(double).
         // A dynamic JSON boolean coerces true→1 / false→0, so a failed numeric parse falls back to a boolean cast.
-        Assert.Equal("SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(year_str AS DOUBLE), TRY_CAST(TRY_CAST(year_str AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS year_str FROM (SELECT *, COALESCE(TRY_CAST(EpisodeId AS TEXT), '') AS year_str FROM StormEvents LIMIT 1)", sql);
+        Assert.Equal("SELECT COALESCE(TRY_CAST(TRUNC(COALESCE(TRY_CAST(year_str AS DOUBLE), TRY_CAST(TRY_CAST(year_str AS BOOLEAN) AS DOUBLE))) AS INTEGER), TRY_CAST(year_str AS INTEGER)) AS year_str FROM (SELECT *, COALESCE(TRY_CAST(EpisodeId AS TEXT), '') AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -41,7 +41,7 @@ public class TypeCastFunctionTests
         var sql = converter.Convert(kql);
         // tolong truncates toward zero (Kusto), unlike DuckDB's rounding CAST — route through TRUNC(double).
         // A dynamic JSON boolean coerces true→1 / false→0, so a failed numeric parse falls back to a boolean cast.
-        Assert.Equal("SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(year_str AS DOUBLE), TRY_CAST(TRY_CAST(year_str AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS year_str FROM (SELECT *, COALESCE(TRY_CAST(EpisodeId AS TEXT), '') AS year_str FROM StormEvents LIMIT 1)", sql);
+        Assert.Equal("SELECT COALESCE(TRY_CAST(TRUNC(COALESCE(TRY_CAST(year_str AS DOUBLE), TRY_CAST(TRY_CAST(year_str AS BOOLEAN) AS DOUBLE))) AS BIGINT), TRY_CAST(year_str AS BIGINT)) AS year_str FROM (SELECT *, COALESCE(TRY_CAST(EpisodeId AS TEXT), '') AS year_str FROM StormEvents LIMIT 1)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
