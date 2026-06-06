@@ -457,27 +457,30 @@ public class DuckDbDialect : ISqlDialect
             "make_bag_if" => $"histogram({args[0]}) FILTER (WHERE {args[1]})",
             // Kusto make_list/make_set IGNORE null values (only make_list_with_nulls keeps them).
             // Over an empty/all-null group Kusto -> [] (empty array); DuckDB LIST -> NULL, so COALESCE to [].
-            "make_list" or "makelist" => $"COALESCE(LIST({args[0]}) FILTER (WHERE {args[0]} IS NOT NULL), [])",
-            "make_list_if" or "makelistif" => $"COALESCE(LIST({args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), [])",
-            "make_list_with_nulls" => $"COALESCE(LIST({args[0]}), [])",
-            "make_set" or "makeset" => $"COALESCE(LIST(DISTINCT {args[0]}) FILTER (WHERE {args[0]} IS NOT NULL), [])",
-            "make_set_if" or "makesetif" => $"COALESCE(LIST(DISTINCT {args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), [])",
+            // For dynamic/JSON element columns, wrap in TO_JSON so the result is a JSON array of the actual
+            // values (read as dynamic) rather than a VARCHAR[] of stringified JSON ('["{\"a\":1}"]').
+            "make_list" or "makelist" => MaybeJsonList(args[0], $"COALESCE(LIST({args[0]}) FILTER (WHERE {args[0]} IS NOT NULL), [])"),
+            "make_list_if" or "makelistif" => MaybeJsonList(args[0], $"COALESCE(LIST({args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), [])"),
+            "make_list_with_nulls" => MaybeJsonList(args[0], $"COALESCE(LIST({args[0]}), [])"),
+            "make_set" or "makeset" => MaybeJsonList(args[0], $"COALESCE(LIST(DISTINCT {args[0]}) FILTER (WHERE {args[0]} IS NOT NULL), [])"),
+            "make_set_if" or "makesetif" => MaybeJsonList(args[0], $"COALESCE(LIST(DISTINCT {args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL), [])"),
             "min" => $"MIN({args[0]})",
             "minif" => $"MIN({args[0]}) FILTER (WHERE {args[1]})",
             "max" => $"MAX({args[0]})",
             "maxif" => $"MAX({args[0]}) FILTER (WHERE {args[1]})",
             "percentile" => $"quantile_disc({args[0]}, {args[1]} / 100.0)",
             "percentilew" => $"quantile_disc({args[0]}, {args[2]} / 100.0)",
-            "stdev" => $"STDDEV_SAMP({args[0]})",
-            "stdevif" => $"STDDEV_SAMP({args[0]}) FILTER (WHERE {args[1]})",
+            // Kusto stdev/variance of a single-element group is 0; DuckDB STDDEV_SAMP/VAR_SAMP give NULL.
+            "stdev" => $"COALESCE(STDDEV_SAMP({args[0]}), 0)",
+            "stdevif" => $"COALESCE(STDDEV_SAMP({args[0]}) FILTER (WHERE {args[1]}), 0)",
             "stdevp" => $"STDDEV_POP({args[0]})",
             "any" or "take_any" => $"ANY_VALUE({args[0]})",
             // strcat_array is a SCALAR join over an array; in a summarize slot its argument is itself an
             // aggregate (make_list), so wrap that in ARRAY_TO_STRING — STRING_AGG would nest aggregates.
             "strcat_array" => $"ARRAY_TO_STRING({args[0]}, {args[1]})",
             "anyif" or "take_anyif" => $"ANY_VALUE({args[0]}) FILTER (WHERE {args[1]})",
-            "variance" => $"VAR_SAMP({args[0]})",
-            "varianceif" => $"VAR_SAMP({args[0]}) FILTER (WHERE {args[1]})",
+            "variance" => $"COALESCE(VAR_SAMP({args[0]}), 0)",
+            "varianceif" => $"COALESCE(VAR_SAMP({args[0]}) FILTER (WHERE {args[1]}), 0)",
             "variancep" => $"VAR_POP({args[0]})",
             "variancepif" => $"VAR_POP({args[0]}) FILTER (WHERE {args[1]})",
             _ => null
@@ -624,6 +627,12 @@ public class DuckDbDialect : ISqlDialect
     /// converted to a native LIST&lt;JSON&gt; by extracting all elements with the '$[*]' wildcard path.</summary>
     private static string CoerceArr(string sql) =>
         IsJsonArg(sql) ? $"json_extract({sql}, '$[*]')" : sql;
+
+    /// <summary>For make_list/make_set over a dynamic/JSON element column, re-serialize the aggregated
+    /// LIST as a JSON array (TO_JSON) so each element keeps its dynamic value (object/number) rather than
+    /// surfacing as a quoted JSON string in a VARCHAR[]. Native-typed columns pass through unchanged.</summary>
+    private static string MaybeJsonList(string elemArg, string listSql) =>
+        IsJsonArg(elemArg) ? $"TO_JSON({listSql})" : listSql;
 
     /// <summary>extract_all(regex, captureGroups, text): for each match, return an array of the selected
     /// capture groups → an array of arrays. Built by zipping REGEXP_EXTRACT_ALL(text, regex, g) per group.

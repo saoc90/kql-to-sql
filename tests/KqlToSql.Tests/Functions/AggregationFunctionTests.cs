@@ -547,7 +547,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize stdev(InjuriesDirect)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT STDDEV_SAMP(InjuriesDirect) AS stdev_InjuriesDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(STDDEV_SAMP(InjuriesDirect), 0) AS stdev_InjuriesDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -564,7 +564,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize stdevif(InjuriesDirect, DeathsDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT STDDEV_SAMP(InjuriesDirect) FILTER (WHERE DeathsDirect > 0) AS stdevif_InjuriesDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(STDDEV_SAMP(InjuriesDirect) FILTER (WHERE DeathsDirect > 0), 0) AS stdevif_InjuriesDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -649,7 +649,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize variance(InjuriesDirect)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT VAR_SAMP(InjuriesDirect) AS variance_InjuriesDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(VAR_SAMP(InjuriesDirect), 0) AS variance_InjuriesDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -666,7 +666,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize varianceif(InjuriesDirect, DeathsDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT VAR_SAMP(InjuriesDirect) FILTER (WHERE DeathsDirect > 0) AS varianceif_InjuriesDirect FROM StormEvents", sql);
+        Assert.Equal("SELECT COALESCE(VAR_SAMP(InjuriesDirect) FILTER (WHERE DeathsDirect > 0), 0) AS varianceif_InjuriesDirect FROM StormEvents", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
