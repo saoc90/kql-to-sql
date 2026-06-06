@@ -1,21 +1,21 @@
 # KQL→SQL Translator — Differential Fuzzing Findings
 
 Oracle: Kustainer (real Kusto). SUT: KqlToSqlConverter → DuckDB.
-Total verdicts: 1662. Bug candidates: 356.
+Total verdicts: 1662. Bug candidates: 212.
 
 ## Counts by outcome
 
 | Outcome | Count |
 |---|---|
-| Match | 1123 |
-| MismatchRows | 343 |
+| Match | 1261 |
+| MismatchRows | 202 |
 | KustoError | 127 |
 | SkippedNondeterministic | 34 |
-| SkippedEngineError | 22 |
-| MismatchOrder | 10 |
+| SkippedEngineError | 28 |
+| MismatchOrder | 7 |
 | MismatchColumns | 3 |
 
-## Family: aggregation (30)
+## Family: aggregation (24)
 
 ### `agent-aggregation-0034` — MismatchRows (high)
 
@@ -61,7 +61,7 @@ SELECT COALESCE(LIST(d) FILTER (WHERE d IS NOT NULL), []) AS list_d FROM (SELECT
 *Detail:* first differing row[0]: kusto=(1, {
   "a": 1,
   "b": 2
-}) duck=(2, {"{\u0022c\u0022:3}":1})
+}) duck=(1, {"{\u0022a\u0022:1}":1,"{\u0022b\u0022:2}":1})
 
 **KQL**
 ```kql
@@ -82,8 +82,8 @@ SELECT k, histogram(v) AS bag_v FROM (SELECT k, CAST(v AS JSON) AS v FROM (VALUE
   "c": 3
 })
 - DuckDB: cols=[k:Int, bag_v:Unknown] rows=2
-    - (2, {"{\u0022c\u0022:3}":1})
     - (1, {"{\u0022a\u0022:1}":1,"{\u0022b\u0022:2}":1})
+    - (2, {"{\u0022c\u0022:3}":1})
 
 ### `agent-aggregation-0001` — MismatchRows (high)
 
@@ -109,7 +109,7 @@ SELECT k, MAX(v) AS v, ARG_MAX(t, v) AS t, MIN(v) AS v1, ARG_MIN(t, v) AS t1 FRO
 ### `agent-aggregation-0002` — MismatchRows (high)
 
 *Sub-verdicts:* NAME_MISMATCH  
-*Detail:* first differing row[0]: kusto=(1, NaN, NaN, NaN, 1, NaN) duck=(1, NaN, 1.5, NaN, 1, NaN)
+*Detail:* first differing row[0]: kusto=(1, NaN, NaN, NaN, 1, NaN) duck=(2, NaN, NaN, NaN, 2, NaN)
 
 **KQL**
 ```kql
@@ -125,8 +125,8 @@ SELECT k, MAX(v) AS mx, MIN(v) AS mn, MAX(v) AS amx, ARG_MAX(k, v) AS k, COALESC
     - (1, NaN, NaN, NaN, 1, NaN)
     - (2, NaN, NaN, NaN, 2, NaN)
 - DuckDB: cols=[k:Int, mx:Real, mn:Real, amx:Real, k:Int, s:Real] rows=2
-    - (1, NaN, 1.5, NaN, 1, NaN)
     - (2, NaN, NaN, NaN, 2, NaN)
+    - (1, NaN, 1.5, NaN, 1, NaN)
 
 ### `agent-aggregation-0004` — MismatchRows (high)
 
@@ -181,7 +181,7 @@ SELECT k, histogram(v) AS bag FROM (SELECT k, CAST(v AS JSON) AS v FROM (VALUES 
   {
     "y": 2
   }
-]) duck=(1, {"{\u0022x\u0022:1}":1,"{\u0022y\u0022:2}":1}, ["{\u0022x\u0022:1}","{\u0022y\u0022:2}"], ["{\u0022x\u0022:1}",null,"{\u0022y\u0022:2}"])
+]) duck=(2, null, [], [null])
 
 **KQL**
 ```kql
@@ -220,94 +220,8 @@ SELECT k, histogram(v) AS bag_v, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), 
   null
 ])
 - DuckDB: cols=[k:Int, bag_v:Unknown, list_v:Unknown, list_v:Unknown] rows=2
-    - (1, {"{\u0022x\u0022:1}":1,"{\u0022y\u0022:2}":1}, ["{\u0022x\u0022:1}","{\u0022y\u0022:2}"], ["{\u0022x\u0022:1}",null,"{\u0022y\u0022:2}"])
     - (2, null, [], [null])
-
-### `agent-aggregation-0013` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(0, 0, 0, 0) duck=(null, null, 0, 0)
-
-**KQL**
-```kql
-datatable(x:long)[ 5 ] | summarize stdev(x), variance(x), stdevp(x), variancep(x)
-```
-**Generated SQL**
-```sql
-SELECT STDDEV_SAMP(x) AS stdev_x, VAR_SAMP(x) AS variance_x, STDDEV_POP(x) AS stdevp_x, VAR_POP(x) AS variancep_x FROM (VALUES (CAST(5 AS BIGINT))) AS t(x)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[stdev_x:Real, variance_x:Real, stdevp_x:Real, variancep_x:Real] rows=1
-    - (0, 0, 0, 0)
-- DuckDB: cols=[stdev_x:Real, variance_x:Real, stdevp_x:Real, variancep_x:Real] rows=1
-    - (null, null, 0, 0)
-
-### `agent-aggregation-0014` — MismatchRows (high)
-
-*Detail:* first differing row[1]: kusto=('b', 0, 0, 10, 10) duck=('b', null, null, 10, 10)
-
-**KQL**
-```kql
-datatable(g:string, x:real)[ "a",1.5, "a",2.5, "a",3.5, "b",10.0 ] | summarize stdev(x), variance(x), sum(x), avg(x) by g
-```
-**Generated SQL**
-```sql
-SELECT g, STDDEV_SAMP(x) AS stdev_x, VAR_SAMP(x) AS variance_x, COALESCE(SUM(x), 0) AS sum_x, COALESCE(AVG(x), 'nan'::DOUBLE) AS avg_x FROM (VALUES ('a', CAST(1.5 AS DOUBLE)), ('a', CAST(2.5 AS DOUBLE)), ('a', CAST(3.5 AS DOUBLE)), ('b', CAST(10.0 AS DOUBLE))) AS t(g, x) GROUP BY ALL
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, stdev_x:Real, variance_x:Real, sum_x:Real, avg_x:Real] rows=2
-    - ('a', 1, 1, 7.5, 2.5)
-    - ('b', 0, 0, 10, 10)
-- DuckDB: cols=[g:String, stdev_x:Real, variance_x:Real, sum_x:Real, avg_x:Real] rows=2
-    - ('a', 1, 1, 7.5, 2.5)
-    - ('b', null, null, 10, 10)
-
-### `agent-aggregation-0016` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(2007-02-14T00:00:00.0000000Z, 3) duck=(2007-12-13T00:00:00.0000000Z, 7)
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2007-03-09),1, datetime(2007-03-11),2, datetime(2007-12-31),3, datetime(2008-01-01),4 ] | summarize sum(v) by bin(t, 30d)
-```
-**Generated SQL**
-```sql
-SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/2592000000)*2592000000 AS BIGINT)) AS t, COALESCE(SUM(v), 0) AS sum_v FROM (VALUES (TIMESTAMP '2007-03-09 00:00:00', CAST(1 AS BIGINT)), (TIMESTAMP '2007-03-11 00:00:00', CAST(2 AS BIGINT)), (TIMESTAMP '2007-12-31 00:00:00', CAST(3 AS BIGINT)), (TIMESTAMP '2008-01-01 00:00:00', CAST(4 AS BIGINT))) AS t(t, v) GROUP BY ALL
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, sum_v:Int] rows=2
-    - (2007-02-14T00:00:00.0000000Z, 3)
-    - (2007-12-11T00:00:00.0000000Z, 7)
-- DuckDB: cols=[t:DateTime, sum_v:Int] rows=2
-    - (2007-12-13T00:00:00.0000000Z, 7)
-    - (2007-02-16T00:00:00.0000000Z, 3)
-
-### `agent-aggregation-0019` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(60, 30, [
-  30,
-  30
-], 2) duck=(60, 30, [{"IsPowerOfTwo":false,"IsZero":false,"IsOne":false,"IsEven":true,"Sign":1},{"IsPowerOfTwo":false,"IsZero":false,"IsOne":false,"IsEven":true,"Sign":1}], 2)
-
-**KQL**
-```kql
-datatable(k:long, v:long)[ 1,10, 1,20, 2,30 ] | summarize total=sum(v) by k | summarize gtot=sum(total), gmax=max(total), glist=make_list(total), gcnt=count()
-```
-**Generated SQL**
-```sql
-SELECT COALESCE(SUM(total), 0) AS gtot, MAX(total) AS gmax, COALESCE(LIST(total) FILTER (WHERE total IS NOT NULL), []) AS glist, COUNT(*) AS gcnt FROM (SELECT k, COALESCE(SUM(v), 0) AS total FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT))) AS t(k, v) GROUP BY ALL)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[gtot:Int, gmax:Int, glist:Dynamic, gcnt:Int] rows=1
-    - (60, 30, [
-  30,
-  30
-], 2)
-- DuckDB: cols=[gtot:Int, gmax:Int, glist:Unknown, gcnt:Int] rows=1
-    - (60, 30, [{"IsPowerOfTwo":false,"IsZero":false,"IsOne":false,"IsEven":true,"Sign":1},{"IsPowerOfTwo":false,"IsZero":false,"IsOne":false,"IsEven":true,"Sign":1}], 2)
+    - (1, {"{\u0022x\u0022:1}":1,"{\u0022y\u0022:2}":1}, ["{\u0022x\u0022:1}","{\u0022y\u0022:2}"], ["{\u0022x\u0022:1}",null,"{\u0022y\u0022:2}"])
 
 ### `agent-aggregation-0025` — MismatchRows (high)
 
@@ -353,7 +267,7 @@ SELECT COUNT(*) FILTER (WHERE b) AS countif_, COUNT(*) FILTER (WHERE NOT (b)) AS
 *Detail:* first differing row[0]: kusto=(1, [
   2,
   1
-], 2) duck=(1, [1,2], 2)
+], 2) duck=(2, [1], 1)
 
 **KQL**
 ```kql
@@ -374,8 +288,8 @@ SELECT x, COALESCE(LIST(c) FILTER (WHERE c IS NOT NULL), []) AS subtotals, COUNT
   1
 ], 1)
 - DuckDB: cols=[x:Int, subtotals:Unknown, n:Int] rows=2
-    - (1, [1,2], 2)
     - (2, [1], 1)
+    - (1, [1,2], 2)
 
 ### `agent-aggregation-0043` — MismatchRows (high)
 
@@ -391,7 +305,7 @@ datatable(k:long)[ 1,1,2,2,2,3 ] | summarize c=count() by k | summarize histo=ma
 ```
 **Generated SQL**
 ```sql
-SELECT histogram(json_object(TRY_CAST(k AS TEXT), c)) AS histo FROM (SELECT k, COUNT(*) AS c FROM (VALUES (CAST(1 AS BIGINT)), (CAST(1 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(3 AS BIGINT))) AS t(k) GROUP BY ALL)
+SELECT histogram(json_object(COALESCE(TRY_CAST(k AS TEXT), ''), c)) AS histo FROM (SELECT k, COUNT(*) AS c FROM (VALUES (CAST(1 AS BIGINT)), (CAST(1 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(3 AS BIGINT))) AS t(k) GROUP BY ALL)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -424,29 +338,6 @@ SELECT * FROM (SELECT k, MAX(v) AS amx, ARG_MAX(w, v) AS w, MIN(v) AS amn, ARG_M
 - DuckDB: cols=[k:Int, amx:Real, w:Real, amn:Real, w1:Real, amxw:Real, v:Real] rows=2
     - (1, NaN, 10, 2, 20, 20, 2)
     - (2, Infinity, 5, 3, NaN, NaN, 3)
-
-### `agent-aggregation-0003` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=([
-  60
-], 1) duck=([{"IsPowerOfTwo":false,"IsZero":false,"IsOne":false,"IsEven":true,"Sign":1}], 1)
-
-**KQL**
-```kql
-datatable(k:long, v:long)[ 1,5, 1,15, 2,25, 2,35, 3,45 ] | summarize cnt=count(), tot=sum(v) by k | where cnt >= 2 and tot > 30 | order by k asc | summarize meta=make_list(tot), groups=count()
-```
-**Generated SQL**
-```sql
-SELECT COALESCE(LIST(tot) FILTER (WHERE tot IS NOT NULL), []) AS meta, COUNT(*) AS groups FROM (SELECT * FROM (SELECT k, COUNT(*) AS cnt, COALESCE(SUM(v), 0) AS tot FROM (VALUES (CAST(1 AS BIGINT), CAST(5 AS BIGINT)), (CAST(1 AS BIGINT), CAST(15 AS BIGINT)), (CAST(2 AS BIGINT), CAST(25 AS BIGINT)), (CAST(2 AS BIGINT), CAST(35 AS BIGINT)), (CAST(3 AS BIGINT), CAST(45 AS BIGINT))) AS t(k, v) GROUP BY ALL) WHERE cnt >= 2 AND tot > 30 ORDER BY k ASC NULLS FIRST)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[meta:Dynamic, groups:Int] rows=1
-    - ([
-  60
-], 1)
-- DuckDB: cols=[meta:Unknown, groups:Int] rows=1
-    - ([{"IsPowerOfTwo":false,"IsZero":false,"IsOne":false,"IsEven":true,"Sign":1}], 1)
 
 ### `agent-aggregation-0006` — MismatchRows (high)
 
@@ -560,30 +451,9 @@ SELECT COALESCE(LIST(CASE WHEN (((x) % NULLIF(2, 0)) + ABS(2)) % NULLIF(2, 0) = 
 - DuckDB: cols=[lo:Unknown, lon:Unknown] rows=1
     - ([2,4,6,8,10], '<unreadable:IndexOutOfRangeException>')
 
-### `agent-aggregation-0014` — MismatchRows (high)
-
-*Detail:* first differing row[1]: kusto=(2, 0, 0, 0, 0, 1) duck=(2, null, 0, null, 0, 1)
-
-**KQL**
-```kql
-datatable(g:long, v:long)[ 1,1, 1,2, 1,3, 1,4, 2,10 ] | summarize sd=stdev(v), sdp=stdevp(v), va=variance(v), vap=variancep(v), n=count() by g | order by g asc
-```
-**Generated SQL**
-```sql
-SELECT * FROM (SELECT g, STDDEV_SAMP(v) AS sd, STDDEV_POP(v) AS sdp, VAR_SAMP(v) AS va, VAR_POP(v) AS vap, COUNT(*) AS n FROM (VALUES (CAST(1 AS BIGINT), CAST(1 AS BIGINT)), (CAST(1 AS BIGINT), CAST(2 AS BIGINT)), (CAST(1 AS BIGINT), CAST(3 AS BIGINT)), (CAST(1 AS BIGINT), CAST(4 AS BIGINT)), (CAST(2 AS BIGINT), CAST(10 AS BIGINT))) AS t(g, v) GROUP BY ALL) ORDER BY g ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:Int, sd:Real, sdp:Real, va:Real, vap:Real, n:Int] rows=2
-    - (1, 1.2909944487487155, 1.118033988749895, 1.6666666667, 1.25, 4)
-    - (2, 0, 0, 0, 0, 1)
-- DuckDB: cols=[g:Int, sd:Real, sdp:Real, va:Real, vap:Real, n:Int] rows=2
-    - (1, 1.2909944487358056, 1.118033988749895, 1.6666666666666667, 1.25, 4)
-    - (2, null, 0, null, 0, 1)
-
 ### `agent-aggregation-0017` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(0, 0, [], [], {}, NaN, 0) duck=(0, 0, [], [], null, NaN, null)
+*Detail:* first differing row[0]: kusto=(0, 0, [], [], {}, NaN, 0) duck=(0, 0, [], [], null, NaN, 0)
 
 **KQL**
 ```kql
@@ -591,14 +461,14 @@ datatable(x:long)[ 100,200,300 ] | where x < 0 | summarize s=sum(x), c=count(), 
 ```
 **Generated SQL**
 ```sql
-SELECT COALESCE(SUM(x), 0) AS s, COUNT(*) AS c, COALESCE(LIST(x) FILTER (WHERE x IS NOT NULL), []) AS ml, COALESCE(LIST(DISTINCT x) FILTER (WHERE x IS NOT NULL), []) AS ms, histogram(json_object('k', x)) AS mb, COALESCE(AVG(x), 'nan'::DOUBLE) AS av, STDDEV_SAMP(x) AS st FROM (SELECT * FROM (VALUES (CAST(100 AS BIGINT)), (CAST(200 AS BIGINT)), (CAST(300 AS BIGINT))) AS t(x) WHERE x < 0)
+SELECT COALESCE(SUM(x), 0) AS s, COUNT(*) AS c, COALESCE(LIST(x) FILTER (WHERE x IS NOT NULL), []) AS ml, COALESCE(LIST(DISTINCT x) FILTER (WHERE x IS NOT NULL), []) AS ms, histogram(json_object('k', x)) AS mb, COALESCE(AVG(x), 'nan'::DOUBLE) AS av, COALESCE(STDDEV_SAMP(x), 0) AS st FROM (SELECT * FROM (VALUES (CAST(100 AS BIGINT)), (CAST(200 AS BIGINT)), (CAST(300 AS BIGINT))) AS t(x) WHERE x < 0)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[s:Int, c:Int, ml:Dynamic, ms:Dynamic, mb:Dynamic, av:Real, st:Real] rows=1
     - (0, 0, [], [], {}, NaN, 0)
 - DuckDB: cols=[s:Int, c:Int, ml:Unknown, ms:Unknown, mb:Unknown, av:Real, st:Real] rows=1
-    - (0, 0, [], [], null, NaN, null)
+    - (0, 0, [], [], null, NaN, 0)
 
 ### `agent-aggregation-0021` — MismatchRows (high)
 
@@ -696,6 +566,31 @@ SELECT MIN(d) AS mn, MAX(d) AS mx, COUNT(*) AS cnt, max(d) - min(d) AS span, COA
 - DuckDB: cols=[mn:DateTime, mx:DateTime, cnt:Int, span:TimeSpan, ml:Unknown] rows=1
     - (2020-01-01T00:00:00.0000000Z, 2020-01-10T00:00:00.0000000Z, 3, 9.00:00:00, ["2020-01-01T00:00:00","2020-01-05T00:00:00","2020-01-10T00:00:00"])
 
+### `agent-aggregation-0027` — MismatchRows (high)
+
+*Detail:* first differing row[0]: kusto=(1000, 700, 2, [
+  200,
+  400
+]) duck=(1000, 700, 2, [400,200])
+
+**KQL**
+```kql
+datatable(g:long, v:long)[ 1,100, 1,200, 2,300, 2,400 ] | summarize tot=sum(v), amx=arg_max(v, g) by g | summarize gtot=sum(tot), maxgrp=arg_max(tot, g), allamx=make_list(amx)
+```
+**Generated SQL**
+```sql
+SELECT COALESCE(SUM(tot), 0) AS gtot, MAX(tot) AS maxgrp, ARG_MAX(g, tot) AS g, COALESCE(LIST(amx) FILTER (WHERE amx IS NOT NULL), []) AS allamx FROM (SELECT g, COALESCE(SUM(v), 0) AS tot, MAX(v) AS amx, ARG_MAX(g, v) AS g FROM (VALUES (CAST(1 AS BIGINT), CAST(100 AS BIGINT)), (CAST(1 AS BIGINT), CAST(200 AS BIGINT)), (CAST(2 AS BIGINT), CAST(300 AS BIGINT)), (CAST(2 AS BIGINT), CAST(400 AS BIGINT))) AS t(g, v) GROUP BY ALL)
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Dynamic] rows=1
+    - (1000, 700, 2, [
+  200,
+  400
+])
+- DuckDB: cols=[gtot:Int, maxgrp:Int, g:Int, allamx:Unknown] rows=1
+    - (1000, 700, 2, [400,200])
+
 ### `agent-aggregation-0029` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=([
@@ -705,7 +600,7 @@ SELECT MIN(d) AS mn, MAX(d) AS mx, COUNT(*) AS cnt, max(d) - min(d) AS span, COA
   1,
   2,
   1
-], 6, 3) duck=([[1],[1,2,3],[1,2]], 6, 3)
+], 6, 3) duck=([[1],[1,2],[1,2,3]], 6, 3)
 
 **KQL**
 ```kql
@@ -727,7 +622,7 @@ SELECT COALESCE(LIST("inner") FILTER (WHERE "inner" IS NOT NULL), []) AS outer_l
   1
 ], 6, 3)
 - DuckDB: cols=[outer_lists:Unknown, totcnt:Int, grps:Int] rows=1
-    - ([[1],[1,2,3],[1,2]], 6, 3)
+    - ([[1],[1,2],[1,2,3]], 6, 3)
 
 ### `agent-aggregation-0032` — MismatchRows (high)
 
@@ -794,7 +689,7 @@ SELECT MAX(x) AS mx, MIN(x) AS mn, COALESCE(AVG(x), 'nan'::DOUBLE) AS av, COALES
 ], [
   1,
   2
-]) duck=([1,2,3,4,5,6], [3,6,2,4,1,5])
+]) duck=([1,2,3,4,5,6], [1,4,3,6,2,5])
 
 **KQL**
 ```kql
@@ -816,28 +711,7 @@ SELECT COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS a, COALESCE(LIST(DI
   2
 ])
 - DuckDB: cols=[a:Unknown, b:Unknown] rows=1
-    - ([1,2,3,4,5,6], [3,6,2,4,1,5])
-
-### `agent-aggregation-0038` — MismatchRows (high)
-
-*Detail:* first differing row[1]: kusto=(2, 0, 0, 10000, 1, 10000) duck=(2, null, null, 10000, 1, 10000)
-
-**KQL**
-```kql
-datatable(k:long, x:real)[ 1,1.0, 1,2.0, 1,3.0, 1,4.0, 2,100.0 ] | summarize var_check=variance(x), stdev_check=stdev(x), sumsq=sum(x*x), n=count(), avgsq=avg(x*x) by k | order by k asc
-```
-**Generated SQL**
-```sql
-SELECT * FROM (SELECT k, VAR_SAMP(x) AS var_check, STDDEV_SAMP(x) AS stdev_check, COALESCE(SUM(x * x), 0) AS sumsq, COUNT(*) AS n, COALESCE(AVG(x * x), 'nan'::DOUBLE) AS avgsq FROM (VALUES (CAST(1 AS BIGINT), CAST(1.0 AS DOUBLE)), (CAST(1 AS BIGINT), CAST(2.0 AS DOUBLE)), (CAST(1 AS BIGINT), CAST(3.0 AS DOUBLE)), (CAST(1 AS BIGINT), CAST(4.0 AS DOUBLE)), (CAST(2 AS BIGINT), CAST(100.0 AS DOUBLE))) AS t(k, x) GROUP BY ALL) ORDER BY k ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, var_check:Real, stdev_check:Real, sumsq:Real, n:Int, avgsq:Real] rows=2
-    - (1, 1.6666666667, 1.2909944487487155, 30, 4, 7.5)
-    - (2, 0, 0, 10000, 1, 10000)
-- DuckDB: cols=[k:Int, var_check:Real, stdev_check:Real, sumsq:Real, n:Int, avgsq:Real] rows=2
-    - (1, 1.6666666666666667, 1.2909944487358056, 30, 4, 7.5)
-    - (2, null, null, 10000, 1, 10000)
+    - ([1,2,3,4,5,6], [1,4,3,6,2,5])
 
 ### `agent-aggregation-0039` — MismatchRows (high)
 
@@ -888,6 +762,7 @@ SELECT * FROM (SELECT g, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS m
 
 ### `agent-aggregation-0042` — MismatchRows (high)
 
+*Sub-verdicts:* TYPE_MISMATCH[histlist:Dynamic|String]  
 *Detail:* first differing row[0]: kusto=({
   "1": 2,
   "2": 1,
@@ -905,7 +780,7 @@ SELECT * FROM (SELECT g, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS m
     "g": 3,
     "c": 2
   }
-]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}"])
+]) duck=({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, '[{"g":2,"c":1},{"g":3,"c":2},{"g":1,"c":2}]')
 
 **KQL**
 ```kql
@@ -913,7 +788,7 @@ datatable(g:long, v:long)[ 1,10, 1,20, 2,30, 3,40, 3,50 ] | summarize cnt=count(
 ```
 **Generated SQL**
 ```sql
-SELECT histogram(json_object(TRY_CAST(g AS TEXT), cnt)) AS bag, COALESCE(LIST(json_object('g', g, 'c', cnt)) FILTER (WHERE json_object('g', g, 'c', cnt) IS NOT NULL), []) AS histlist FROM (SELECT g, COUNT(*) AS cnt FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(3 AS BIGINT), CAST(40 AS BIGINT)), (CAST(3 AS BIGINT), CAST(50 AS BIGINT))) AS t(g, v) GROUP BY ALL)
+SELECT histogram(json_object(COALESCE(TRY_CAST(g AS TEXT), ''), cnt)) AS bag, TO_JSON(COALESCE(LIST(json_object('g', g, 'c', cnt)) FILTER (WHERE json_object('g', g, 'c', cnt) IS NOT NULL), [])) AS histlist FROM (SELECT g, COUNT(*) AS cnt FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(3 AS BIGINT), CAST(40 AS BIGINT)), (CAST(3 AS BIGINT), CAST(50 AS BIGINT))) AS t(g, v) GROUP BY ALL)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -936,10 +811,10 @@ SELECT histogram(json_object(TRY_CAST(g AS TEXT), cnt)) AS bag, COALESCE(LIST(js
     "c": 2
   }
 ])
-- DuckDB: cols=[bag:Unknown, histlist:Unknown] rows=1
-    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, ["{\u0022g\u0022:1,\u0022c\u0022:2}","{\u0022g\u0022:3,\u0022c\u0022:2}","{\u0022g\u0022:2,\u0022c\u0022:1}"])
+- DuckDB: cols=[bag:Unknown, histlist:String] rows=1
+    - ({"{\u00221\u0022:2}":1,"{\u00222\u0022:1}":1,"{\u00223\u0022:2}":1}, '[{"g":2,"c":1},{"g":3,"c":2},{"g":1,"c":2}]')
 
-## Family: datetime-timespan (35)
+## Family: datetime-timespan (30)
 
 ### `agent-datetime-timespan-0043` — MismatchRows (high)
 
@@ -961,25 +836,6 @@ SELECT *, EXTRACT(YEAR FROM t) AS yr, STRFTIME(t, '%f') AS tick, DATE_TRUNC('yea
 - DuckDB: cols=[t:DateTime, yr:Int, tick:String, eoy:DateTime] rows=2
     - (2020-01-01T00:00:00.0000000Z, 2020, '000000', 2020-12-31T23:59:59.9999990Z)
     - (2020-12-31T23:59:59.9999990Z, 2020, '999999', 2020-12-31T23:59:59.9999990Z)
-
-### `agent-datetime-timespan-0004` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1955-11-05T00:00:00.0000000Z, 1955-10-31T00:00:00.0000000Z) duck=(1955-11-05T00:00:00.0000000Z, 1955-11-03T00:00:00.0000000Z)
-
-**KQL**
-```kql
-print binneg = bin(datetime(1955-11-05 06:15:00), 1d), binneg2 = bin(datetime(1955-11-05 06:15:00), 7d)
-```
-**Generated SQL**
-```sql
-SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(TIMESTAMP '1955-11-05 06:15:00' AS TIMESTAMP))/86400000)*86400000 AS BIGINT)) AS binneg, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(TIMESTAMP '1955-11-05 06:15:00' AS TIMESTAMP))/604800000)*604800000 AS BIGINT)) AS binneg2
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[binneg:DateTime, binneg2:DateTime] rows=1
-    - (1955-11-05T00:00:00.0000000Z, 1955-10-31T00:00:00.0000000Z)
-- DuckDB: cols=[binneg:DateTime, binneg2:DateTime] rows=1
-    - (1955-11-05T00:00:00.0000000Z, 1955-11-03T00:00:00.0000000Z)
 
 ### `agent-datetime-timespan-0014` — MismatchRows (high)
 
@@ -1076,25 +932,6 @@ SELECT (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond'))) / EXTRACT(EP
 - DuckDB: cols=[arith:Real, arith2:TimeSpan, arith3:TimeSpan, arith4:Real] rows=1
     - (24, 2.12:00:00, 00:45:00, Infinity)
 
-### `agent-datetime-timespan-0024` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1.02:03:04.5000000, -00:30:00, 13:00:00) duck=(null, -00:30:00, 13:00:00)
-
-**KQL**
-```kql
-print sp = totimespan('1.02:03:04.5'), sp2 = totimespan('-00:30:00'), sp3 = totimespan('13:00')
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST('1.02:03:04.5' AS INTERVAL) AS sp, TRY_CAST('-00:30:00' AS INTERVAL) AS sp2, TRY_CAST('13:00' AS INTERVAL) AS sp3
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[sp:TimeSpan, sp2:TimeSpan, sp3:TimeSpan] rows=1
-    - (1.02:03:04.5000000, -00:30:00, 13:00:00)
-- DuckDB: cols=[sp:TimeSpan, sp2:TimeSpan, sp3:TimeSpan] rows=1
-    - (null, -00:30:00, 13:00:00)
-
 ### `agent-datetime-timespan-0027` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=(2020-06-15T00:00:00.0000000Z, null, 02:30:00) duck=(2020-06-15T00:00:00.0000000Z, 1.02:10:00, 02:30:00)
@@ -1137,49 +974,24 @@ SELECT *, EXTRACT(YEAR FROM t) AS y, EXTRACT(WEEK FROM t) AS woy, (EXTRACT(EPOCH
     - (0001-01-01T00:00:00.0000000Z, 1, 1, 1, 0001-01-31T23:59:59.9999990Z)
     - (9999-12-31T23:59:59.9999990Z, 9999, 52, 5, 9999-12-31T23:59:59.9999990Z)
 
-### `agent-datetime-timespan-0039` — MismatchRows (high)
+### `agent-datetime-timespan-0041` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(1.01:01:01, 1.042372685185185, 25.016944444444444, 1501.0166666666667, '1.01:01:01') duck=(1.01:01:01, 1.042372685185185, 25.016944444444444, 1501.0166666666667, '25:01:01')
-
-**KQL**
-```kql
-datatable(span:timespan)[ 90061s, 86400s, 3661s, -3661s ] | extend d = span / 1d, h = span / 1h, m = span / 1m, fmt = tostring(span)
-```
-**Generated SQL**
-```sql
-SELECT *, (EXTRACT(EPOCH FROM (span)) / EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond')))) AS d, (EXTRACT(EPOCH FROM (span)) / EXTRACT(EPOCH FROM ((3600000 * INTERVAL '1 millisecond')))) AS h, (EXTRACT(EPOCH FROM (span)) / EXTRACT(EPOCH FROM ((60000 * INTERVAL '1 millisecond')))) AS m, TRY_CAST(span AS TEXT) AS fmt FROM (VALUES ((90061000 * INTERVAL '1 millisecond')), ((86400000 * INTERVAL '1 millisecond')), ((3661000 * INTERVAL '1 millisecond')), ((-3661000 * INTERVAL '1 millisecond'))) AS t(span)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[span:TimeSpan, d:Real, h:Real, m:Real, fmt:String] rows=4
-    - (1.01:01:01, 1.042372685185185, 25.016944444444444, 1501.0166666666667, '1.01:01:01')
-    - (1.00:00:00, 1, 24, 1440, '1.00:00:00')
-    - (01:01:01, 0.04237268518518519, 1.0169444444444444, 61.016666666666666, '01:01:01')
-    - (-01:01:01, -0.04237268518518519, -1.0169444444444444, -61.016666666666666, '-01:01:01')
-- DuckDB: cols=[span:TimeSpan, d:Real, h:Real, m:Real, fmt:String] rows=4
-    - (1.01:01:01, 1.042372685185185, 25.016944444444444, 1501.0166666666667, '25:01:01')
-    - (1.00:00:00, 1, 24, 1440, '24:00:00')
-    - (01:01:01, 0.04237268518518519, 1.0169444444444444, 61.016666666666666, '01:01:01')
-    - (-01:01:01, -0.04237268518518519, -1.0169444444444444, -61.016666666666666, '-01:01:01')
-
-### `agent-datetime-timespan-0040` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(86400, '1.02:00:00', '-1.02:03:04') duck=(86400, '26:00:00', '-26:03:04')
+*Detail:* first differing row[0]: kusto=(2020-06-15T13:45:09.1234567Z, 1.02:03:04.5000000) duck=(2020-06-15T13:45:09.1234560Z, null)
 
 **KQL**
 ```kql
-print sec = totimespan(1d) / totimespan(1s), tot = tostring(1d + 2h), tot2 = tostring(-1d - 2h - 3m - 4s)
+print roundtrip = todatetime(tostring(datetime(2020-06-15 13:45:09.1234567))), spround = totimespan(tostring(1d + 2h + 3m + 4.5s))
 ```
 **Generated SQL**
 ```sql
-SELECT (EXTRACT(EPOCH FROM (TRY_CAST((86400000 * INTERVAL '1 millisecond') AS INTERVAL))) / EXTRACT(EPOCH FROM (TRY_CAST((1000 * INTERVAL '1 millisecond') AS INTERVAL)))) AS sec, TRY_CAST((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') AS TEXT) AS tot, TRY_CAST((-(86400000 * INTERVAL '1 millisecond')) - (7200000 * INTERVAL '1 millisecond') - (180000 * INTERVAL '1 millisecond') - (4000 * INTERVAL '1 millisecond') AS TEXT) AS tot2
+SELECT COALESCE(TRY_CAST(COALESCE(STRFTIME(TIMESTAMP '2020-06-15 13:45:09.123456', '%Y-%m-%dT%H:%M:%S.%f') || '0Z', '') AS TIMESTAMP), TRY_STRPTIME(CAST(COALESCE(STRFTIME(TIMESTAMP '2020-06-15 13:45:09.123456', '%Y-%m-%dT%H:%M:%S.%f') || '0Z', '') AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS roundtrip, TRY_CAST(COALESCE(((CASE WHEN (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + INTERVAL '4.5s')) * 1000000) < 0 THEN '-' ELSE '' END) || (CASE WHEN CAST(FLOOR(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + INTERVAL '4.5s')) * 1000000)) / 86400000000) AS BIGINT) > 0 THEN CAST(CAST(FLOOR(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + INTERVAL '4.5s')) * 1000000)) / 86400000000) AS BIGINT) AS VARCHAR) || '.' ELSE '' END) || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + INTERVAL '4.5s')) * 1000000)), 86400000000) / 3600000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + INTERVAL '4.5s')) * 1000000)), 3600000000) / 60000000) AS BIGINT) AS VARCHAR), 2, '0') || ':' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + INTERVAL '4.5s')) * 1000000)), 60000000) / 1000000) AS BIGINT) AS VARCHAR), 2, '0') || (CASE WHEN CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + INTERVAL '4.5s')) * 1000000)), 1000000)) AS BIGINT) > 0 THEN '.' || LPAD(CAST(CAST(FLOOR(MOD(ABS((EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond') + (7200000 * INTERVAL '1 millisecond') + (180000 * INTERVAL '1 millisecond') + INTERVAL '4.5s')) * 1000000)), 1000000)) AS BIGINT) * 10 AS VARCHAR), 7, '0') ELSE '' END)), '') AS INTERVAL) AS spround
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
-- Kusto: cols=[sec:Real, tot:String, tot2:String] rows=1
-    - (86400, '1.02:00:00', '-1.02:03:04')
-- DuckDB: cols=[sec:Real, tot:String, tot2:String] rows=1
-    - (86400, '26:00:00', '-26:03:04')
+- Kusto: cols=[roundtrip:DateTime, spround:TimeSpan] rows=1
+    - (2020-06-15T13:45:09.1234567Z, 1.02:03:04.5000000)
+- DuckDB: cols=[roundtrip:DateTime, spround:TimeSpan] rows=1
+    - (2020-06-15T13:45:09.1234560Z, null)
 
 ### `agent-datetime-timespan-0043` — MismatchRows (high)
 
@@ -1409,25 +1221,6 @@ SELECT TIMESTAMP '2020-02-29 12:00:00' + ((1 / 10.0) * INTERVAL '1 microsecond')
 - DuckDB: cols=[a:DateTime, b:DateTime, c:DateTime, d:DateTime] rows=1
     - (2020-02-29T12:00:00.0000000Z, 0001-01-01T00:00:00.0000000Z, 9999-12-31T23:59:59.9999990Z, 2020-06-14T00:00:00.0000000Z)
 
-### `agent-datetime-timespan-0025` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1955-11-05T06:00:00.0000000Z, 1955-10-31T00:00:00.0000000Z, 1955-11-05T00:00:00.0000000Z, 1955-11-05T03:30:00.0000000Z) duck=(1955-11-05T06:00:00.0000000Z, 1955-11-03T00:00:00.0000000Z, 1955-11-05T00:00:00.0000000Z, 1955-11-05T03:30:00.0000000Z)
-
-**KQL**
-```kql
-print a = bin(datetime(1955-11-05 06:15:00.5), 1h), b = bin(datetime(1955-11-05 06:15:00.5), 7d), c = bin_at(datetime(1955-11-05 06:15:00), 1d, datetime(1970-01-01)), d = bin_at(datetime(1955-11-05 06:15:00), 3h, datetime(1955-11-05 00:30:00))
-```
-**Generated SQL**
-```sql
-SELECT EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(TIMESTAMP '1955-11-05 06:15:00.500000' AS TIMESTAMP))/3600000)*3600000 AS BIGINT)) AS a, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(TIMESTAMP '1955-11-05 06:15:00.500000' AS TIMESTAMP))/604800000)*604800000 AS BIGINT)) AS b, EPOCH_MS(CAST(FLOOR((EPOCH_MS(CAST(TIMESTAMP '1955-11-05 06:15:00' AS TIMESTAMP)) - EPOCH_MS(CAST(TIMESTAMP '1970-01-01 00:00:00' AS TIMESTAMP)))/86400000)*86400000 + EPOCH_MS(CAST(TIMESTAMP '1970-01-01 00:00:00' AS TIMESTAMP)) AS BIGINT)) AS c, EPOCH_MS(CAST(FLOOR((EPOCH_MS(CAST(TIMESTAMP '1955-11-05 06:15:00' AS TIMESTAMP)) - EPOCH_MS(CAST(TIMESTAMP '1955-11-05 00:30:00' AS TIMESTAMP)))/10800000)*10800000 + EPOCH_MS(CAST(TIMESTAMP '1955-11-05 00:30:00' AS TIMESTAMP)) AS BIGINT)) AS d
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:DateTime, b:DateTime, c:DateTime, d:DateTime] rows=1
-    - (1955-11-05T06:00:00.0000000Z, 1955-10-31T00:00:00.0000000Z, 1955-11-05T00:00:00.0000000Z, 1955-11-05T03:30:00.0000000Z)
-- DuckDB: cols=[a:DateTime, b:DateTime, c:DateTime, d:DateTime] rows=1
-    - (1955-11-05T06:00:00.0000000Z, 1955-11-03T00:00:00.0000000Z, 1955-11-05T00:00:00.0000000Z, 1955-11-05T03:30:00.0000000Z)
-
 ### `agent-datetime-timespan-0028` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[dw:Real|Int]  
@@ -1475,7 +1268,7 @@ SELECT *, DATE_DIFF('second', b, a) AS ds, DATE_DIFF('millisecond', b, a) AS dms
 
 ### `agent-datetime-timespan-0031` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('2020-06-15T13:45:30.0000000Z', '2020-06-15T13:45:30.7654321Z', '2020-06-15T00:00:00.0000000Z', '2020-06-15T13:45:00.0000000Z') duck=('2020-06-15 13:45:30', '2020-06-15 13:45:30.765432', '2020-06-15 00:00:00', '2020-06-15 13:45:00')
+*Detail:* first differing row[0]: kusto=('2020-06-15T13:45:30.0000000Z', '2020-06-15T13:45:30.7654321Z', '2020-06-15T00:00:00.0000000Z', '2020-06-15T13:45:00.0000000Z') duck=('2020-06-15 13:45:30', '2020-06-15T13:45:30.7654320Z', '2020-06-15T00:00:00.0000000Z', '2020-06-15T13:45:00.0000000Z')
 
 **KQL**
 ```kql
@@ -1483,33 +1276,14 @@ print a = tostring(bin(datetime(2020-06-15 13:45:30.7654321), 1s)), b = tostring
 ```
 **Generated SQL**
 ```sql
-SELECT TRY_CAST(EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(TIMESTAMP '2020-06-15 13:45:30.765432' AS TIMESTAMP))/1000)*1000 AS BIGINT)) AS TEXT) AS a, TRY_CAST(TIMESTAMP '2020-06-15 13:45:30.765432' AS TEXT) AS b, TRY_CAST(TIMESTAMP '2020-06-15 00:00:00' AS TEXT) AS c, TRY_CAST(TIMESTAMP '2020-06-15 13:45:00' AS TEXT) AS d
+SELECT COALESCE(TRY_CAST(EPOCH_MS(CAST(FLOOR(((EPOCH_MS(CAST(TIMESTAMP '2020-06-15 13:45:30.765432' AS TIMESTAMP))) - (EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00') * 1000))/1000)*1000 + (EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00') * 1000) AS BIGINT)) AS TEXT), '') AS a, COALESCE(STRFTIME(TIMESTAMP '2020-06-15 13:45:30.765432', '%Y-%m-%dT%H:%M:%S.%f') || '0Z', '') AS b, COALESCE(STRFTIME(TIMESTAMP '2020-06-15 00:00:00', '%Y-%m-%dT%H:%M:%S.%f') || '0Z', '') AS c, COALESCE(STRFTIME(TIMESTAMP '2020-06-15 13:45:00', '%Y-%m-%dT%H:%M:%S.%f') || '0Z', '') AS d
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[a:String, b:String, c:String, d:String] rows=1
     - ('2020-06-15T13:45:30.0000000Z', '2020-06-15T13:45:30.7654321Z', '2020-06-15T00:00:00.0000000Z', '2020-06-15T13:45:00.0000000Z')
 - DuckDB: cols=[a:String, b:String, c:String, d:String] rows=1
-    - ('2020-06-15 13:45:30', '2020-06-15 13:45:30.765432', '2020-06-15 00:00:00', '2020-06-15 13:45:00')
-
-### `agent-datetime-timespan-0032` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1.02:03:04.5000000, -1.02:03:04.5000000, 23:59:59.9999999, 00:00:00.0010000, 100.00:00:00) duck=(null, null, 23:59:59.9999990, 00:00:00.0010000, null)
-
-**KQL**
-```kql
-print a = totimespan('1.02:03:04.5'), b = totimespan('-1.02:03:04.5'), c = totimespan('23:59:59.9999999'), d = totimespan('0:0:0.001'), e = totimespan('100.00:00:00')
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST('1.02:03:04.5' AS INTERVAL) AS a, TRY_CAST('-1.02:03:04.5' AS INTERVAL) AS b, TRY_CAST('23:59:59.9999999' AS INTERVAL) AS c, TRY_CAST('0:0:0.001' AS INTERVAL) AS d, TRY_CAST('100.00:00:00' AS INTERVAL) AS e
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:TimeSpan, b:TimeSpan, c:TimeSpan, d:TimeSpan, e:TimeSpan] rows=1
-    - (1.02:03:04.5000000, -1.02:03:04.5000000, 23:59:59.9999999, 00:00:00.0010000, 100.00:00:00)
-- DuckDB: cols=[a:TimeSpan, b:TimeSpan, c:TimeSpan, d:TimeSpan, e:TimeSpan] rows=1
-    - (null, null, 23:59:59.9999990, 00:00:00.0010000, null)
+    - ('2020-06-15 13:45:30', '2020-06-15T13:45:30.7654320Z', '2020-06-15T00:00:00.0000000Z', '2020-06-15T13:45:00.0000000Z')
 
 ### `agent-datetime-timespan-0033` — MismatchRows (high)
 
@@ -1578,7 +1352,7 @@ datatable(t:datetime, s:timespan)[ datetime(2020-03-29 01:30:00),1h, datetime(20
 ```
 **Generated SQL**
 ```sql
-SELECT *, t + s AS plus, t - s AS minus, EPOCH_MS(CAST(FLOOR(EPOCH_MS(CAST(t AS TIMESTAMP))/EPOCH_MS(CAST(TIMESTAMP 'epoch' + (s) AS TIMESTAMP)))*EPOCH_MS(CAST(TIMESTAMP 'epoch' + (s) AS TIMESTAMP)) AS BIGINT)) AS bin, (EXTRACT(EPOCH FROM ((EXTRACT(DOW FROM t) * INTERVAL '1 day'))) / EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond')))) AS dow FROM (VALUES (TIMESTAMP '2020-03-29 01:30:00', (3600000 * INTERVAL '1 millisecond')), (TIMESTAMP '2020-10-25 02:30:00', (-3600000 * INTERVAL '1 millisecond')), (TIMESTAMP '2024-02-29 23:00:00', (7200000 * INTERVAL '1 millisecond'))) AS t(t, s)
+SELECT *, t + s AS plus, t - s AS minus, EPOCH_MS(CAST(FLOOR(((EPOCH_MS(CAST(t AS TIMESTAMP))) - (EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00') * 1000))/EPOCH_MS(CAST(TIMESTAMP 'epoch' + (s) AS TIMESTAMP)))*EPOCH_MS(CAST(TIMESTAMP 'epoch' + (s) AS TIMESTAMP)) + (EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00') * 1000) AS BIGINT)) AS bin, (EXTRACT(EPOCH FROM ((EXTRACT(DOW FROM t) * INTERVAL '1 day'))) / EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond')))) AS dow FROM (VALUES (TIMESTAMP '2020-03-29 01:30:00', (3600000 * INTERVAL '1 millisecond')), (TIMESTAMP '2020-10-25 02:30:00', (-3600000 * INTERVAL '1 millisecond')), (TIMESTAMP '2024-02-29 23:00:00', (7200000 * INTERVAL '1 millisecond'))) AS t(t, s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -1629,107 +1403,7 @@ SELECT STRFTIME(TIMESTAMP '2020-01-05 00:00:00', '%d') AS a, STRFTIME(TIMESTAMP 
 - DuckDB: cols=[a:String, b:String, c:String, d:String] rows=1
     - ('05', '05', '01', '01')
 
-## Family: dynamic-json (49)
-
-### `agent-dynamic-json-0000` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=({
-  "a": 1,
-  "b": [
-    1,
-    2,
-    3
-  ]
-}, null) duck=('{"a":1,"b":[1,2,3]}', 0)
-
-**KQL**
-```kql
-datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic([10,20,30]), dynamic({"x":{"y":1}}) ] | extend al = array_length(d)
-```
-**Generated SQL**
-```sql
-SELECT *, LEN(json_extract(CAST(d AS JSON), '$[*]')) AS al FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('{"a":1,"b":[1,2,3]}'::JSON AS JSON)), (CAST(LIST_VALUE(10, 20, 30) AS JSON)), (CAST('{"x":{"y":1}}'::JSON AS JSON))) AS t(d))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[d:Dynamic, al:Int] rows=3
-    - ({
-  "a": 1,
-  "b": [
-    1,
-    2,
-    3
-  ]
-}, null)
-    - ([
-  10,
-  20,
-  30
-], 3)
-    - ({
-  "x": {
-    "y": 1
-  }
-}, null)
-- DuckDB: cols=[d:String, al:Int] rows=3
-    - ('{"a":1,"b":[1,2,3]}', 0)
-    - ('[10,20,30]', 3)
-    - ('{"x":{"y":1}}', 0)
-
-### `agent-dynamic-json-0006` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String], TYPE_MISMATCH[m:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=({
-  "a": 1,
-  "b": 2
-}, {
-  "a": 1,
-  "b": 2,
-  "c": 4
-}) duck=('{"a":1,"b":2}', '{"a":1,"b":3,"c":4}')
-
-**KQL**
-```kql
-print d = dynamic({"a":1,"b":2}) | extend m = bag_merge(d, dynamic({"b":3,"c":4}))
-```
-**Generated SQL**
-```sql
-SELECT *, JSON_MERGE_PATCH(d, '{"b":3,"c":4}'::JSON) AS m FROM (SELECT '{"a":1,"b":2}'::JSON AS d)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[d:Dynamic, m:Dynamic] rows=1
-    - ({
-  "a": 1,
-  "b": 2
-}, {
-  "a": 1,
-  "b": 2,
-  "c": 4
-})
-- DuckDB: cols=[d:String, m:String] rows=1
-    - ('{"a":1,"b":2}', '{"a":1,"b":3,"c":4}')
-
-### `agent-dynamic-json-0010` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=({}, null, []) duck=('{}', 2, [])
-
-**KQL**
-```kql
-print d = dynamic({}) | extend e = array_length(d), keys = bag_keys(d)
-```
-**Generated SQL**
-```sql
-SELECT *, LEN(d) AS e, JSON_KEYS(d) AS keys FROM (SELECT '{}'::JSON AS d)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[d:Dynamic, e:Int, keys:Dynamic] rows=1
-    - ({}, null, [])
-- DuckDB: cols=[d:String, e:Int, keys:Unknown] rows=1
-    - ('{}', 2, [])
+## Family: dynamic-json (24)
 
 ### `agent-dynamic-json-0018` — MismatchRows (high)
 
@@ -1745,7 +1419,7 @@ print d = dynamic({"b":2,"a":1}) | extend j = dynamic_to_json(d)
 ```
 **Generated SQL**
 ```sql
-SELECT *, CAST(d AS JSON) AS j FROM (SELECT '{"b":2,"a":1}'::JSON AS d)
+SELECT *, CAST(CAST(d AS JSON) AS JSON) AS j FROM (SELECT '{"b":2,"a":1}'::JSON AS d)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -1770,7 +1444,7 @@ datatable(d:dynamic)[ dynamic({"x":1}), dynamic({"y":2}) ] | mv-apply k = bag_ke
 ```
 **Generated SQL**
 ```sql
-SELECT t.*, _sub.* FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('{"x":1}'::JSON AS JSON)), (CAST('{"y":2}'::JSON AS JSON))) AS t(d)) AS t CROSS JOIN UNNEST(JSON_KEYS(CAST(d AS JSON))) AS u(value), LATERAL (SELECT *, k AS kk FROM (SELECT u.value AS k)) AS _sub
+SELECT t.*, _sub.* FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('{"x":1}'::JSON AS JSON)), (CAST('{"y":2}'::JSON AS JSON))) AS t(d)) AS t, LATERAL (SELECT *, k AS kk FROM (SELECT u.value AS k FROM UNNEST(JSON_KEYS(CAST(d AS JSON))) AS u(value))) AS _sub
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -1788,7 +1462,7 @@ SELECT t.*, _sub.* FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('{"x":1}
 ### `agent-dynamic-json-0021` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[x:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=(null, 'null', True) duck=('null', 'dictionary', False)
+*Detail:* first differing row[0]: kusto=(null, 'null', True) duck=('null', 'null', False)
 
 **KQL**
 ```kql
@@ -1796,190 +1470,14 @@ print x = parse_json("null") | extend t = gettype(x), isn = isnull(x)
 ```
 **Generated SQL**
 ```sql
-SELECT *, CASE WHEN TYPEOF(x) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(x) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(x) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(x) = 'VARCHAR' THEN 'string' WHEN TYPEOF(x) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(x) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(x) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(x) = 'UUID' THEN 'guid' WHEN TYPEOF(x) LIKE '%[]' OR TYPEOF(x) LIKE 'STRUCT%' OR TYPEOF(x) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(x) = 'JSON' THEN (CASE WHEN json_type(CAST(x AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(x)) END AS t, (x IS NULL) AS isn FROM (SELECT TRY_CAST('null' AS JSON) AS x)
+SELECT *, CASE WHEN TYPEOF(CAST(x AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(x AS JSON)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(x AS JSON)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(x AS JSON)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(x AS JSON)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(x AS JSON)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(x AS JSON)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(x AS JSON)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(x AS JSON)) LIKE '%[]' OR TYPEOF(CAST(x AS JSON)) LIKE 'STRUCT%' OR TYPEOF(CAST(x AS JSON)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(x AS JSON)) = 'JSON' THEN (CASE json_type(CAST(CAST(x AS JSON) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(x AS JSON))) END AS t, (CAST(x AS JSON) IS NULL) AS isn FROM (SELECT TRY_CAST('null' AS JSON) AS x)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[x:Dynamic, t:String, isn:Bool] rows=1
     - (null, 'null', True)
 - DuckDB: cols=[x:String, t:String, isn:Bool] rows=1
-    - ('null', 'dictionary', False)
-
-### `agent-dynamic-json-0022` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[x:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=("hello", 'string') duck=(null, 'dictionary')
-
-**KQL**
-```kql
-print x = parse_json('"hello"') | extend t = gettype(x)
-```
-**Generated SQL**
-```sql
-SELECT *, CASE WHEN TYPEOF(x) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(x) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(x) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(x) = 'VARCHAR' THEN 'string' WHEN TYPEOF(x) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(x) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(x) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(x) = 'UUID' THEN 'guid' WHEN TYPEOF(x) LIKE '%[]' OR TYPEOF(x) LIKE 'STRUCT%' OR TYPEOF(x) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(x) = 'JSON' THEN (CASE WHEN json_type(CAST(x AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(x)) END AS t FROM (SELECT TRY_CAST('hello' AS JSON) AS x)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Dynamic, t:String] rows=1
-    - ("hello", 'string')
-- DuckDB: cols=[x:String, t:String] rows=1
-    - (null, 'dictionary')
-
-### `agent-dynamic-json-0023` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[x:Dynamic|String], TYPE_MISMATCH[v:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=(123, 'long', 123) duck=('123', 'dictionary', '123')
-
-**KQL**
-```kql
-print x = parse_json("123") | extend t = gettype(x), v = x
-```
-**Generated SQL**
-```sql
-SELECT *, CASE WHEN TYPEOF(x) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(x) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(x) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(x) = 'VARCHAR' THEN 'string' WHEN TYPEOF(x) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(x) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(x) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(x) = 'UUID' THEN 'guid' WHEN TYPEOF(x) LIKE '%[]' OR TYPEOF(x) LIKE 'STRUCT%' OR TYPEOF(x) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(x) = 'JSON' THEN (CASE WHEN json_type(CAST(x AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(x)) END AS t, x AS v FROM (SELECT TRY_CAST('123' AS JSON) AS x)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Dynamic, t:String, v:Dynamic] rows=1
-    - (123, 'long', 123)
-- DuckDB: cols=[x:String, t:String, v:String] rows=1
-    - ('123', 'dictionary', '123')
-
-### `agent-dynamic-json-0024` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[x:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=(true, 'bool') duck=('true', 'dictionary')
-
-**KQL**
-```kql
-print x = parse_json("true") | extend t = gettype(x)
-```
-**Generated SQL**
-```sql
-SELECT *, CASE WHEN TYPEOF(x) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(x) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(x) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(x) = 'VARCHAR' THEN 'string' WHEN TYPEOF(x) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(x) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(x) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(x) = 'UUID' THEN 'guid' WHEN TYPEOF(x) LIKE '%[]' OR TYPEOF(x) LIKE 'STRUCT%' OR TYPEOF(x) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(x) = 'JSON' THEN (CASE WHEN json_type(CAST(x AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(x)) END AS t FROM (SELECT TRY_CAST('true' AS JSON) AS x)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Dynamic, t:String] rows=1
-    - (true, 'bool')
-- DuckDB: cols=[x:String, t:String] rows=1
-    - ('true', 'dictionary')
-
-### `agent-dynamic-json-0028` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('red', 1) duck=('"red"', 1)
-
-**KQL**
-```kql
-datatable(d:dynamic)[ dynamic({"tags":["red","green","blue"]}) ] | mv-expand tag = d.tags | summarize cnt = count() by tostring(tag)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(tag AS TEXT) AS tag, COUNT(*) AS cnt FROM (SELECT t.*, u.value AS tag FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('{"tags":["red","green","blue"]}'::JSON AS JSON))) AS t(d)) AS t CROSS JOIN UNNEST(CASE WHEN json_extract(d, '$.tags') IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(json_extract(d, '$.tags')) = 'ARRAY' THEN CAST(json_extract(d, '$.tags') AS JSON[]) WHEN json_type(json_extract(d, '$.tags')) = 'OBJECT' THEN list_transform(json_keys(json_extract(d, '$.tags')), lambda k: json_object(k, json_extract(json_extract(d, '$.tags'), '$."' || k || '"'))) ELSE CAST([json_extract(d, '$.tags')] AS JSON[]) END) AS u(value)) GROUP BY ALL
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[tag:String, cnt:Int] rows=3
-    - ('red', 1)
-    - ('green', 1)
-    - ('blue', 1)
-- DuckDB: cols=[tag:String, cnt:Int] rows=3
-    - ('"red"', 1)
-    - ('"green"', 1)
-    - ('"blue"', 1)
-
-### `agent-dynamic-json-0029` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String], TYPE_MISMATCH[inner:Dynamic|String], TYPE_MISMATCH[el:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=([
-  [
-    1,
-    2
-  ],
-  [
-    3,
-    4
-  ]
-], [
-  1,
-  2
-], 2) duck=('[[1,2],[3,4]]', '[3,4]', null)
-
-**KQL**
-```kql
-print d = dynamic([[1,2],[3,4]]) | extend inner = d[0], el = d[0][1]
-```
-**Generated SQL**
-```sql
-SELECT *, d[0 + 1] AS "inner", d[0 + 1][1 + 1] AS el FROM (SELECT '[[1,2],[3,4]]'::JSON AS d)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[d:Dynamic, inner:Dynamic, el:Dynamic] rows=1
-    - ([
-  [
-    1,
-    2
-  ],
-  [
-    3,
-    4
-  ]
-], [
-  1,
-  2
-], 2)
-- DuckDB: cols=[d:String, inner:String, el:String] rows=1
-    - ('[[1,2],[3,4]]', '[3,4]', null)
-
-### `agent-dynamic-json-0032` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=([
-  1,
-  2,
-  3,
-  4,
-  5
-], [
-  5,
-  4,
-  3,
-  2,
-  1
-], [
-  4,
-  5
-]) duck=([1,2,3,4,5], [5,4,3,2,1], [])
-
-**KQL**
-```kql
-print d = dynamic([1,2,3,4,5]) | extend rev = array_reverse(d), tail2 = array_slice(d, -2, -1)
-```
-**Generated SQL**
-```sql
-SELECT *, LIST_REVERSE(d) AS rev, LIST_SLICE(d, (-2) + 1, (-1) + 1) AS tail2 FROM (SELECT LIST_VALUE(1, 2, 3, 4, 5) AS d)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[d:Dynamic, rev:Dynamic, tail2:Dynamic] rows=1
-    - ([
-  1,
-  2,
-  3,
-  4,
-  5
-], [
-  5,
-  4,
-  3,
-  2,
-  1
-], [
-  4,
-  5
-])
-- DuckDB: cols=[d:Unknown, rev:Unknown, tail2:Unknown] rows=1
-    - ([1,2,3,4,5], [5,4,3,2,1], [])
+    - ('null', 'null', False)
 
 ### `agent-dynamic-json-0040` — MismatchRows (high)
 
@@ -2009,42 +1507,6 @@ SELECT *, d[10 + 1] AS oob, d[(-1) + 1] AS neg FROM (SELECT LIST_VALUE(1, 2, 3) 
 - DuckDB: cols=[d:Unknown, oob:Int, neg:Int] rows=1
     - ([1,2,3], null, null)
 
-### `agent-dynamic-json-0042` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[b:Dynamic|Int], TYPE_MISMATCH[m:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=([
-  1,
-  2
-], null, {
-  "k": 1
-}, [
-  1,
-  2
-]) duck=([1,2], null, null, [1,2])
-
-**KQL**
-```kql
-print a = dynamic([1,2]), b = dynamic(null) | extend m = bag_merge(dynamic({"k":1}), dynamic(null)), c = array_concat(a, b)
-```
-**Generated SQL**
-```sql
-SELECT *, JSON_MERGE_PATCH('{"k":1}'::JSON, NULL) AS m, LIST_CONCAT(a, b) AS c FROM (SELECT LIST_VALUE(1, 2) AS a, NULL AS b)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:Dynamic, b:Dynamic, m:Dynamic, c:Dynamic] rows=1
-    - ([
-  1,
-  2
-], null, {
-  "k": 1
-}, [
-  1,
-  2
-])
-- DuckDB: cols=[a:Unknown, b:Int, m:String, c:Unknown] rows=1
-    - ([1,2], null, null, [1,2])
-
 ### `agent-dynamic-json-0045` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String], TYPE_MISMATCH[keys:Dynamic|String], TYPE_MISMATCH[kv:Dynamic|String]  
@@ -2059,7 +1521,7 @@ print d = dynamic({"a":1,"b":2}) | extend keys = bag_keys(d) | mv-expand keys | 
 ```
 **Generated SQL**
 ```sql
-SELECT *, json_extract(d, '$.' || TRY_CAST(keys AS TEXT)) AS kv FROM (SELECT t.* EXCLUDE (keys), u.value AS keys FROM (SELECT *, JSON_KEYS(d) AS keys FROM (SELECT '{"a":1,"b":2}'::JSON AS d)) AS t CROSS JOIN UNNEST(t.keys) AS u(value))
+SELECT *, json_extract(d, '$.' || COALESCE(TRY_CAST(keys AS TEXT), '')) AS kv FROM (SELECT t.* EXCLUDE (keys), u.value AS keys FROM (SELECT *, JSON_KEYS(CAST(d AS JSON)) AS keys FROM (SELECT '{"a":1,"b":2}'::JSON AS d)) AS t CROSS JOIN UNNEST(t.keys) AS u(value))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -2075,28 +1537,6 @@ SELECT *, json_extract(d, '$.' || TRY_CAST(keys AS TEXT)) AS kv FROM (SELECT t.*
 - DuckDB: cols=[d:String, keys:String, kv:String] rows=2
     - ('{"a":1,"b":2}', 'a', '1')
     - ('{"a":1,"b":2}', 'b', '2')
-
-### `agent-dynamic-json-0001` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[tot:Int|Real]  
-*Detail:* first differing row[0]: kusto=('a', 4) duck=('"a"', 4)
-
-**KQL**
-```kql
-datatable(d:dynamic)[ dynamic([{"k":"a","v":1},{"k":"b","v":2},{"k":"a","v":3}]) ] | mv-expand item = d | summarize tot = sum(toint(item.v)) by g = tostring(item.k) | sort by g asc
-```
-**Generated SQL**
-```sql
-SELECT * FROM (SELECT TRY_CAST(json_extract(item, '$.k') AS TEXT) AS g, COALESCE(SUM(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(item, '$.v') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(item, '$.v') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS DOUBLE)), 0) AS tot FROM (SELECT t.*, u.value AS item FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('[{"k":"a","v":1},{"k":"b","v":2},{"k":"a","v":3}]'::JSON AS JSON))) AS t(d)) AS t CROSS JOIN UNNEST(CASE WHEN t.d IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(t.d) = 'ARRAY' THEN CAST(t.d AS JSON[]) WHEN json_type(t.d) = 'OBJECT' THEN list_transform(json_keys(t.d), lambda k: json_object(k, json_extract(t.d, '$."' || k || '"'))) ELSE CAST([t.d] AS JSON[]) END) AS u(value)) GROUP BY ALL) ORDER BY g ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, tot:Int] rows=2
-    - ('a', 4)
-    - ('b', 2)
-- DuckDB: cols=[g:String, tot:Real] rows=2
-    - ('"a"', 4)
-    - ('"b"', 2)
 
 ### `agent-dynamic-json-0002` — MismatchRows (high)
 
@@ -2119,7 +1559,7 @@ print d = dynamic({"a":{"b":{"c":[10,20,30]}}}) | extend deep = d.a.b.c[2], len 
 ```
 **Generated SQL**
 ```sql
-SELECT *, json_extract(json_extract(d, '$.a.b.c'), '$[' || (2) || ']') AS deep, LEN(json_extract(json_extract(d, '$.a.b.c'), '$[*]')) AS len, TRY_CAST(TRY_CAST(json_extract(d, '$.a.b.c') AS TEXT) AS JSON)[1 + 1] AS rt FROM (SELECT '{"a":{"b":{"c":[10,20,30]}}}'::JSON AS d)
+SELECT *, json_extract(json_extract(d, '$.a.b.c'), '$[' || (CASE WHEN (2) < 0 THEN '#' ELSE '' END) || (2) || ']') AS deep, CASE WHEN json_type(json_extract(d, '$.a.b.c')) = 'ARRAY' THEN LEN(json_extract(json_extract(d, '$.a.b.c'), '$[*]')) ELSE NULL END AS len, TRY_CAST(COALESCE(json_extract_string(json_extract(d, '$.a.b.c'), '$'), '') AS JSON)[1 + 1] AS rt FROM (SELECT '{"a":{"b":{"c":[10,20,30]}}}'::JSON AS d)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -2173,88 +1613,6 @@ SELECT *, JSON_KEYS(merged) AS keys FROM (SELECT histogram(d) AS merged FROM (SE
 - DuckDB: cols=[merged:Unknown, keys:Unknown] rows=1
     - ({"{\u0022a\u0022:1}":1,"{\u0022a\u0022:3,\u0022c\u0022:4}":1,"{\u0022b\u0022:2}":1}, ["{\u0022a\u0022:1}","{\u0022a\u0022:3,\u0022c\u0022:4}","{\u0022b\u0022:2}"])
 
-### `agent-dynamic-json-0006` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=([
-  1,
-  2,
-  3
-], [
-  3,
-  4,
-  5
-], [
-  5,
-  6,
-  7
-], [
-  1,
-  2,
-  3,
-  4,
-  5,
-  6,
-  7
-], []) duck=([1,2,3], [3,4,5], [5,6,7], [1,2,3,4,5], [])
-
-**KQL**
-```kql
-print a = dynamic([1,2,3]), b = dynamic([3,4,5]), c = dynamic([5,6,7]) | extend u = set_union(a, b, c), i = set_intersect(a, set_intersect(b, c))
-```
-**Generated SQL**
-```sql
-SELECT *, LIST_DISTINCT(LIST_CONCAT(a, b)) AS u, LIST_FILTER(a, x -> LIST_CONTAINS(LIST_FILTER(b, x -> LIST_CONTAINS(c, x)), x)) AS i FROM (SELECT LIST_VALUE(1, 2, 3) AS a, LIST_VALUE(3, 4, 5) AS b, LIST_VALUE(5, 6, 7) AS c)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:Dynamic, b:Dynamic, c:Dynamic, u:Dynamic, i:Dynamic] rows=1
-    - ([
-  1,
-  2,
-  3
-], [
-  3,
-  4,
-  5
-], [
-  5,
-  6,
-  7
-], [
-  1,
-  2,
-  3,
-  4,
-  5,
-  6,
-  7
-], [])
-- DuckDB: cols=[a:Unknown, b:Unknown, c:Unknown, u:Unknown, i:Unknown] rows=1
-    - ([1,2,3], [3,4,5], [5,6,7], [1,2,3,4,5], [])
-
-### `agent-dynamic-json-0008` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 'x') duck=(2, '"z"')
-
-**KQL**
-```kql
-print d = dynamic({"nested":{"arr":[{"id":1,"tags":["x","y"]},{"id":2,"tags":["z"]}]}}) | mv-expand obj = d.nested.arr | mv-expand t = obj.tags | project id = toint(obj.id), tag = tostring(t)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(obj, '$.id') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(obj, '$.id') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS id, TRY_CAST(t AS TEXT) AS tag FROM (SELECT t.*, u.value AS t FROM (SELECT t.*, u.value AS obj FROM (SELECT '{"nested":{"arr":[{"id":1,"tags":["x","y"]},{"id":2,"tags":["z"]}]}}'::JSON AS d) AS t CROSS JOIN UNNEST(CASE WHEN json_extract(d, '$.nested.arr') IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(json_extract(d, '$.nested.arr')) = 'ARRAY' THEN CAST(json_extract(d, '$.nested.arr') AS JSON[]) WHEN json_type(json_extract(d, '$.nested.arr')) = 'OBJECT' THEN list_transform(json_keys(json_extract(d, '$.nested.arr')), lambda k: json_object(k, json_extract(json_extract(d, '$.nested.arr'), '$."' || k || '"'))) ELSE CAST([json_extract(d, '$.nested.arr')] AS JSON[]) END) AS u(value)) AS t CROSS JOIN UNNEST(CASE WHEN json_extract(obj, '$.tags') IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(json_extract(obj, '$.tags')) = 'ARRAY' THEN CAST(json_extract(obj, '$.tags') AS JSON[]) WHEN json_type(json_extract(obj, '$.tags')) = 'OBJECT' THEN list_transform(json_keys(json_extract(obj, '$.tags')), lambda k: json_object(k, json_extract(json_extract(obj, '$.tags'), '$."' || k || '"'))) ELSE CAST([json_extract(obj, '$.tags')] AS JSON[]) END) AS u(value))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[id:Int, tag:String] rows=3
-    - (1, 'x')
-    - (1, 'y')
-    - (2, 'z')
-- DuckDB: cols=[id:Int, tag:String] rows=3
-    - (2, '"z"')
-    - (1, '"y"')
-    - (1, '"x"')
-
 ### `agent-dynamic-json-0010` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String], TYPE_MISMATCH[m1:Dynamic|String], TYPE_MISMATCH[bval:Dynamic|String]  
@@ -2269,7 +1627,7 @@ SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(obj, '$.id') AS DOUBLE), TR
   "a",
   "b",
   "c"
-], null) duck=('{"a":1,"b":2}', '{"a":1,"b":{"nested":true},"c":3}', ["a","b","c"], 'true')
+], null) duck=('{"a":1,"b":2}', '{"c":3,"a":1,"b":2}', ["c","a","b"], null)
 
 **KQL**
 ```kql
@@ -2277,7 +1635,7 @@ print d = dynamic({"a":1,"b":2}) | extend m1 = bag_merge(d, dynamic({"b":{"neste
 ```
 **Generated SQL**
 ```sql
-SELECT *, JSON_KEYS(CAST(m1 AS JSON)) AS bk, json_extract(m1, '$.b.nested') AS bval FROM (SELECT *, JSON_MERGE_PATCH(d, '{"b":{"nested":true},"c":3}'::JSON) AS m1 FROM (SELECT '{"a":1,"b":2}'::JSON AS d))
+SELECT *, JSON_KEYS(CAST(m1 AS JSON)) AS bk, json_extract(m1, '$.b.nested') AS bval FROM (SELECT *, JSON_MERGE_PATCH(COALESCE('{"b":{"nested":true},"c":3}'::JSON, '{}'::JSON), COALESCE(CAST(d AS JSON), '{}'::JSON)) AS m1 FROM (SELECT '{"a":1,"b":2}'::JSON AS d))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -2295,91 +1653,7 @@ SELECT *, JSON_KEYS(CAST(m1 AS JSON)) AS bk, json_extract(m1, '$.b.nested') AS b
   "c"
 ], null)
 - DuckDB: cols=[d:String, m1:String, bk:Unknown, bval:String] rows=1
-    - ('{"a":1,"b":2}', '{"a":1,"b":{"nested":true},"c":3}', ["a","b","c"], 'true')
-
-### `agent-dynamic-json-0012` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('a', 2) duck=('"b"', 3)
-
-**KQL**
-```kql
-print d = dynamic([{"name":"a","sub":[1,2]},{"name":"b","sub":[3,4,5]}]) | mv-apply x = d on (extend sl = array_length(x.sub)) | project nm = tostring(x.name), sl
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(json_extract(x, '$.name') AS TEXT) AS nm, sl FROM (SELECT t.*, _sub.* FROM (SELECT '[{"name":"a","sub":[1,2]},{"name":"b","sub":[3,4,5]}]'::JSON AS d) AS t CROSS JOIN UNNEST(CASE WHEN t.d IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(t.d) = 'ARRAY' THEN CAST(t.d AS JSON[]) WHEN json_type(t.d) = 'OBJECT' THEN list_transform(json_keys(t.d), lambda k: json_object(k, json_extract(t.d, '$."' || k || '"'))) ELSE CAST([t.d] AS JSON[]) END) AS u(value), LATERAL (SELECT *, LEN(json_extract(json_extract(x, '$.sub'), '$[*]')) AS sl FROM (SELECT u.value AS x)) AS _sub)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[nm:String, sl:Int] rows=2
-    - ('a', 2)
-    - ('b', 3)
-- DuckDB: cols=[nm:String, sl:Int] rows=2
-    - ('"b"', 3)
-    - ('"a"', 2)
-
-### `agent-dynamic-json-0014` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=([
-  1,
-  2,
-  3,
-  4,
-  5,
-  6
-], [
-  3,
-  4,
-  5
-], [
-  4,
-  5,
-  6
-], [
-  1,
-  2,
-  3,
-  4,
-  5,
-  6
-]) duck=([1,2,3,4,5,6], [3,4,5,6], [], [1,2,3,4,5,6])
-
-**KQL**
-```kql
-print d = dynamic([1,2,3,4,5,6]) | extend slmid = array_slice(d, 2, -2), slneg = array_slice(d, -3, -1), slbig = array_slice(d, 0, 100)
-```
-**Generated SQL**
-```sql
-SELECT *, LIST_SLICE(d, 2 + 1, (-2) + 1) AS slmid, LIST_SLICE(d, (-3) + 1, (-1) + 1) AS slneg, LIST_SLICE(d, 0 + 1, 100 + 1) AS slbig FROM (SELECT LIST_VALUE(1, 2, 3, 4, 5, 6) AS d)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[d:Dynamic, slmid:Dynamic, slneg:Dynamic, slbig:Dynamic] rows=1
-    - ([
-  1,
-  2,
-  3,
-  4,
-  5,
-  6
-], [
-  3,
-  4,
-  5
-], [
-  4,
-  5,
-  6
-], [
-  1,
-  2,
-  3,
-  4,
-  5,
-  6
-])
-- DuckDB: cols=[d:Unknown, slmid:Unknown, slneg:Unknown, slbig:Unknown] rows=1
-    - ([1,2,3,4,5,6], [3,4,5,6], [], [1,2,3,4,5,6])
+    - ('{"a":1,"b":2}', '{"c":3,"a":1,"b":2}', ["c","a","b"], null)
 
 ### `agent-dynamic-json-0021` — MismatchRows (high)
 
@@ -2434,34 +1708,6 @@ SELECT * EXCLUDE (d), d->>'$.a' AS a, d->>'$.b' AS b, d->>'$.c' AS c, d->>'$.d' 
 ])
 - DuckDB: cols=[a:String, b:String, c:String, d:String, e:String] rows=1
     - ('1', 'two', '[3]', '{"e":4}', null)
-
-### `agent-dynamic-json-0027` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String]  
-*Detail:* row count: kusto=1 duck=2
-
-**KQL**
-```kql
-print d = dynamic([{"x":1},{"x":2}]) | extend cnt = array_length(d) | mv-apply e = d on (summarize mx = max(toint(e.x)))
-```
-**Generated SQL**
-```sql
-SELECT t.*, _sub.* FROM (SELECT *, LEN(d) AS cnt FROM (SELECT '[{"x":1},{"x":2}]'::JSON AS d)) AS t CROSS JOIN UNNEST(CASE WHEN t.d IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(t.d) = 'ARRAY' THEN CAST(t.d AS JSON[]) WHEN json_type(t.d) = 'OBJECT' THEN list_transform(json_keys(t.d), lambda k: json_object(k, json_extract(t.d, '$."' || k || '"'))) ELSE CAST([t.d] AS JSON[]) END) AS u(value), LATERAL (SELECT MAX(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(e, '$.x') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(e, '$.x') AS BOOLEAN) AS DOUBLE))) AS INTEGER)) AS mx FROM (SELECT u.value AS e)) AS _sub
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[d:Dynamic, cnt:Int, mx:Int] rows=1
-    - ([
-  {
-    "x": 1
-  },
-  {
-    "x": 2
-  }
-], 2, 2)
-- DuckDB: cols=[d:String, cnt:Int, mx:Int] rows=2
-    - ('[{"x":1},{"x":2}]', 17, 2)
-    - ('[{"x":1},{"x":2}]', 17, 1)
 
 ### `agent-dynamic-json-0029` — MismatchRows (high)
 
@@ -2551,7 +1797,7 @@ print d = dynamic({"nums":[1,2,3,4,5]}) | extend evens = array_length(d.nums) | 
 ```
 **Generated SQL**
 ```sql
-SELECT COALESCE(LIST(n) FILTER (WHERE n IS NOT NULL), []) AS list_n FROM (SELECT * FROM (SELECT t.*, CAST(u.value AS BIGINT) AS n FROM (SELECT *, LEN(json_extract(json_extract(d, '$.nums'), '$[*]')) AS evens FROM (SELECT '{"nums":[1,2,3,4,5]}'::JSON AS d)) AS t CROSS JOIN UNNEST(CASE WHEN json_extract(d, '$.nums') IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(json_extract(d, '$.nums')) = 'ARRAY' THEN CAST(json_extract(d, '$.nums') AS JSON[]) WHEN json_type(json_extract(d, '$.nums')) = 'OBJECT' THEN list_transform(json_keys(json_extract(d, '$.nums')), lambda k: json_object(k, json_extract(json_extract(d, '$.nums'), '$."' || k || '"'))) ELSE CAST([json_extract(d, '$.nums')] AS JSON[]) END) AS u(value)) WHERE n % 2 = 0)
+SELECT COALESCE(LIST(n) FILTER (WHERE n IS NOT NULL), []) AS list_n FROM (SELECT * FROM (SELECT t.*, CAST(u.value AS BIGINT) AS n FROM (SELECT *, CASE WHEN json_type(json_extract(d, '$.nums')) = 'ARRAY' THEN LEN(json_extract(json_extract(d, '$.nums'), '$[*]')) ELSE NULL END AS evens FROM (SELECT '{"nums":[1,2,3,4,5]}'::JSON AS d)) AS t CROSS JOIN UNNEST(CASE WHEN json_extract(d, '$.nums') IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(json_extract(d, '$.nums')) = 'ARRAY' THEN CAST(json_extract(d, '$.nums') AS JSON[]) WHEN json_type(json_extract(d, '$.nums')) = 'OBJECT' THEN list_transform(json_keys(json_extract(d, '$.nums')), lambda k: json_object(k, json_extract(json_extract(d, '$.nums'), '$."' || k || '"'))) ELSE CAST([json_extract(d, '$.nums')] AS JSON[]) END) AS u(value)) WHERE (((n) % NULLIF(2, 0)) + ABS(2)) % NULLIF(2, 0) = 0)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -2592,27 +1838,6 @@ SELECT *, LEN(d) AS al, TRY_CAST(d[0 + 1] AS BOOLEAN) AS t0, TRY_CAST(d[3 + 1] A
 - DuckDB: cols=[d:Unknown, al:Int, t0:Bool, tn:Bool] rows=1
     - ('<unreadable:IndexOutOfRangeException>', 4, True, null)
 
-### `agent-dynamic-json-0001` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('x', 18, 5) duck=('"x"', 18, 5)
-
-**KQL**
-```kql
-print d = dynamic([{"g":"x","n":[1,2]},{"g":"y","n":[3]},{"g":"x","n":[4,5,6]}]) | mv-expand o = d | mv-expand n = o.n to typeof(long) | summarize total = sum(n), cnt = count() by grp = tostring(o.g) | sort by grp asc
-```
-**Generated SQL**
-```sql
-SELECT * FROM (SELECT TRY_CAST(json_extract(o, '$.g') AS TEXT) AS grp, COALESCE(SUM(n), 0) AS total, COUNT(*) AS cnt FROM (SELECT t.*, CAST(u.value AS BIGINT) AS n FROM (SELECT t.*, u.value AS o FROM (SELECT '[{"g":"x","n":[1,2]},{"g":"y","n":[3]},{"g":"x","n":[4,5,6]}]'::JSON AS d) AS t CROSS JOIN UNNEST(CASE WHEN t.d IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(t.d) = 'ARRAY' THEN CAST(t.d AS JSON[]) WHEN json_type(t.d) = 'OBJECT' THEN list_transform(json_keys(t.d), lambda k: json_object(k, json_extract(t.d, '$."' || k || '"'))) ELSE CAST([t.d] AS JSON[]) END) AS u(value)) AS t CROSS JOIN UNNEST(CASE WHEN json_extract(o, '$.n') IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(json_extract(o, '$.n')) = 'ARRAY' THEN CAST(json_extract(o, '$.n') AS JSON[]) WHEN json_type(json_extract(o, '$.n')) = 'OBJECT' THEN list_transform(json_keys(json_extract(o, '$.n')), lambda k: json_object(k, json_extract(json_extract(o, '$.n'), '$."' || k || '"'))) ELSE CAST([json_extract(o, '$.n')] AS JSON[]) END) AS u(value)) GROUP BY ALL) ORDER BY grp ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[grp:String, total:Int, cnt:Int] rows=2
-    - ('x', 18, 5)
-    - ('y', 3, 1)
-- DuckDB: cols=[grp:String, total:Int, cnt:Int] rows=2
-    - ('"x"', 18, 5)
-    - ('"y"', 3, 1)
-
 ### `agent-dynamic-json-0002` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=([
@@ -2627,7 +1852,7 @@ print d = dynamic({"a":1,"b":2,"c":3}) | extend ks = bag_keys(d) | mv-apply k = 
 ```
 **Generated SQL**
 ```sql
-SELECT COALESCE(LIST(pair) FILTER (WHERE pair IS NOT NULL), []) AS joined FROM (SELECT t.*, _sub.* FROM (SELECT *, JSON_KEYS(d) AS ks FROM (SELECT '{"a":1,"b":2,"c":3}'::JSON AS d)) AS t CROSS JOIN UNNEST(t.ks) AS u(value), LATERAL (SELECT *, CONCAT(TRY_CAST(k AS TEXT), '=', TRY_CAST(json_extract(d, '$.' || TRY_CAST(k AS TEXT)) AS TEXT)) AS pair FROM (SELECT u.value AS k)) AS _sub)
+SELECT COALESCE(LIST(pair) FILTER (WHERE pair IS NOT NULL), []) AS joined FROM (SELECT t.*, _sub.* FROM (SELECT *, JSON_KEYS(CAST(d AS JSON)) AS ks FROM (SELECT '{"a":1,"b":2,"c":3}'::JSON AS d)) AS t, LATERAL (SELECT *, CONCAT(COALESCE(TRY_CAST(k AS TEXT), ''), '=', COALESCE(json_extract_string(json_extract(d, '$.' || COALESCE(TRY_CAST(k AS TEXT), '')), '$'), '')) AS pair FROM (SELECT u.value AS k FROM UNNEST(t.ks) AS u(value))) AS _sub)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -2656,7 +1881,7 @@ print d = dynamic({"a":{"b":{"c":1}},"x":{"y":2}}) | extend paths = treepath(d) 
 ```
 **Generated SQL**
 ```sql
-SELECT COALESCE(LIST(p) FILTER (WHERE p IS NOT NULL), []) AS list_p FROM (SELECT t.*, CAST(u.value AS VARCHAR) AS p FROM (SELECT *, JSON_KEYS(d) AS paths FROM (SELECT '{"a":{"b":{"c":1}},"x":{"y":2}}'::JSON AS d)) AS t CROSS JOIN UNNEST(t.paths) AS u(value) ORDER BY p ASC NULLS FIRST)
+SELECT COALESCE(LIST(p) FILTER (WHERE p IS NOT NULL), []) AS list_p FROM (SELECT t.*, CAST(u.value AS VARCHAR) AS p FROM (SELECT *, JSON_KEYS(CAST(d AS JSON)) AS paths FROM (SELECT '{"a":{"b":{"c":1}},"x":{"y":2}}'::JSON AS d)) AS t CROSS JOIN UNNEST(t.paths) AS u(value) ORDER BY p ASC NULLS FIRST)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -2700,54 +1925,6 @@ SELECT * FROM (SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(o, '$.id') A
     - (1, ["\u0022b\u0022","\u0022a\u0022"])
     - (3, ["\u0022c\u0022"])
 
-### `agent-dynamic-json-0014` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[a0:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=('', 0, null, '') duck=('"vé"', 4, '1', '"3\t"')
-
-**KQL**
-```kql
-print s = '{"k":"vé","arr":[1,2,"3\t"]}' | extend d = parse_json(s) | project k = tostring(d.k), klen = strlen(tostring(d.k)), a0 = d.arr[0], a2 = tostring(d.arr[2])
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(json_extract(d, '$.k') AS TEXT) AS k, LENGTH(CAST(TRY_CAST(json_extract(d, '$.k') AS TEXT) AS VARCHAR)) AS klen, json_extract(json_extract(d, '$.arr'), '$[' || (0) || ']') AS a0, TRY_CAST(json_extract(json_extract(d, '$.arr'), '$[' || (2) || ']') AS TEXT) AS a2 FROM (SELECT *, TRY_CAST(s AS JSON) AS d FROM (SELECT '{"k":"vé","arr":[1,2,"3\t"]}' AS s))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:String, klen:Int, a0:Dynamic, a2:String] rows=1
-    - ('', 0, null, '')
-- DuckDB: cols=[k:String, klen:Int, a0:String, a2:String] rows=1
-    - ('"vé"', 4, '1', '"3\t"')
-
-### `agent-dynamic-json-0015` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[ma:Dynamic|String], TYPE_MISMATCH[mb:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=([
-  1,
-  2,
-  3
-], 9, 3) duck=('[4,5]', '9', 2)
-
-**KQL**
-```kql
-print d = dynamic({"a":[1,2,3]}) | extend m = bag_merge(d, dynamic({"a":[4,5],"b":9})) | project ma = m.a, mb = m.b, malen = array_length(m.a)
-```
-**Generated SQL**
-```sql
-SELECT json_extract(m, '$.a') AS ma, json_extract(m, '$.b') AS mb, LEN(json_extract(json_extract(m, '$.a'), '$[*]')) AS malen FROM (SELECT *, JSON_MERGE_PATCH(d, '{"a":[4,5],"b":9}'::JSON) AS m FROM (SELECT '{"a":[1,2,3]}'::JSON AS d))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ma:Dynamic, mb:Dynamic, malen:Int] rows=1
-    - ([
-  1,
-  2,
-  3
-], 9, 3)
-- DuckDB: cols=[ma:String, mb:String, malen:Int] rows=1
-    - ('[4,5]', '9', 2)
-
 ### `agent-dynamic-json-0016` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String]  
@@ -2771,7 +1948,7 @@ SELECT json_extract(m, '$.a') AS ma, json_extract(m, '$.b') AS mb, LEN(json_extr
   2,
   4,
   6
-], 21) duck=('[[1,2],[3,4],[5,6]]', ["4","6",null,null,null,null], 10)
+], 21) duck=('[[1,2],[3,4],[5,6]]', ["1","3","5","2","4","6"], 21)
 
 **KQL**
 ```kql
@@ -2779,7 +1956,7 @@ print d = dynamic([[1,2],[3,4],[5,6]]) | extend cols = array_concat(pack_array(d
 ```
 **Generated SQL**
 ```sql
-SELECT *, LIST_SUM(LIST_TRANSFORM(cols, x -> TRY_CAST(x AS DOUBLE))) AS colsum FROM (SELECT *, LIST_CONCAT(LIST_VALUE(d[0 + 1][0 + 1], d[1 + 1][0 + 1], d[2 + 1][0 + 1]), LIST_VALUE(d[0 + 1][1 + 1], d[1 + 1][1 + 1], d[2 + 1][1 + 1])) AS cols FROM (SELECT '[[1,2],[3,4],[5,6]]'::JSON AS d))
+SELECT *, LIST_SUM(LIST_TRANSFORM(cols, x -> TRY_CAST(x AS DOUBLE))) AS colsum FROM (SELECT *, LIST_CONCAT(LIST_VALUE(json_extract(json_extract(d, '$[' || (CASE WHEN (0) < 0 THEN '#' ELSE '' END) || (0) || ']'), '$[' || (CASE WHEN (0) < 0 THEN '#' ELSE '' END) || (0) || ']'), json_extract(json_extract(d, '$[' || (CASE WHEN (1) < 0 THEN '#' ELSE '' END) || (1) || ']'), '$[' || (CASE WHEN (0) < 0 THEN '#' ELSE '' END) || (0) || ']'), json_extract(json_extract(d, '$[' || (CASE WHEN (2) < 0 THEN '#' ELSE '' END) || (2) || ']'), '$[' || (CASE WHEN (0) < 0 THEN '#' ELSE '' END) || (0) || ']')), LIST_VALUE(json_extract(json_extract(d, '$[' || (CASE WHEN (0) < 0 THEN '#' ELSE '' END) || (0) || ']'), '$[' || (CASE WHEN (1) < 0 THEN '#' ELSE '' END) || (1) || ']'), json_extract(json_extract(d, '$[' || (CASE WHEN (1) < 0 THEN '#' ELSE '' END) || (1) || ']'), '$[' || (CASE WHEN (1) < 0 THEN '#' ELSE '' END) || (1) || ']'), json_extract(json_extract(d, '$[' || (CASE WHEN (2) < 0 THEN '#' ELSE '' END) || (2) || ']'), '$[' || (CASE WHEN (1) < 0 THEN '#' ELSE '' END) || (1) || ']'))) AS cols FROM (SELECT '[[1,2],[3,4],[5,6]]'::JSON AS d))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -2806,7 +1983,7 @@ SELECT *, LIST_SUM(LIST_TRANSFORM(cols, x -> TRY_CAST(x AS DOUBLE))) AS colsum F
   6
 ], 21)
 - DuckDB: cols=[d:String, cols:Unknown, colsum:Real] rows=1
-    - ('[[1,2],[3,4],[5,6]]', ["4","6",null,null,null,null], 10)
+    - ('[[1,2],[3,4],[5,6]]', ["1","3","5","2","4","6"], 21)
 
 ### `agent-dynamic-json-0020` — MismatchRows (high)
 
@@ -2846,7 +2023,7 @@ print s = '[]' | extend e = parse_json(s) | extend al = array_length(e), s2 = ar
 ```
 **Generated SQL**
 ```sql
-SELECT *, LEN(json_extract(CAST(e AS JSON), '$[*]')) AS al, LIST_SUM(LIST_TRANSFORM(json_extract(CAST(e AS JSON), '$[*]'), x -> TRY_CAST(x AS DOUBLE))) AS s2, TO_JSON(LIST_SORT(json_extract(CAST(e AS JSON), '$[*]'))) AS srt, JSON_KEYS(CAST(e AS JSON)) AS keys FROM (SELECT *, TRY_CAST(s AS JSON) AS e FROM (SELECT '[]' AS s))
+SELECT *, CASE WHEN json_type(CAST(e AS JSON)) = 'ARRAY' THEN LEN(json_extract(CAST(e AS JSON), '$[*]')) ELSE NULL END AS al, LIST_SUM(LIST_TRANSFORM(json_extract(CAST(e AS JSON), '$[*]'), x -> TRY_CAST(x AS DOUBLE))) AS s2, TO_JSON(LIST_SORT(json_extract(CAST(e AS JSON), '$[*]'))) AS srt, JSON_KEYS(CAST(e AS JSON)) AS keys FROM (SELECT *, TRY_CAST(s AS JSON) AS e FROM (SELECT '[]' AS s))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -2854,84 +2031,6 @@ SELECT *, LEN(json_extract(CAST(e AS JSON), '$[*]')) AS al, LIST_SUM(LIST_TRANSF
     - ('[]', [], 0, null, [], null)
 - DuckDB: cols=[s:String, e:String, al:Int, s2:Real, srt:String, keys:Unknown] rows=1
     - ('[]', '[]', 0, null, '[]', [])
-
-### `agent-dynamic-json-0028` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[total:Int|Real]  
-*Detail:* first differing row[0]: kusto=(7, [
-  "a",
-  "c"
-]) duck=(7, ["\u0022a\u0022","\u0022c\u0022"])
-
-**KQL**
-```kql
-print d = dynamic({"items":[{"name":"a","qty":2},{"name":"b","qty":0},{"name":"c","qty":5}]}) | mv-expand it = d.items | where toint(it.qty) > 0 | summarize total = sum(toint(it.qty)), names = make_set(tostring(it.name))
-```
-**Generated SQL**
-```sql
-SELECT COALESCE(SUM(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(it, '$.qty') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS DOUBLE)), 0) AS total, COALESCE(LIST(DISTINCT TRY_CAST(json_extract(it, '$.name') AS TEXT)) FILTER (WHERE TRY_CAST(json_extract(it, '$.name') AS TEXT) IS NOT NULL), []) AS names FROM (SELECT * FROM (SELECT t.*, u.value AS it FROM (SELECT '{"items":[{"name":"a","qty":2},{"name":"b","qty":0},{"name":"c","qty":5}]}'::JSON AS d) AS t CROSS JOIN UNNEST(CASE WHEN json_extract(d, '$.items') IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(json_extract(d, '$.items')) = 'ARRAY' THEN CAST(json_extract(d, '$.items') AS JSON[]) WHEN json_type(json_extract(d, '$.items')) = 'OBJECT' THEN list_transform(json_keys(json_extract(d, '$.items')), lambda k: json_object(k, json_extract(json_extract(d, '$.items'), '$."' || k || '"'))) ELSE CAST([json_extract(d, '$.items')] AS JSON[]) END) AS u(value)) WHERE TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(it, '$.qty') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(it, '$.qty') AS BOOLEAN) AS DOUBLE))) AS INTEGER) > 0)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[total:Int, names:Dynamic] rows=1
-    - (7, [
-  "a",
-  "c"
-])
-- DuckDB: cols=[total:Real, names:Unknown] rows=1
-    - (7, ["\u0022a\u0022","\u0022c\u0022"])
-
-### `agent-dynamic-json-0031` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=([
-  "a",
-  "b",
-  "c",
-  "d"
-], 2, 4) duck=(["a","b","c"], 3, 4)
-
-**KQL**
-```kql
-print d = dynamic({"a":1,"b":2}), e = dynamic({"b":3,"c":4}), f = dynamic({"c":5,"d":6}) | extend m = bag_merge(d, e, f) | extend ks = array_sort_asc(bag_keys(m)) | project ks, mb = toint(m.b), mc = toint(m.c)
-```
-**Generated SQL**
-```sql
-SELECT ks, TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(m, '$.b') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(m, '$.b') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS mb, TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(m, '$.c') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(m, '$.c') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS mc FROM (SELECT *, LIST_SORT(JSON_KEYS(CAST(m AS JSON))) AS ks FROM (SELECT *, JSON_MERGE_PATCH(d, e) AS m FROM (SELECT '{"a":1,"b":2}'::JSON AS d, '{"b":3,"c":4}'::JSON AS e, '{"c":5,"d":6}'::JSON AS f)))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ks:Dynamic, mb:Int, mc:Int] rows=1
-    - ([
-  "a",
-  "b",
-  "c",
-  "d"
-], 2, 4)
-- DuckDB: cols=[ks:Unknown, mb:Int, mc:Int] rows=1
-    - (["a","b","c"], 3, 4)
-
-### `agent-dynamic-json-0033` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(50, [
-  50
-]) duck=(50, [{"IsPowerOfTwo":false,"IsZero":false,"IsOne":false,"IsEven":true,"Sign":1}])
-
-**KQL**
-```kql
-print d = dynamic([10,20,30,40]) | extend mid = array_slice(d, 1, 2) | mv-expand m = mid to typeof(long) | summarize ms = sum(m) | extend back = pack_array(ms)
-```
-**Generated SQL**
-```sql
-SELECT *, LIST_VALUE(ms) AS back FROM (SELECT COALESCE(SUM(m), 0) AS ms FROM (SELECT t.*, CAST(u.value AS BIGINT) AS m FROM (SELECT *, LIST_SLICE(d, 1 + 1, 2 + 1) AS mid FROM (SELECT LIST_VALUE(10, 20, 30, 40) AS d)) AS t CROSS JOIN UNNEST(t.mid) AS u(value)))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ms:Int, back:Dynamic] rows=1
-    - (50, [
-  50
-])
-- DuckDB: cols=[ms:Int, back:Unknown] rows=1
-    - (50, [{"IsPowerOfTwo":false,"IsZero":false,"IsOne":false,"IsEven":true,"Sign":1}])
 
 ### `agent-dynamic-json-0034` — MismatchRows (high)
 
@@ -2944,7 +2043,7 @@ print s = '{"a":null,"b":[null,1,null],"c":{"d":null}}' | extend d = parse_json(
 ```
 **Generated SQL**
 ```sql
-SELECT (json_extract(d, '$.a') IS NULL) AS an, (json_extract(json_extract(d, '$.b'), '$[' || (0) || ']') IS NULL) AS b0, json_extract(json_extract(d, '$.b'), '$[' || (1) || ']') AS b1, (json_extract(d, '$.c.d') IS NULL) AS cd, LEN(json_extract(json_extract(d, '$.b'), '$[*]')) AS blen FROM (SELECT *, TRY_CAST(s AS JSON) AS d FROM (SELECT '{"a":null,"b":[null,1,null],"c":{"d":null}}' AS s))
+SELECT (json_extract(d, '$.a') IS NULL) AS an, (json_extract(json_extract(d, '$.b'), '$[' || (CASE WHEN (0) < 0 THEN '#' ELSE '' END) || (0) || ']') IS NULL) AS b0, json_extract(json_extract(d, '$.b'), '$[' || (CASE WHEN (1) < 0 THEN '#' ELSE '' END) || (1) || ']') AS b1, (json_extract(d, '$.c.d') IS NULL) AS cd, CASE WHEN json_type(json_extract(d, '$.b')) = 'ARRAY' THEN LEN(json_extract(json_extract(d, '$.b'), '$[*]')) ELSE NULL END AS blen FROM (SELECT *, TRY_CAST(s AS JSON) AS d FROM (SELECT '{"a":null,"b":[null,1,null],"c":{"d":null}}' AS s))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -2952,50 +2051,6 @@ SELECT (json_extract(d, '$.a') IS NULL) AS an, (json_extract(json_extract(d, '$.
     - (True, True, 1, True, 3)
 - DuckDB: cols=[an:Bool, b0:Bool, b1:String, cd:Bool, blen:Int] rows=1
     - (False, False, '1', False, 3)
-
-### `agent-dynamic-json-0035` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('x', 3) duck=('"x"', 3)
-
-**KQL**
-```kql
-print d = dynamic({"groups":[{"g":"x","items":[1,2]},{"g":"y","items":[3,4,5]}]}) | mv-apply grp = d.groups on (extend gs = array_sum(grp.items), gn = tostring(grp.g)) | project gn, gs | sort by gn asc
-```
-**Generated SQL**
-```sql
-SELECT gn, gs FROM (SELECT t.*, _sub.* FROM (SELECT '{"groups":[{"g":"x","items":[1,2]},{"g":"y","items":[3,4,5]}]}'::JSON AS d) AS t CROSS JOIN UNNEST(CASE WHEN json_extract(d, '$.groups') IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(json_extract(d, '$.groups')) = 'ARRAY' THEN CAST(json_extract(d, '$.groups') AS JSON[]) WHEN json_type(json_extract(d, '$.groups')) = 'OBJECT' THEN list_transform(json_keys(json_extract(d, '$.groups')), lambda k: json_object(k, json_extract(json_extract(d, '$.groups'), '$."' || k || '"'))) ELSE CAST([json_extract(d, '$.groups')] AS JSON[]) END) AS u(value), LATERAL (SELECT *, LIST_SUM(LIST_TRANSFORM(json_extract(json_extract(grp, '$.items'), '$[*]'), x -> TRY_CAST(x AS DOUBLE))) AS gs, TRY_CAST(json_extract(grp, '$.g') AS TEXT) AS gn FROM (SELECT u.value AS grp)) AS _sub) ORDER BY gn ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[gn:String, gs:Real] rows=2
-    - ('x', 3)
-    - ('y', 12)
-- DuckDB: cols=[gn:String, gs:Real] rows=2
-    - ('"x"', 3)
-    - ('"y"', 12)
-
-### `agent-dynamic-json-0039` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[evensum:Int|Real]  
-*Detail:* row count: kusto=1 duck=4
-
-**KQL**
-```kql
-print d = dynamic([{"v":1},{"v":2},{"v":3},{"v":4}]) | mv-apply e = d on (where toint(e.v) % 2 == 0 | summarize evensum = sum(toint(e.v))) | project evensum
-```
-**Generated SQL**
-```sql
-SELECT evensum FROM (SELECT t.*, _sub.* FROM (SELECT '[{"v":1},{"v":2},{"v":3},{"v":4}]'::JSON AS d) AS t CROSS JOIN UNNEST(CASE WHEN t.d IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(t.d) = 'ARRAY' THEN CAST(t.d AS JSON[]) WHEN json_type(t.d) = 'OBJECT' THEN list_transform(json_keys(t.d), lambda k: json_object(k, json_extract(t.d, '$."' || k || '"'))) ELSE CAST([t.d] AS JSON[]) END) AS u(value), LATERAL (SELECT COALESCE(SUM(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(e, '$.v') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(e, '$.v') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS DOUBLE)), 0) AS evensum FROM (SELECT * FROM (SELECT u.value AS e) WHERE (((TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(e, '$.v') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(e, '$.v') AS BOOLEAN) AS DOUBLE))) AS INTEGER)) % NULLIF(2, 0)) + ABS(2)) % NULLIF(2, 0) = 0)) AS _sub)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[evensum:Int] rows=1
-    - (6)
-- DuckDB: cols=[evensum:Real] rows=4
-    - (4)
-    - (0)
-    - (2)
-    - (0)
 
 ### `agent-dynamic-json-0043` — MismatchRows (high)
 
@@ -3007,7 +2062,7 @@ SELECT evensum FROM (SELECT t.*, _sub.* FROM (SELECT '[{"v":1},{"v":2},{"v":3},{
   "a",
   "b",
   "c"
-]) duck=([3,2,1], ["\u0022c\u0022","\u0022b\u0022","\u0022a\u0022"])
+]) duck=([3,2,1], ["c","b","a"])
 
 **KQL**
 ```kql
@@ -3015,7 +2070,7 @@ print x = dynamic([[1,"a"],[2,"b"],[3,"c"]]) | mv-expand pair = x | project num 
 ```
 **Generated SQL**
 ```sql
-SELECT COALESCE(LIST(num) FILTER (WHERE num IS NOT NULL), []) AS list_num, COALESCE(LIST(letter) FILTER (WHERE letter IS NOT NULL), []) AS list_letter FROM (SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(pair, '$[' || (0) || ']') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(pair, '$[' || (0) || ']') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS num, TRY_CAST(json_extract(pair, '$[' || (1) || ']') AS TEXT) AS letter FROM (SELECT t.*, u.value AS pair FROM (SELECT '[[1,"a"],[2,"b"],[3,"c"]]'::JSON AS x) AS t CROSS JOIN UNNEST(CASE WHEN t.x IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(t.x) = 'ARRAY' THEN CAST(t.x AS JSON[]) WHEN json_type(t.x) = 'OBJECT' THEN list_transform(json_keys(t.x), lambda k: json_object(k, json_extract(t.x, '$."' || k || '"'))) ELSE CAST([t.x] AS JSON[]) END) AS u(value)))
+SELECT COALESCE(LIST(num) FILTER (WHERE num IS NOT NULL), []) AS list_num, COALESCE(LIST(letter) FILTER (WHERE letter IS NOT NULL), []) AS list_letter FROM (SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(json_extract(pair, '$[' || (CASE WHEN (0) < 0 THEN '#' ELSE '' END) || (0) || ']') AS DOUBLE), TRY_CAST(TRY_CAST(json_extract(pair, '$[' || (CASE WHEN (0) < 0 THEN '#' ELSE '' END) || (0) || ']') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS num, COALESCE(json_extract_string(json_extract(pair, '$[' || (CASE WHEN (1) < 0 THEN '#' ELSE '' END) || (1) || ']'), '$'), '') AS letter FROM (SELECT t.*, u.value AS pair FROM (SELECT '[[1,"a"],[2,"b"],[3,"c"]]'::JSON AS x) AS t CROSS JOIN UNNEST(CASE WHEN t.x IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(t.x) = 'ARRAY' THEN CAST(t.x AS JSON[]) WHEN json_type(t.x) = 'OBJECT' THEN list_transform(json_keys(t.x), lambda k: json_object(k, json_extract(t.x, '$."' || k || '"'))) ELSE CAST([t.x] AS JSON[]) END) AS u(value)))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -3030,32 +2085,7 @@ SELECT COALESCE(LIST(num) FILTER (WHERE num IS NOT NULL), []) AS list_num, COALE
   "c"
 ])
 - DuckDB: cols=[list_num:Unknown, list_letter:Unknown] rows=1
-    - ([3,2,1], ["\u0022c\u0022","\u0022b\u0022","\u0022a\u0022"])
-
-### `t1-dynamic-json-0000` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(null) duck=(0)
-
-**KQL**
-```kql
-datatable(d:dynamic)[ dynamic({"a":1,"b":[1,2,3]}), dynamic([10,20,30]), dynamic({"nested":{"x":"y"}}), dynamic(null) ] | project v = array_length(d)
-```
-**Generated SQL**
-```sql
-SELECT LEN(json_extract(CAST(d AS JSON), '$[*]')) AS v FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('{"a":1,"b":[1,2,3]}'::JSON AS JSON)), (CAST(LIST_VALUE(10, 20, 30) AS JSON)), (CAST('{"nested":{"x":"y"}}'::JSON AS JSON)), (CAST(NULL AS JSON))) AS t(d))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[v:Int] rows=4
-    - (null)
-    - (3)
-    - (null)
-    - (null)
-- DuckDB: cols=[v:Int] rows=4
-    - (0)
-    - (3)
-    - (0)
-    - (null)
+    - ([3,2,1], ["c","b","a"])
 
 ### `t1-dynamic-json-0005` — MismatchRows (high)
 
@@ -3117,33 +2147,7 @@ SELECT JSON_KEYS(CAST(d AS JSON)) AS v FROM (SELECT CAST(d AS JSON) AS d FROM (V
     - (["nested"])
     - (null)
 
-## Family: joins-lookup-union (5)
-
-### `agent-joins-lookup-union-0032` — MismatchRows (high)
-
-*Sub-verdicts:* NAME_MISMATCH, TYPE_MISMATCH[src:String|Int], TYPE_MISMATCH[x:Int|String]  
-*Detail:* first differing row[0]: kusto=('union_arg0', 1, 'a') duck=(1, 'a', 'union_arg0')
-
-**KQL**
-```kql
-let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, y:string)[ 3,"c", 4,"d" ]; union withsource=src A, B | order by x asc
-```
-**Generated SQL**
-```sql
-WITH A AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), 'a'), (CAST(2 AS BIGINT), 'b')) AS t(x, y)), B AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(3 AS BIGINT), 'c'), (CAST(4 AS BIGINT), 'd')) AS t(x, y)) (SELECT *, 'union_arg0' AS src FROM (SELECT * FROM A)) UNION ALL BY NAME (SELECT *, 'union_arg1' AS src FROM (SELECT * FROM B)) ORDER BY x ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[src:String, x:Int, y:String] rows=4
-    - ('union_arg0', 1, 'a')
-    - ('union_arg0', 2, 'b')
-    - ('union_arg1', 3, 'c')
-    - ('union_arg1', 4, 'd')
-- DuckDB: cols=[x:Int, y:String, src:String] rows=4
-    - (1, 'a', 'union_arg0')
-    - (2, 'b', 'union_arg0')
-    - (3, 'c', 'union_arg1')
-    - (4, 'd', 'union_arg1')
+## Family: joins-lookup-union (2)
 
 ### `agent-joins-lookup-union-0033` — MismatchRows (high)
 
@@ -3167,30 +2171,6 @@ WITH A AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), 'a')) AS t
     - (1, 'a', '', null)
     - (null, '', 'q', 9)
 
-### `agent-joins-lookup-union-0017` — MismatchRows (high)
-
-*Sub-verdicts:* NAME_MISMATCH, TYPE_MISMATCH[tbl:String|Int], TYPE_MISMATCH[x:Int|String]  
-*Detail:* first differing row[0]: kusto=('union_arg0', 1, 'a', 1, 'a') duck=(1, 'a', 'union_arg0', 1, 'a')
-
-**KQL**
-```kql
-let A = datatable(x:long, y:string)[ 1,"a", 2,"b" ]; let B = datatable(x:long, y:string)[ 2,"c", 3,"d" ]; union withsource=tbl A, B | join kind=inner (A | project x, ay=y) on x | order by x asc, y asc
-```
-**Generated SQL**
-```sql
-WITH A AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), 'a'), (CAST(2 AS BIGINT), 'b')) AS t(x, y)), B AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(2 AS BIGINT), 'c'), (CAST(3 AS BIGINT), 'd')) AS t(x, y)) SELECT L.*, R.* RENAME (x AS x1) FROM ((SELECT *, 'union_arg0' AS tbl FROM (SELECT * FROM A)) UNION ALL BY NAME (SELECT *, 'union_arg1' AS tbl FROM (SELECT * FROM B))) AS L INNER JOIN (SELECT x, y AS ay FROM A) AS R ON L.x IS NOT DISTINCT FROM R.x ORDER BY x ASC NULLS FIRST, y ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[tbl:String, x:Int, y:String, x1:Int, ay:String] rows=3
-    - ('union_arg0', 1, 'a', 1, 'a')
-    - ('union_arg0', 2, 'b', 2, 'b')
-    - ('union_arg1', 2, 'c', 2, 'b')
-- DuckDB: cols=[x:Int, y:String, tbl:String, x1:Int, ay:String] rows=3
-    - (1, 'a', 'union_arg0', 1, 'a')
-    - (2, 'b', 'union_arg0', 2, 'b')
-    - (2, 'c', 'union_arg1', 2, 'b')
-
 ### `agent-joins-lookup-union-0034` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=(1, 'a', '') duck=(1, 'a', null)
@@ -3212,55 +2192,7 @@ WITH L AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), 'a'), (CAS
     - (1, 'a', null)
     - (4, null, 'z')
 
-### `agent-joins-lookup-union-0041` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 200) duck=(1, 100)
-
-**KQL**
-```kql
-let L = datatable(k:long, lv:long)[ 1,10, 2,20, 3,30 ]; let R = datatable(k:long, rv:long)[ 1,100, 2,200 ]; L | join kind=leftouter (R | extend rv = rv * 2) on k | summarize sum(rv) by k | order by k asc
-```
-**Generated SQL**
-```sql
-WITH L AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(2 AS BIGINT), CAST(20 AS BIGINT)), (CAST(3 AS BIGINT), CAST(30 AS BIGINT))) AS t(k, lv)), R AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(100 AS BIGINT)), (CAST(2 AS BIGINT), CAST(200 AS BIGINT))) AS t(k, rv)) SELECT * FROM (SELECT k, COALESCE(SUM(rv), 0) AS sum_rv FROM (SELECT L.*, R.k AS k1, R.rv FROM L AS L LEFT OUTER JOIN (SELECT *, rv * 2 AS rv FROM R) AS R ON L.k IS NOT DISTINCT FROM R.k) GROUP BY ALL) ORDER BY k ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, sum_rv:Int] rows=3
-    - (1, 200)
-    - (2, 400)
-    - (3, 0)
-- DuckDB: cols=[k:Int, sum_rv:Int] rows=3
-    - (1, 100)
-    - (2, 200)
-    - (3, 0)
-
-## Family: nested-pipelines-let-cte (20)
-
-### `agent-nested-pipelines-let-cte-0000` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 4, 10) duck=(1, 2, 10)
-
-**KQL**
-```kql
-let a = datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ]; let b = a | summarize count() by k; let c = b | extend count_ = count_ * 2; c | join kind=inner (a) on k | project k, count_, v | sort by k asc, v asc
-```
-**Generated SQL**
-```sql
-WITH a AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT))) AS t(k, v)), b AS NOT MATERIALIZED (SELECT k, COUNT(*) AS count_ FROM a GROUP BY ALL), c AS NOT MATERIALIZED (SELECT *, count_ * 2 AS count_ FROM b) SELECT k, count_, v FROM (SELECT L.*, R.k AS k1, R.v FROM c AS L INNER JOIN a AS R ON L.k IS NOT DISTINCT FROM R.k) ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, count_:Int, v:Int] rows=4
-    - (1, 4, 10)
-    - (1, 4, 20)
-    - (2, 4, 30)
-    - (2, 4, 30)
-- DuckDB: cols=[k:Int, count_:Int, v:Int] rows=4
-    - (1, 2, 10)
-    - (1, 2, 20)
-    - (2, 2, 30)
-    - (2, 2, 30)
+## Family: nested-pipelines-let-cte (13)
 
 ### `agent-nested-pipelines-let-cte-0004` — MismatchRows (high)
 
@@ -3280,26 +2212,6 @@ SELECT x, y, z FROM (SELECT *, x + y AS z FROM (SELECT *, y * 10 AS x FROM (SELE
     - (20, 2, 22)
 - DuckDB: cols=[x:Int, y:Int, z:Int] rows=1
     - (1, 2, 3)
-
-### `agent-nested-pipelines-let-cte-0017` — MismatchRows (high)
-
-*Detail:* row count: kusto=0 duck=3
-
-**KQL**
-```kql
-let p = datatable(k:long)[ 1, 2, 3 ]; let q = p | extend k = k + 10; let s = q | extend k = k * 2; s | join kind=inner (p) on $left.k == $right.k | project k, k1
-```
-**Generated SQL**
-```sql
-WITH p AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(3 AS BIGINT))) AS t(k)), q AS NOT MATERIALIZED (SELECT *, k + 10 AS k FROM p), s AS NOT MATERIALIZED (SELECT *, k * 2 AS k FROM q) SELECT k, k1 FROM (SELECT L.*, R.k AS k1 FROM s AS L INNER JOIN p AS R ON L.k IS NOT DISTINCT FROM R.k)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, k1:Int] rows=0
-- DuckDB: cols=[k:Int, k1:Int] rows=3
-    - (1, 1)
-    - (2, 2)
-    - (3, 3)
 
 ### `agent-nested-pipelines-let-cte-0018` — MismatchColumns (high)
 
@@ -3336,7 +2248,7 @@ print a = 1, b = 2 | extend c = pack("x", a, "y", b) | mv-expand kind=array c | 
 ```
 **Generated SQL**
 ```sql
-SELECT c FROM (SELECT t.* EXCLUDE (c), u.value AS c FROM (SELECT *, json_object('x', a, 'y', b) AS c FROM (SELECT 1 AS a, 2 AS b)) AS t CROSS JOIN UNNEST(CASE WHEN t.c IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(t.c) = 'ARRAY' THEN CAST(t.c AS JSON[]) WHEN json_type(t.c) = 'OBJECT' THEN list_transform(json_keys(t.c), lambda k: json_object(k, json_extract(t.c, '$."' || k || '"'))) ELSE CAST([t.c] AS JSON[]) END) AS u(value)) ORDER BY TRY_CAST(c AS TEXT) ASC NULLS FIRST
+SELECT c FROM (SELECT t.* EXCLUDE (c), u.value AS c FROM (SELECT *, json_object('x', a, 'y', b) AS c FROM (SELECT 1 AS a, 2 AS b)) AS t CROSS JOIN UNNEST(CASE WHEN t.c IS NULL THEN CAST([NULL] AS JSON[]) WHEN json_type(t.c) = 'ARRAY' THEN CAST(t.c AS JSON[]) WHEN json_type(t.c) = 'OBJECT' THEN list_transform(json_keys(t.c), lambda k: json_object(k, json_extract(t.c, '$."' || k || '"'))) ELSE CAST([t.c] AS JSON[]) END) AS u(value)) ORDER BY COALESCE(json_extract_string(c, '$'), '') ASC NULLS FIRST
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -3377,29 +2289,6 @@ WITH x AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(5 AS BIGINT)), (CAST(10 
     - (10, 33.333333333333336)
     - (15, 50)
 
-### `agent-nested-pipelines-let-cte-0028` — MismatchRows (high)
-
-*Detail:* row count: kusto=2 duck=4
-
-**KQL**
-```kql
-let s = datatable(g:string, v:long)[ "a",1, "a",2, "b",3, "b",4 ]; s | summarize total = sum(v), lst = make_list(v) by g | mv-apply x = lst to typeof(long) on (summarize mx = max(x)) | project g, total, mx | sort by g asc
-```
-**Generated SQL**
-```sql
-WITH s AS NOT MATERIALIZED (SELECT * FROM (VALUES ('a', CAST(1 AS BIGINT)), ('a', CAST(2 AS BIGINT)), ('b', CAST(3 AS BIGINT)), ('b', CAST(4 AS BIGINT))) AS t(g, v)) SELECT g, total, mx FROM (SELECT t.*, _sub.* FROM (SELECT g, COALESCE(SUM(v), 0) AS total, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS lst FROM s GROUP BY ALL) AS t CROSS JOIN UNNEST(t.lst) AS u(value), LATERAL (SELECT MAX(x) AS mx FROM (SELECT u.value AS x)) AS _sub) ORDER BY g ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, total:Int, mx:Int] rows=2
-    - ('a', 3, 2)
-    - ('b', 7, 4)
-- DuckDB: cols=[g:String, total:Int, mx:Int] rows=4
-    - ('a', 3, 2)
-    - ('a', 3, 1)
-    - ('b', 7, 4)
-    - ('b', 7, 3)
-
 ### `agent-nested-pipelines-let-cte-0029` — MismatchRows (high)
 
 *Detail:* row count: kusto=2 duck=1
@@ -3420,27 +2309,6 @@ SELECT * FROM (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (C
 - DuckDB: cols=[k:Int, v:Int] rows=1
     - (2, 30)
 
-### `agent-nested-pipelines-let-cte-0002` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 30, 31, 2, 2, 2) duck=(1, 30, 30, 2, 2, 2)
-
-**KQL**
-```kql
-let m = materialize(datatable(k:long, v:long)[ 1,10, 1,20, 2,30 ] | summarize s = sum(v), c = count() by k); m | join kind=inner (m | extend s = s + 1) on k | join kind=leftouter (m | project k, c) on k | project k, s, s1, c, c1, c2 | sort by k asc
-```
-**Generated SQL**
-```sql
-WITH m AS MATERIALIZED (SELECT k, COALESCE(SUM(v), 0) AS s, COUNT(*) AS c FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT))) AS t(k, v) GROUP BY ALL) SELECT k, s, s1, c, c1, c2 FROM (SELECT L.*, R.k AS k2, R.c AS c2 FROM (SELECT L.*, R.k AS k1, R.s AS s1, R.c AS c1 FROM m AS L INNER JOIN (SELECT *, s + 1 AS s FROM m) AS R ON L.k IS NOT DISTINCT FROM R.k) AS L LEFT OUTER JOIN (SELECT k, c FROM m) AS R ON L.k IS NOT DISTINCT FROM R.k) ORDER BY k ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, s:Int, s1:Int, c:Int, c1:Int, c2:Int] rows=2
-    - (1, 30, 31, 2, 2, 2)
-    - (2, 30, 31, 1, 1, 1)
-- DuckDB: cols=[k:Int, s:Int, s1:Int, c:Int, c1:Int, c2:Int] rows=2
-    - (1, 30, 30, 2, 2, 2)
-    - (2, 30, 30, 1, 1, 1)
-
 ### `agent-nested-pipelines-let-cte-0003` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=(16, 4) duck=(4, 4)
@@ -3460,31 +2328,6 @@ SELECT x, y FROM (SELECT *, y * x AS x FROM (SELECT *, x AS y FROM (SELECT * EXC
 - DuckDB: cols=[x:Int, y:Int] rows=1
     - (4, 4)
 
-### `agent-nested-pipelines-let-cte-0011` — MismatchRows (high)
-
-*Detail:* first differing row[3]: kusto=(99, null, 126) duck=(99, null, 60)
-
-**KQL**
-```kql
-let g = datatable(k:long, v:long)[ 1,10, 2,20, 3,30 ]; let h = g | extend v = v + 1; let i2 = h | extend v = v * 2; let j = i2 | summarize sum(v); g | union (j | extend k = 99) | sort by k asc
-```
-**Generated SQL**
-```sql
-WITH g AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(2 AS BIGINT), CAST(20 AS BIGINT)), (CAST(3 AS BIGINT), CAST(30 AS BIGINT))) AS t(k, v)), h AS NOT MATERIALIZED (SELECT *, v + 1 AS v FROM g), i2 AS NOT MATERIALIZED (SELECT *, v * 2 AS v FROM h), j AS NOT MATERIALIZED (SELECT COALESCE(SUM(v), 0) AS sum_v FROM i2) (SELECT * FROM g) UNION ALL BY NAME (SELECT *, 99 AS k FROM j) ORDER BY k ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, v:Int, sum_v:Int] rows=4
-    - (1, 10, null)
-    - (2, 20, null)
-    - (3, 30, null)
-    - (99, null, 126)
-- DuckDB: cols=[k:Int, v:Int, sum_v:Int] rows=4
-    - (1, 10, null)
-    - (2, 20, null)
-    - (3, 30, null)
-    - (99, null, 60)
-
 ### `agent-nested-pipelines-let-cte-0012` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[Column2:Dynamic|String]  
@@ -3496,7 +2339,7 @@ datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", "
 ```
 **Generated SQL**
 ```sql
-SELECT tag, Column1, Column2 FROM (SELECT t.* EXCLUDE (Column2), u.value AS Column2 FROM (SELECT tag, COUNT(*) AS Column1, COALESCE(LIST(s) FILTER (WHERE s IS NOT NULL), []) AS Column2 FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), ('O''Brien', 'x')) AS t(s, tag) GROUP BY ALL) AS t CROSS JOIN UNNEST(t.Column2) AS u(value)) ORDER BY tag ASC NULLS FIRST, TRY_CAST(Column2 AS TEXT) ASC NULLS FIRST
+SELECT tag, Column1, Column2 FROM (SELECT t.* EXCLUDE (Column2), u.value AS Column2 FROM (SELECT tag, COUNT(*) AS Column1, COALESCE(LIST(s) FILTER (WHERE s IS NOT NULL), []) AS Column2 FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), ('O''Brien', 'x')) AS t(s, tag) GROUP BY ALL) AS t CROSS JOIN UNNEST(t.Column2) AS u(value)) ORDER BY tag ASC NULLS FIRST, COALESCE(TRY_CAST(Column2 AS TEXT), '') ASC NULLS FIRST
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -3561,29 +2404,6 @@ SELECT *, 'p' AS tag FROM (SELECT COALESCE(SUM(i), 0) AS s FROM (SELECT *, (((i)
 - DuckDB: cols=[s:Int, tag:String] rows=1
     - (21, 'p')
 
-### `agent-nested-pipelines-let-cte-0015` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 10, 11) duck=(1, 5, 10)
-
-**KQL**
-```kql
-let l1 = datatable(k:long, v:long)[ 1,5, 2,10, 3,15 ]; let l2 = l1 | extend w = v * 2; let l3 = l2 | extend v = w; let l4 = l3 | extend w = v + 1; l4 | project k, v, w | sort by k asc
-```
-**Generated SQL**
-```sql
-WITH l1 AS NOT MATERIALIZED (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(5 AS BIGINT)), (CAST(2 AS BIGINT), CAST(10 AS BIGINT)), (CAST(3 AS BIGINT), CAST(15 AS BIGINT))) AS t(k, v)), l2 AS NOT MATERIALIZED (SELECT *, v * 2 AS w FROM l1), l3 AS NOT MATERIALIZED (SELECT *, w AS v FROM l2), l4 AS NOT MATERIALIZED (SELECT *, v + 1 AS w FROM l3) SELECT k, v, w FROM l4 ORDER BY k ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, v:Int, w:Int] rows=3
-    - (1, 10, 11)
-    - (2, 20, 21)
-    - (3, 30, 31)
-- DuckDB: cols=[k:Int, v:Int, w:Int] rows=3
-    - (1, 5, 10)
-    - (2, 10, 20)
-    - (3, 15, 30)
-
 ### `agent-nested-pipelines-let-cte-0021` — MismatchColumns (high)
 
 *Detail:* column count: kusto=3 duck=4 (kusto: [c, b, a]; duck: [c, b, a, b_1])
@@ -3607,52 +2427,28 @@ SELECT c, b, a, * EXCLUDE (c, b, a) FROM (SELECT *, a + c AS b FROM (SELECT a, b
     - (4, 5, 6, 10)
     - (7, 8, 9, 16)
 
-### `agent-nested-pipelines-let-cte-0024` — MismatchRows (high)
+### `agent-nested-pipelines-let-cte-0022` — MismatchRows (high)
 
-*Detail:* row count: kusto=2 duck=4
-
-**KQL**
-```kql
-let f = datatable(g:string, v:long)[ "a",1, "a",2, "b",3, "b",4 ]; f | summarize lst = make_list(v) by g | mv-apply x = lst to typeof(long) on (summarize sm = sum(x), mx = max(x)) | extend ratio = mx * 1.0 / sm | project g, sm, mx, ratio | sort by g asc
-```
-**Generated SQL**
-```sql
-WITH f AS NOT MATERIALIZED (SELECT * FROM (VALUES ('a', CAST(1 AS BIGINT)), ('a', CAST(2 AS BIGINT)), ('b', CAST(3 AS BIGINT)), ('b', CAST(4 AS BIGINT))) AS t(g, v)) SELECT g, sm, mx, ratio FROM (SELECT *, mx * 1.0 / sm AS ratio FROM (SELECT t.*, _sub.* FROM (SELECT g, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS lst FROM f GROUP BY ALL) AS t CROSS JOIN UNNEST(t.lst) AS u(value), LATERAL (SELECT COALESCE(SUM(x), 0) AS sm, MAX(x) AS mx FROM (SELECT u.value AS x)) AS _sub)) ORDER BY g ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, sm:Int, mx:Int, ratio:Real] rows=2
-    - ('a', 3, 2, 0.6666666666666666)
-    - ('b', 7, 4, 0.5714285714285714)
-- DuckDB: cols=[g:String, sm:Int, mx:Int, ratio:Real] rows=4
-    - ('a', 2, 2, 1)
-    - ('a', 1, 1, 1)
-    - ('b', 4, 4, 1)
-    - ('b', 3, 3, 1)
-
-### `agent-nested-pipelines-let-cte-0035` — MismatchRows (high)
-
-*Detail:* row count: kusto=2 duck=5
+*Detail:* first differing row[1]: kusto=(2, 'neg', 1, -5.5) duck=(2, 'zero', 1, 0)
 
 **KQL**
 ```kql
-let s = datatable(g:string, v:long)[ "a",1, "a",2, "a",3, "b",4, "b",5 ]; let agg = s | summarize lst = make_list(v), mn = min(v), mx = max(v) by g; let norm = agg | mv-apply x = lst to typeof(long) on (extend scaled = (x - mn) * 1.0 / (mx - mn) | summarize avgscaled = avg(scaled)); norm | project g, avgscaled | sort by g asc
+let nums = datatable(i:int, l:long, r:real)[ -5,-5,-5.5, 0,0,0.0, 3,2147483648,0.1, 7,100,3.25 ]; let s1 = nums | extend cat = case(i < 0, "neg", i == 0, "zero", "pos"); let s2 = s1 | summarize cnt = count(), avgr = avg(r) by cat; let s3 = s2 | sort by cnt desc; s3 | extend rn = row_number() | project rn, cat, cnt, avgr
 ```
 **Generated SQL**
 ```sql
-WITH s AS NOT MATERIALIZED (SELECT * FROM (VALUES ('a', CAST(1 AS BIGINT)), ('a', CAST(2 AS BIGINT)), ('a', CAST(3 AS BIGINT)), ('b', CAST(4 AS BIGINT)), ('b', CAST(5 AS BIGINT))) AS t(g, v)), agg AS NOT MATERIALIZED (SELECT g, COALESCE(LIST(v) FILTER (WHERE v IS NOT NULL), []) AS lst, MIN(v) AS mn, MAX(v) AS mx FROM s GROUP BY ALL), norm AS NOT MATERIALIZED (SELECT t.*, _sub.* FROM agg AS t CROSS JOIN UNNEST(t.lst) AS u(value), LATERAL (SELECT COALESCE(AVG(scaled), 'nan'::DOUBLE) AS avgscaled FROM (SELECT *, (x - mn) * 1.0 / (mx - mn) AS scaled FROM (SELECT u.value AS x))) AS _sub) SELECT g, avgscaled FROM norm ORDER BY g ASC NULLS FIRST
+WITH nums AS NOT MATERIALIZED (SELECT * FROM (VALUES (-5, CAST(-5 AS BIGINT), CAST(-5.5 AS DOUBLE)), (0, CAST(0 AS BIGINT), CAST(0.0 AS DOUBLE)), (3, CAST(2147483648 AS BIGINT), CAST(0.1 AS DOUBLE)), (7, CAST(100 AS BIGINT), CAST(3.25 AS DOUBLE))) AS t(i, l, r)), s1 AS NOT MATERIALIZED (SELECT *, CASE WHEN i < 0 THEN 'neg' WHEN i = 0 THEN 'zero' ELSE 'pos' END AS cat FROM nums), s2 AS NOT MATERIALIZED (SELECT cat, COUNT(*) AS cnt, COALESCE(AVG(r), 'nan'::DOUBLE) AS avgr FROM s1 GROUP BY ALL), s3 AS NOT MATERIALIZED (SELECT * FROM s2 ORDER BY cnt DESC NULLS LAST) SELECT rn, cat, cnt, avgr FROM (SELECT *, ROW_NUMBER() OVER () AS rn FROM s3)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
-- Kusto: cols=[g:String, avgscaled:Real] rows=2
-    - ('a', 0.5)
-    - ('b', 0.5)
-- DuckDB: cols=[g:String, avgscaled:Real] rows=5
-    - ('a', 1)
-    - ('a', 0.5)
-    - ('a', 0)
-    - ('b', 1)
-    - ('b', 0)
+- Kusto: cols=[rn:Int, cat:String, cnt:Int, avgr:Real] rows=3
+    - (1, 'pos', 2, 1.675)
+    - (2, 'neg', 1, -5.5)
+    - (3, 'zero', 1, 0)
+- DuckDB: cols=[rn:Int, cat:String, cnt:Int, avgr:Real] rows=3
+    - (1, 'pos', 2, 1.675)
+    - (2, 'zero', 1, 0)
+    - (3, 'neg', 1, -5.5)
 
 ### `agent-nested-pipelines-let-cte-0038` — MismatchRows (high)
 
@@ -3698,68 +2494,7 @@ SELECT label, s FROM (SELECT *, CONCAT('g_', g) AS label FROM (SELECT g, COALESC
     - ('g_b', 3)
     - ('g_a', 3)
 
-## Family: null-and-edge (36)
-
-### `agent-null-and-edge-0008` — MismatchRows (high)
-
-*Detail:* first differing row[2]: kusto=('', True, False) duck=(null, True, True)
-
-**KQL**
-```kql
-datatable(s:string)[ "a", "" ] | union (datatable(s:string)[ "c" ] | extend s=tostring(dynamic(null))) | extend e=isempty(s), n=isnull(s) | project s, e, n
-```
-**Generated SQL**
-```sql
-SELECT s, e, n FROM (SELECT *, (s IS NULL OR CAST(s AS VARCHAR) = '') AS e, (s IS NULL) AS n FROM ((SELECT * FROM (VALUES ('a'), ('')) AS t(s)) UNION ALL BY NAME (SELECT * EXCLUDE (s), TRY_CAST(NULL AS TEXT) AS s FROM (VALUES ('c')) AS t(s))))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, e:Bool, n:Bool] rows=3
-    - ('a', False, False)
-    - ('', True, False)
-    - ('', True, False)
-- DuckDB: cols=[s:String, e:Bool, n:Bool] rows=3
-    - ('a', False, False)
-    - ('', True, False)
-    - (null, True, True)
-
-### `agent-null-and-edge-0038` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(0, 0) duck=(0, null)
-
-**KQL**
-```kql
-print l = strlen(""), n = strlen(tostring(dynamic(null)))
-```
-**Generated SQL**
-```sql
-SELECT LENGTH(CAST('' AS VARCHAR)) AS l, LENGTH(CAST(TRY_CAST(NULL AS TEXT) AS VARCHAR)) AS n
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[l:Int, n:Int] rows=1
-    - (0, 0)
-- DuckDB: cols=[l:Int, n:Int] rows=1
-    - (0, null)
-
-### `agent-null-and-edge-0039` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('', 'c') duck=('', 'a')
-
-**KQL**
-```kql
-print sub = substring("abc", 5, 3), neg = substring("abc", -1, 2)
-```
-**Generated SQL**
-```sql
-SELECT SUBSTR(CAST('abc' AS VARCHAR), (5) + 1, 3) AS sub, SUBSTR(CAST('abc' AS VARCHAR), ((-1)) + 1, 2) AS neg
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[sub:String, neg:String] rows=1
-    - ('', 'c')
-- DuckDB: cols=[sub:String, neg:String] rows=1
-    - ('', 'a')
+## Family: null-and-edge (20)
 
 ### `agent-null-and-edge-0044` — MismatchRows (high)
 
@@ -3771,7 +2506,7 @@ datatable(d:dynamic)[ dynamic(null), dynamic({"a":1}), dynamic([]) ] | extend t=
 ```
 **Generated SQL**
 ```sql
-SELECT t, n, an FROM (SELECT *, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(d AS JSON)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(d AS JSON)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(d AS JSON)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(d AS JSON)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(d AS JSON)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(d AS JSON)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(d AS JSON)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(d AS JSON)) LIKE '%[]' OR TYPEOF(CAST(d AS JSON)) LIKE 'STRUCT%' OR TYPEOF(CAST(d AS JSON)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(d AS JSON)) = 'JSON' THEN (CASE WHEN json_type(CAST(CAST(d AS JSON) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(d AS JSON))) END AS t, (CAST(d AS JSON) IS NULL) AS n, LEN(json_extract(CAST(d AS JSON), '$[*]')) AS an FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST(NULL AS JSON)), (CAST('{"a":1}'::JSON AS JSON)), (CAST(LIST_VALUE() AS JSON))) AS t(d)))
+SELECT t, n, an FROM (SELECT *, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(d AS JSON)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(d AS JSON)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(d AS JSON)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(d AS JSON)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(d AS JSON)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(d AS JSON)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(d AS JSON)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(d AS JSON)) LIKE '%[]' OR TYPEOF(CAST(d AS JSON)) LIKE 'STRUCT%' OR TYPEOF(CAST(d AS JSON)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(d AS JSON)) = 'JSON' THEN (CASE json_type(CAST(CAST(d AS JSON) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(d AS JSON))) END AS t, (CAST(d AS JSON) IS NULL) AS n, CASE WHEN json_type(CAST(d AS JSON)) = 'ARRAY' THEN LEN(json_extract(CAST(d AS JSON), '$[*]')) ELSE NULL END AS an FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST(NULL AS JSON)), (CAST('{"a":1}'::JSON AS JSON)), (CAST(LIST_VALUE() AS JSON))) AS t(d)))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -3781,7 +2516,7 @@ SELECT t, n, an FROM (SELECT *, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT',
     - ('array', False, 0)
 - DuckDB: cols=[t:String, n:Bool, an:Int] rows=3
     - ('dictionary', True, null)
-    - ('dictionary', False, 0)
+    - ('dictionary', False, null)
     - ('array', False, 0)
 
 ### `agent-null-and-edge-0003` — MismatchRows (high)
@@ -3806,30 +2541,24 @@ SELECT * FROM (SELECT g, MIN(x) AS mn, MAX(x) AS mx, MAX(x) AS arg, ARG_MAX(g, x
     - ('a', null, null, null, null, null, null)
     - ('b', null, null, null, null, null, null)
 
-### `agent-null-and-edge-0010` — MismatchRows (high)
+### `agent-null-and-edge-0009` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('a', '', True, False, False, 'aZ') duck=('a', null, True, False, True, 'aZ')
+*Detail:* first differing row[0]: kusto=('both', 'c1', 'fallback') duck=('both', 'c1', '')
 
 **KQL**
 ```kql
-datatable(s:string)[ "a", "", "b", "" ] | extend n=tostring(dynamic(null)) | extend r1=isempty(n), r2=isempty(s), r3=isnull(n), r4=strcat(s, n, "Z") | project s, n, r1, r2, r3, r4
+print a=iif(isnull(int(null)), iif(isempty(""), "both", "n"), "no"), b=case(isnull(real(null)), "c1", isempty("x"), "c2", "def"), c=coalesce(tostring(int(null)), tostring(dynamic(null)), "fallback")
 ```
 **Generated SQL**
 ```sql
-SELECT s, n, r1, r2, r3, r4 FROM (SELECT *, (n IS NULL OR CAST(n AS VARCHAR) = '') AS r1, (s IS NULL OR CAST(s AS VARCHAR) = '') AS r2, (n IS NULL) AS r3, CONCAT(s, n, 'Z') AS r4 FROM (SELECT *, TRY_CAST(NULL AS TEXT) AS n FROM (VALUES ('a'), (''), ('b'), ('')) AS t(s)))
+SELECT CASE WHEN (CAST(NULL AS INTEGER) IS NULL) THEN CASE WHEN ('' IS NULL OR CAST('' AS VARCHAR) = '') THEN 'both' ELSE 'n' END ELSE 'no' END AS a, CASE WHEN (CAST(NULL AS DOUBLE) IS NULL) THEN 'c1' WHEN ('x' IS NULL OR CAST('x' AS VARCHAR) = '') THEN 'c2' ELSE 'def' END AS b, COALESCE(COALESCE(TRY_CAST(CAST(NULL AS INTEGER) AS TEXT), ''), COALESCE(TRY_CAST(NULL AS TEXT), ''), 'fallback') AS c
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
-- Kusto: cols=[s:String, n:String, r1:Bool, r2:Bool, r3:Bool, r4:String] rows=4
-    - ('a', '', True, False, False, 'aZ')
-    - ('', '', True, True, False, 'Z')
-    - ('b', '', True, False, False, 'bZ')
-    - ('', '', True, True, False, 'Z')
-- DuckDB: cols=[s:String, n:String, r1:Bool, r2:Bool, r3:Bool, r4:String] rows=4
-    - ('a', null, True, False, True, 'aZ')
-    - ('', null, True, True, True, 'Z')
-    - ('b', null, True, False, True, 'bZ')
-    - ('', null, True, True, True, 'Z')
+- Kusto: cols=[a:String, b:String, c:String] rows=1
+    - ('both', 'c1', 'fallback')
+- DuckDB: cols=[a:String, b:String, c:String] rows=1
+    - ('both', 'c1', '')
 
 ### `agent-null-and-edge-0013` — MismatchRows (high)
 
@@ -3869,25 +2598,6 @@ SELECT TIMESTAMP '9999-12-31 23:59:59.999999' AS d1, TIMESTAMP '9999-12-31 23:59
 - DuckDB: cols=[d1:DateTime, d2:DateTime, diff:TimeSpan] rows=1
     - (9999-12-31T23:59:59.9999990Z, 9999-12-31T23:59:59.9999990Z, 3652058.00:00:00)
 
-### `agent-null-and-edge-0021` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('', '', '', '', '', '') duck=(null, null, null, null, null, null)
-
-**KQL**
-```kql
-print a=tostring(int(null)), b=tostring(real(null)), c=tostring(datetime(null)), d=tostring(bool(null)), e=tostring(long(null)), f=tostring(dynamic(null))
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(CAST(NULL AS INTEGER) AS TEXT) AS a, TRY_CAST(CAST(NULL AS DOUBLE) AS TEXT) AS b, TRY_CAST(CAST(NULL AS TIMESTAMP) AS TEXT) AS c, TRY_CAST(CAST(NULL AS BOOLEAN) AS TEXT) AS d, TRY_CAST(CAST(NULL AS BIGINT) AS TEXT) AS e, TRY_CAST(NULL AS TEXT) AS f
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:String, b:String, c:String, d:String, e:String, f:String] rows=1
-    - ('', '', '', '', '', '')
-- DuckDB: cols=[a:String, b:String, c:String, d:String, e:String, f:String] rows=1
-    - (null, null, null, null, null, null)
-
 ### `agent-null-and-edge-0024` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[va:Dynamic|String], TYPE_MISMATCH[vab:Dynamic|String], TYPE_MISMATCH[idx0:Dynamic|String]  
@@ -3899,7 +2609,7 @@ datatable(d:dynamic)[ dynamic(null), dynamic({"a":null}), dynamic({"a":{"b":null
 ```
 **Generated SQL**
 ```sql
-SELECT t, va, vab, idx0, al FROM (SELECT *, json_extract(d, '$.a') AS va, json_extract(d, '$.a.b') AS vab, json_extract(d, '$[' || (0) || ']') AS idx0, LEN(json_extract(CAST(d AS JSON), '$[*]')) AS al, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(d AS JSON)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(d AS JSON)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(d AS JSON)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(d AS JSON)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(d AS JSON)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(d AS JSON)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(d AS JSON)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(d AS JSON)) LIKE '%[]' OR TYPEOF(CAST(d AS JSON)) LIKE 'STRUCT%' OR TYPEOF(CAST(d AS JSON)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(d AS JSON)) = 'JSON' THEN (CASE WHEN json_type(CAST(CAST(d AS JSON) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(d AS JSON))) END AS t FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST(NULL AS JSON)), (CAST('{"a":null}'::JSON AS JSON)), (CAST('{"a":{"b":null}}'::JSON AS JSON)), (CAST(LIST_VALUE(NULL, 1, NULL) AS JSON))) AS t(d)))
+SELECT t, va, vab, idx0, al FROM (SELECT *, json_extract(d, '$.a') AS va, json_extract(d, '$.a.b') AS vab, json_extract(d, '$[' || (CASE WHEN (0) < 0 THEN '#' ELSE '' END) || (0) || ']') AS idx0, CASE WHEN json_type(CAST(d AS JSON)) = 'ARRAY' THEN LEN(json_extract(CAST(d AS JSON), '$[*]')) ELSE NULL END AS al, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(d AS JSON)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(d AS JSON)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(d AS JSON)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(d AS JSON)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(d AS JSON)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(d AS JSON)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(d AS JSON)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(d AS JSON)) LIKE '%[]' OR TYPEOF(CAST(d AS JSON)) LIKE 'STRUCT%' OR TYPEOF(CAST(d AS JSON)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(d AS JSON)) = 'JSON' THEN (CASE json_type(CAST(CAST(d AS JSON) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(d AS JSON))) END AS t FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST(NULL AS JSON)), (CAST('{"a":null}'::JSON AS JSON)), (CAST('{"a":{"b":null}}'::JSON AS JSON)), (CAST(LIST_VALUE(NULL, 1, NULL) AS JSON))) AS t(d)))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -3912,8 +2622,8 @@ SELECT t, va, vab, idx0, al FROM (SELECT *, json_extract(d, '$.a') AS va, json_e
     - ('array', null, null, null, 3)
 - DuckDB: cols=[t:String, va:String, vab:String, idx0:String, al:Int] rows=4
     - ('dictionary', null, null, null, null)
-    - ('dictionary', 'null', null, null, 0)
-    - ('dictionary', '{"b":null}', 'null', null, 0)
+    - ('dictionary', 'null', null, null, null)
+    - ('dictionary', '{"b":null}', 'null', null, null)
     - ('array', null, null, 'null', 3)
 
 ### `agent-null-and-edge-0028` — MismatchRows (high)
@@ -3938,7 +2648,7 @@ SELECT TRY_CAST('null' AS JSON) AS a, TRY_CAST('[]' AS JSON) AS b, TRY_CAST('{}'
 
 ### `agent-null-and-edge-0036` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('abc', 'c', 'bc', null, 'abc') duck=('abc', 'c', 'c', 0, 'abc')
+*Detail:* first differing row[0]: kusto=('abc', 'c', 'bc', null, 'abc') duck=('abc', 'c', 'bc', 0, 'abc')
 
 **KQL**
 ```kql
@@ -3946,7 +2656,7 @@ datatable(s:string)[ "abc", "", "x" ] | extend sub1=substring(s, 2, 10), sub2=su
 ```
 **Generated SQL**
 ```sql
-SELECT s, sub1, sub2, idx, rep FROM (SELECT *, SUBSTR(CAST(s AS VARCHAR), (2) + 1, 10) AS sub1, SUBSTR(CAST(s AS VARCHAR), ((-2)) + 1, 5) AS sub2, (INSTR(CAST(s AS VARCHAR), '') - 1) AS idx, REPLACE(s, '', '_') AS rep FROM (VALUES ('abc'), (''), ('x')) AS t(s))
+SELECT s, sub1, sub2, idx, rep FROM (SELECT *, (CASE WHEN (10) < 0 THEN '' ELSE SUBSTR(CAST(s AS VARCHAR), (CASE WHEN (2) < 0 THEN (2) ELSE (2) + 1 END), 10) END) AS sub1, (CASE WHEN (5) < 0 THEN '' ELSE SUBSTR(CAST(s AS VARCHAR), (CASE WHEN ((-2)) < 0 THEN ((-2)) ELSE ((-2)) + 1 END), 5) END) AS sub2, (INSTR(CAST(s AS VARCHAR), '') - 1) AS idx, REPLACE(s, '', '_') AS rep FROM (VALUES ('abc'), (''), ('x')) AS t(s))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -3955,7 +2665,7 @@ SELECT s, sub1, sub2, idx, rep FROM (SELECT *, SUBSTR(CAST(s AS VARCHAR), (2) + 
     - ('', '', '', null, '')
     - ('x', '', '', null, 'x')
 - DuckDB: cols=[s:String, sub1:String, sub2:String, idx:Int, rep:String] rows=3
-    - ('abc', 'c', 'c', 0, 'abc')
+    - ('abc', 'c', 'bc', 0, 'abc')
     - ('', '', '', 0, '')
     - ('x', '', 'x', 0, 'x')
 
@@ -3990,31 +2700,6 @@ SELECT ARRAY_TO_STRING(LIST_VALUE(1, NULL, 3), '-') AS a, STRING_SPLIT(CAST('a,,
 - DuckDB: cols=[a:String, b:Unknown, c:Unknown, d:Int, e:String] rows=1
     - ('1-3', ["a","","b"], [""], 1, '')
 
-### `agent-null-and-edge-0041` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('a', 1, 1) duck=('a', 3, 1)
-
-**KQL**
-```kql
-datatable(g:string, x:long)[ "a",3, "a",long(null), "a",1, "b",long(null) ] | sort by g asc, x asc nulls last | extend rn=row_number(), rng=row_number(1, g != prev(g)) | project g, x, rn
-```
-**Generated SQL**
-```sql
-SELECT g, x, rn FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY g ASC NULLS FIRST, x DESC NULLS LAST) AS rn, ROW_NUMBER() OVER (ORDER BY g ASC NULLS FIRST, x DESC NULLS LAST) AS rng FROM (VALUES ('a', CAST(3 AS BIGINT)), ('a', CAST(CAST(NULL AS BIGINT) AS BIGINT)), ('a', CAST(1 AS BIGINT)), ('b', CAST(CAST(NULL AS BIGINT) AS BIGINT))) AS t(g, x) ORDER BY g ASC NULLS FIRST, x DESC NULLS LAST)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, x:Int, rn:Int] rows=4
-    - ('a', 1, 1)
-    - ('a', 3, 2)
-    - ('a', null, 3)
-    - ('b', null, 4)
-- DuckDB: cols=[g:String, x:Int, rn:Int] rows=4
-    - ('a', 3, 1)
-    - ('a', 1, 2)
-    - ('a', null, 3)
-    - ('b', null, 4)
-
 ### `agent-null-and-edge-0043` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=({
@@ -4028,7 +2713,7 @@ datatable(k:long, v:long)[ 1,10, 1,long(null), 2,long(null) ] | summarize m=make
 ```
 **Generated SQL**
 ```sql
-SELECT m FROM (SELECT histogram(json_object(TRY_CAST(k AS TEXT), v)) AS m FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(CAST(NULL AS BIGINT) AS BIGINT)), (CAST(2 AS BIGINT), CAST(CAST(NULL AS BIGINT) AS BIGINT))) AS t(k, v))
+SELECT m FROM (SELECT histogram(json_object(COALESCE(TRY_CAST(k AS TEXT), ''), v)) AS m FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(CAST(NULL AS BIGINT) AS BIGINT)), (CAST(2 AS BIGINT), CAST(CAST(NULL AS BIGINT) AS BIGINT))) AS t(k, v))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -4040,41 +2725,6 @@ SELECT m FROM (SELECT histogram(json_object(TRY_CAST(k AS TEXT), v)) AS m FROM (
 - DuckDB: cols=[m:Unknown] rows=1
     - ({"{\u00221\u0022:10}":1,"{\u00221\u0022:null}":1,"{\u00222\u0022:null}":1})
 
-### `agent-null-and-edge-0002` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=([
-  "",
-  "",
-  ""
-], [
-  "abc",
-  "",
-  "x"
-], 0, 3) duck=([], ["","abc","x"], 3, 3)
-
-**KQL**
-```kql
-datatable(s:string)[ "abc", "", "x" ] | extend n=tostring(dynamic(null)) | summarize ml=make_list(n), ms=make_set(s), cn=countif(isnull(n)), ce=countif(isempty(n))
-```
-**Generated SQL**
-```sql
-SELECT COALESCE(LIST(n) FILTER (WHERE n IS NOT NULL), []) AS ml, COALESCE(LIST(DISTINCT s) FILTER (WHERE s IS NOT NULL), []) AS ms, COUNT(*) FILTER (WHERE (n IS NULL)) AS cn, COUNT(*) FILTER (WHERE (n IS NULL OR CAST(n AS VARCHAR) = '')) AS ce FROM (SELECT *, TRY_CAST(NULL AS TEXT) AS n FROM (VALUES ('abc'), (''), ('x')) AS t(s))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ml:Dynamic, ms:Dynamic, cn:Int, ce:Int] rows=1
-    - ([
-  "",
-  "",
-  ""
-], [
-  "abc",
-  "",
-  "x"
-], 0, 3)
-- DuckDB: cols=[ml:Unknown, ms:Unknown, cn:Int, ce:Int] rows=1
-    - ([], ["","abc","x"], 3, 3)
-
 ### `agent-null-and-edge-0006` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=('pq', 'fb') duck=('pq', '')
@@ -4085,7 +2735,7 @@ print a=iif(isnull(int(null)) and isempty(""), strcat("p",tostring(int(null)),"q
 ```
 **Generated SQL**
 ```sql
-SELECT CASE WHEN (CAST(NULL AS INTEGER) IS NULL) AND ('' IS NULL OR CAST('' AS VARCHAR) = '') THEN CONCAT('p', TRY_CAST(CAST(NULL AS INTEGER) AS TEXT), 'q') ELSE 'x' END AS a, COALESCE(CONCAT(TRY_CAST(CAST(NULL AS DOUBLE) AS TEXT)), 'fb') AS b
+SELECT CASE WHEN (CAST(NULL AS INTEGER) IS NULL) AND ('' IS NULL OR CAST('' AS VARCHAR) = '') THEN CONCAT('p', COALESCE(TRY_CAST(CAST(NULL AS INTEGER) AS TEXT), ''), 'q') ELSE 'x' END AS a, COALESCE(CONCAT(COALESCE(TRY_CAST(CAST(NULL AS DOUBLE) AS TEXT), '')), 'fb') AS b
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -4132,28 +2782,9 @@ SELECT COUNT(*) AS Count FROM (VALUES (CAST(1 AS BIGINT)), (CAST(2 AS BIGINT)), 
 - DuckDB: cols=[Count:Int] rows=1
     - (0)
 
-### `agent-null-and-edge-0011` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1) duck=(0)
-
-**KQL**
-```kql
-datatable(s:string)[ "a", "", "b" ] | extend n=tostring(dynamic(null)) | where s == n | count
-```
-**Generated SQL**
-```sql
-SELECT COUNT(*) AS Count FROM (SELECT *, TRY_CAST(NULL AS TEXT) AS n FROM (VALUES ('a'), (''), ('b')) AS t(s)) WHERE s = n
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[Count:Int] rows=1
-    - (1)
-- DuckDB: cols=[Count:Int] rows=1
-    - (0)
-
 ### `agent-null-and-edge-0013` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(1.5, 1, 1.5, 2) duck=(2.5, 2, 2, 3)
+*Detail:* first differing row[0]: kusto=(1.5, 1, 1.5, 2) duck=(1.5, 1, 1, 2)
 
 **KQL**
 ```kql
@@ -4161,7 +2792,7 @@ datatable(x:real)[ 1.5, real(null), 2.5 ] | extend b=bin(x, 1.0), f=floor(x, 0.5
 ```
 **Generated SQL**
 ```sql
-SELECT x, b, f, c FROM (SELECT *, FLOOR((x)/(1.0))*(1.0) AS b, FLOOR(x) AS f, CEILING(x) AS c FROM (VALUES (CAST(1.5 AS DOUBLE)), (CAST(CAST(NULL AS DOUBLE) AS DOUBLE)), (CAST(2.5 AS DOUBLE))) AS t(x)) ORDER BY x DESC NULLS LAST
+SELECT x, b, f, c FROM (SELECT *, FLOOR((x)/(1.0))*(1.0) AS b, FLOOR(x) AS f, CEILING(x) AS c FROM (VALUES (CAST(1.5 AS DOUBLE)), (CAST(CAST(NULL AS DOUBLE) AS DOUBLE)), (CAST(2.5 AS DOUBLE))) AS t(x)) ORDER BY x ASC NULLS LAST
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -4170,8 +2801,8 @@ SELECT x, b, f, c FROM (SELECT *, FLOOR((x)/(1.0))*(1.0) AS b, FLOOR(x) AS f, CE
     - (2.5, 2, 2.5, 3)
     - (null, null, null, null)
 - DuckDB: cols=[x:Real, b:Real, f:Real, c:Real] rows=3
-    - (2.5, 2, 2, 3)
     - (1.5, 1, 1, 2)
+    - (2.5, 2, 2, 3)
     - (null, null, null, null)
 
 ### `agent-null-and-edge-0019` — MismatchRows (high)
@@ -4231,49 +2862,9 @@ SELECT TIMESTAMP '9999-12-31 23:59:59.999999' AS t1, TIMESTAMP '0001-01-01 00:00
 - DuckDB: cols=[t1:DateTime, t2:DateTime, diff:TimeSpan, neg:DateTime] rows=1
     - (9999-12-31T23:59:59.9999990Z, 0001-01-01T00:00:00.0000000Z, 3652058.00:00:00, 0001-01-01T00:00:00.0000000Z)
 
-### `agent-null-and-edge-0029` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(2020-01-01T00:00:00.0000000Z, null, null, '', '2020-01-01T00:00:00.0000000Z') duck=(2020-01-01T00:00:00.0000000Z, null, null, null, '2020-01-01 00:00:00')
-
-**KQL**
-```kql
-datatable(t:datetime, s:timespan)[ datetime(2020-01-01),timespan(null), datetime(null),1d ] | extend e=t+s, ts=tostring(s), tt=tostring(t) | project t, s, e, ts, tt
-```
-**Generated SQL**
-```sql
-SELECT t, s, e, ts, tt FROM (SELECT *, t + s AS e, TRY_CAST(s AS TEXT) AS ts, TRY_CAST(t AS TEXT) AS tt FROM (VALUES (TIMESTAMP '2020-01-01 00:00:00', CAST(NULL AS INTERVAL)), (CAST(NULL AS TIMESTAMP), (86400000 * INTERVAL '1 millisecond'))) AS t(t, s))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, s:TimeSpan, e:DateTime, ts:String, tt:String] rows=2
-    - (2020-01-01T00:00:00.0000000Z, null, null, '', '2020-01-01T00:00:00.0000000Z')
-    - (null, 1.00:00:00, null, '1.00:00:00', '')
-- DuckDB: cols=[t:DateTime, s:TimeSpan, e:DateTime, ts:String, tt:String] rows=2
-    - (2020-01-01T00:00:00.0000000Z, null, null, null, '2020-01-01 00:00:00')
-    - (null, 1.00:00:00, null, '24:00:00', null)
-
-### `agent-null-and-edge-0031` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(null, null, null, '', null) duck=(null, null, null, null, null)
-
-**KQL**
-```kql
-print a=tolong(int(null)), b=toint(long(null)), c=todouble(int(null)), d=tostring(toint("")), e=tolong(todouble("inf"))
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(CAST(NULL AS INTEGER) AS DOUBLE), TRY_CAST(TRY_CAST(CAST(NULL AS INTEGER) AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS a, TRY_CAST(TRUNC(COALESCE(TRY_CAST(CAST(NULL AS BIGINT) AS DOUBLE), TRY_CAST(TRY_CAST(CAST(NULL AS BIGINT) AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS b, COALESCE(TRY_CAST(CAST(NULL AS INTEGER) AS DOUBLE), TRY_CAST(TRY_CAST(CAST(NULL AS INTEGER) AS BOOLEAN) AS DOUBLE)) AS c, TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT) AS d, TRY_CAST(TRUNC(COALESCE(TRY_CAST(COALESCE(TRY_CAST('inf' AS DOUBLE), TRY_CAST(TRY_CAST('inf' AS BOOLEAN) AS DOUBLE)) AS DOUBLE), TRY_CAST(TRY_CAST(COALESCE(TRY_CAST('inf' AS DOUBLE), TRY_CAST(TRY_CAST('inf' AS BOOLEAN) AS DOUBLE)) AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS e
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:Int, b:Int, c:Real, d:String, e:Int] rows=1
-    - (null, null, null, '', null)
-- DuckDB: cols=[a:Int, b:Int, c:Real, d:String, e:Int] rows=1
-    - (null, null, null, null, null)
-
 ### `agent-null-and-edge-0032` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(False, 0, 'False', True, False, False) duck=(True, 1, 'true', False, True, True)
+*Detail:* first differing row[1]: kusto=(True, 1, 'True', False, True, True) duck=(False, 0, 'False', True, False, False)
 
 **KQL**
 ```kql
@@ -4281,7 +2872,7 @@ datatable(b:bool)[ true, false, bool(null) ] | extend i=toint(b), s=tostring(b),
 ```
 **Generated SQL**
 ```sql
-SELECT b, i, s, n, a, o FROM (SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS i, TRY_CAST(b AS TEXT) AS s, NOT (b) AS n, b AND TRUE AS a, b OR FALSE AS o FROM (VALUES (TRUE), (FALSE), (FALSE)) AS t(b)) ORDER BY b DESC NULLS LAST
+SELECT b, i, s, n, a, o FROM (SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS i, COALESCE(CASE WHEN b THEN 'True' WHEN NOT b THEN 'False' END, '') AS s, NOT (b) AS n, b AND TRUE AS a, b OR FALSE AS o FROM (VALUES (TRUE), (FALSE), (FALSE)) AS t(b)) ORDER BY b ASC NULLS LAST
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -4290,13 +2881,13 @@ SELECT b, i, s, n, a, o FROM (SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(b AS DO
     - (True, 1, 'True', False, True, True)
     - (null, null, '', null, null, null)
 - DuckDB: cols=[b:Bool, i:Int, s:String, n:Bool, a:Bool, o:Bool] rows=3
-    - (True, 1, 'true', False, True, True)
-    - (False, 0, 'false', True, False, False)
-    - (False, 0, 'false', True, False, False)
+    - (False, 0, 'False', True, False, False)
+    - (False, 0, 'False', True, False, False)
+    - (True, 1, 'True', False, True, True)
 
 ### `agent-null-and-edge-0034` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('a', null, 0) duck=('a', 2, 1)
+*Detail:* first differing row[2]: kusto=('b', null, 0) duck=('b', null, 2)
 
 **KQL**
 ```kql
@@ -4304,7 +2895,7 @@ datatable(g:string, x:long)[ "a",long(null), "a",2, "b",long(null), "b",long(nul
 ```
 **Generated SQL**
 ```sql
-SELECT g, x, rn FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY g ASC NULLS FIRST, x DESC NULLS LAST) AS rn FROM (VALUES ('a', CAST(CAST(NULL AS BIGINT) AS BIGINT)), ('a', CAST(2 AS BIGINT)), ('b', CAST(CAST(NULL AS BIGINT) AS BIGINT)), ('b', CAST(CAST(NULL AS BIGINT) AS BIGINT))) AS t(g, x) ORDER BY g ASC NULLS FIRST, x DESC NULLS LAST)
+SELECT g, x, rn FROM (SELECT *, (ROW_NUMBER() OVER (ORDER BY g ASC NULLS FIRST, x DESC NULLS FIRST) + (0 - 1)) AS rn FROM (VALUES ('a', CAST(CAST(NULL AS BIGINT) AS BIGINT)), ('a', CAST(2 AS BIGINT)), ('b', CAST(CAST(NULL AS BIGINT) AS BIGINT)), ('b', CAST(CAST(NULL AS BIGINT) AS BIGINT))) AS t(g, x) ORDER BY g ASC NULLS FIRST, x DESC NULLS FIRST)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -4314,40 +2905,14 @@ SELECT g, x, rn FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY g ASC NULLS FIRST, x
     - ('b', null, 0)
     - ('b', null, 1)
 - DuckDB: cols=[g:String, x:Int, rn:Int] rows=4
+    - ('a', null, 0)
     - ('a', 2, 1)
-    - ('a', null, 2)
+    - ('b', null, 2)
     - ('b', null, 3)
-    - ('b', null, 4)
-
-### `agent-null-and-edge-0043` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[c:Int|Real]  
-*Detail:* first differing row[1]: kusto=('a"b', 3, 'A"B', '"b', 1) duck=('a\"b', 4, 'A\"B', '\"b', 1)
-
-**KQL**
-```kql
-datatable(s:string)[ "O'Brien", "a\"b", "tab\ttab", "" ] | extend l=strlen(s), u=toupper(s), sub=substring(s, 1, 100), c=countof(s, "b") | project s, l, u, sub, c
-```
-**Generated SQL**
-```sql
-SELECT s, l, u, sub, c FROM (SELECT *, LENGTH(CAST(s AS VARCHAR)) AS l, UPPER(s) AS u, SUBSTR(CAST(s AS VARCHAR), (1) + 1, 100) AS sub, (LENGTH(s) - LENGTH(REPLACE(s, 'b', ''))) / LENGTH('b') AS c FROM (VALUES ('O''Brien'), ('a\"b'), ('tab\ttab'), ('')) AS t(s))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, l:Int, u:String, sub:String, c:Int] rows=4
-    - ('O'Brien', 7, 'O'BRIEN', ''Brien', 0)
-    - ('a"b', 3, 'A"B', '"b', 1)
-    - ('tab	tab', 7, 'TAB	TAB', 'ab	tab', 2)
-    - ('', 0, '', '', 0)
-- DuckDB: cols=[s:String, l:Int, u:String, sub:String, c:Real] rows=4
-    - ('O'Brien', 7, 'O'BRIEN', ''Brien', 0)
-    - ('a\"b', 4, 'A\"B', '\"b', 1)
-    - ('tab\ttab', 8, 'TAB\TTAB', 'ab\ttab', 2)
-    - ('', 0, '', '', 0)
 
 ### `agent-null-and-edge-0044` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(-2147483649, 2147483647, 2147483647) duck=(2147483648, null, null)
+*Detail:* first differing row[0]: kusto=(-2147483649, 2147483647, 2147483647) duck=(-2147483649, null, null)
 
 **KQL**
 ```kql
@@ -4355,7 +2920,7 @@ datatable(x:long)[ 2147483648, -2147483649, long(null) ] | extend i=toint(x), ba
 ```
 **Generated SQL**
 ```sql
-SELECT x, i, back FROM (SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS i, TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS back FROM (VALUES (CAST(2147483648 AS BIGINT)), (CAST(-2147483649 AS BIGINT)), (CAST(CAST(NULL AS BIGINT) AS BIGINT))) AS t(x)) ORDER BY x DESC NULLS LAST
+SELECT x, i, back FROM (SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS i, TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS back FROM (VALUES (CAST(2147483648 AS BIGINT)), (CAST(-2147483649 AS BIGINT)), (CAST(CAST(NULL AS BIGINT) AS BIGINT))) AS t(x)) ORDER BY x ASC NULLS LAST
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -4364,145 +2929,11 @@ SELECT x, i, back FROM (SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(x AS DOUBLE),
     - (2147483648, -2147483648, -2147483648)
     - (null, null, null)
 - DuckDB: cols=[x:Int, i:Int, back:Int] rows=3
-    - (2147483648, null, null)
     - (-2147483649, null, null)
+    - (2147483648, null, null)
     - (null, null, null)
 
-### `agent-null-and-edge-0006` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(a:long)[ 1, long(null), 2 ] | join kind=fullouter (datatable(a:long)[ long(null), 2, 3 ]) on a | project left=a, right=a1 | order by left asc nulls last, right asc nulls last
-```
-**Generated SQL**
-```sql
-SELECT a AS "left", a1 AS "right" FROM (SELECT L.*, R.a AS a1 FROM (SELECT * FROM (VALUES (CAST(1 AS BIGINT)), (CAST(CAST(NULL AS BIGINT) AS BIGINT)), (CAST(2 AS BIGINT))) AS t(a)) AS L FULL OUTER JOIN (SELECT * FROM (VALUES (CAST(CAST(NULL AS BIGINT) AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(3 AS BIGINT))) AS t(a)) AS R ON L.a IS NOT DISTINCT FROM R.a) ORDER BY "left" DESC NULLS LAST, "right" DESC NULLS LAST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[left:Int, right:Int] rows=4
-    - (1, null)
-    - (2, 2)
-    - (null, 3)
-    - (null, null)
-- DuckDB: cols=[left:Int, right:Int] rows=4
-    - (2, 2)
-    - (1, null)
-    - (null, 3)
-    - (null, null)
-
-### `agent-null-and-edge-0007` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(k:long)[ 1, 2, long(null) ] | lookup (datatable(k:long, name:string)[ 1,"x", long(null),"nullname" ]) on k | project k, name | order by k asc nulls first
-```
-**Generated SQL**
-```sql
-SELECT k, name FROM (SELECT L.*, COALESCE(R.name, '') AS name FROM (SELECT * FROM (VALUES (CAST(1 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(CAST(NULL AS BIGINT) AS BIGINT))) AS t(k)) AS L LEFT OUTER JOIN (SELECT * FROM (VALUES (CAST(1 AS BIGINT), 'x'), (CAST(CAST(NULL AS BIGINT) AS BIGINT), 'nullname')) AS t(k, name)) AS R ON L.k IS NOT DISTINCT FROM R.k) ORDER BY k DESC NULLS LAST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, name:String] rows=3
-    - (null, 'nullname')
-    - (1, 'x')
-    - (2, '')
-- DuckDB: cols=[k:Int, name:String] rows=3
-    - (2, '')
-    - (1, 'x')
-    - (null, 'nullname')
-
-### `agent-null-and-edge-0019` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(t:datetime, span:timespan)[ datetime(2020-01-01),1d, datetime(null),timespan(null) ] | extend e=t+span | project t, span, e | order by e asc nulls first
-```
-**Generated SQL**
-```sql
-SELECT t, span, e FROM (SELECT *, t + span AS e FROM (VALUES (TIMESTAMP '2020-01-01 00:00:00', (86400000 * INTERVAL '1 millisecond')), (CAST(NULL AS TIMESTAMP), CAST(NULL AS INTERVAL))) AS t(t, span)) ORDER BY e DESC NULLS LAST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, span:TimeSpan, e:DateTime] rows=2
-    - (null, null, null)
-    - (2020-01-01T00:00:00.0000000Z, 1.00:00:00, 2020-01-02T00:00:00.0000000Z)
-- DuckDB: cols=[t:DateTime, span:TimeSpan, e:DateTime] rows=2
-    - (2020-01-01T00:00:00.0000000Z, 1.00:00:00, 2020-01-02T00:00:00.0000000Z)
-    - (null, null, null)
-
-### `agent-null-and-edge-0028` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(t:datetime)[ datetime(2020-01-01), datetime(null) ] | extend a=t+timespan(null), b=t-1d, w=dayofweek(t), m=monthofyear(t) | project t, a, b, w, m | order by t asc nulls first
-```
-**Generated SQL**
-```sql
-SELECT t, a, b, w, m FROM (SELECT *, t + CAST(NULL AS INTERVAL) AS a, t - (86400000 * INTERVAL '1 millisecond') AS b, (EXTRACT(DOW FROM t) * INTERVAL '1 day') AS w, EXTRACT(MONTH FROM t) AS m FROM (VALUES (TIMESTAMP '2020-01-01 00:00:00'), (CAST(NULL AS TIMESTAMP))) AS t(t)) ORDER BY t DESC NULLS LAST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, a:DateTime, b:DateTime, w:TimeSpan, m:Int] rows=2
-    - (null, null, null, null, null)
-    - (2020-01-01T00:00:00.0000000Z, null, 2019-12-31T00:00:00.0000000Z, 3.00:00:00, 1)
-- DuckDB: cols=[t:DateTime, a:DateTime, b:DateTime, w:TimeSpan, m:Int] rows=2
-    - (2020-01-01T00:00:00.0000000Z, null, 2019-12-31T00:00:00.0000000Z, 3.00:00:00, 1)
-    - (null, null, null, null, null)
-
-### `agent-null-and-edge-0039` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(k:long)[ long(null), long(null), 1 ] | summarize c=count() by k | order by k asc nulls first
-```
-**Generated SQL**
-```sql
-SELECT * FROM (SELECT k, COUNT(*) AS c FROM (VALUES (CAST(CAST(NULL AS BIGINT) AS BIGINT)), (CAST(CAST(NULL AS BIGINT) AS BIGINT)), (CAST(1 AS BIGINT))) AS t(k) GROUP BY ALL) ORDER BY k DESC NULLS LAST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, c:Int] rows=2
-    - (null, 2)
-    - (1, 1)
-- DuckDB: cols=[k:Int, c:Int] rows=2
-    - (1, 1)
-    - (null, 2)
-
-### `agent-null-and-edge-0041` — MismatchOrder (medium)
-
-*Detail:* rows match as a set but order differs
-
-**KQL**
-```kql
-datatable(x:long)[ 0, long(null), -1 ] | extend d=10/x, m=10%x | project x, d, m | order by x asc nulls last
-```
-**Generated SQL**
-```sql
-SELECT x, d, m FROM (SELECT *, CAST(TRUNC(CAST(10 AS DOUBLE) / NULLIF(x, 0)) AS BIGINT) AS d, (((10) % NULLIF(x, 0)) + ABS(x)) % NULLIF(x, 0) AS m FROM (VALUES (CAST(0 AS BIGINT)), (CAST(CAST(NULL AS BIGINT) AS BIGINT)), (CAST(-1 AS BIGINT))) AS t(x)) ORDER BY x DESC NULLS LAST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int, d:Int, m:Int] rows=3
-    - (-1, -10, 0)
-    - (0, null, null)
-    - (null, null, null)
-- DuckDB: cols=[x:Int, d:Int, m:Int] rows=3
-    - (0, null, null)
-    - (-1, -10, 0)
-    - (null, null, null)
-
-## Family: parse-search (13)
+## Family: parse-search (4)
 
 ### `agent-parse-search-0007` — MismatchRows (high)
 
@@ -4527,7 +2958,7 @@ SELECT *, TRIM(REGEXP_EXTRACT(s, '(^|]\[)\s*k1\s*=\s*([^\][]*)', 2)) AS k1, TRIM
 
 ### `agent-parse-search-0008` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('name="John Smith";city="New York"', 'John Smith', 'New York') duck=('name=\"John Smith\";city=\"New York\', '\"John Smith\"', '\"New York\')
+*Detail:* first differing row[0]: kusto=('name="John Smith";city="New York"', 'John Smith', 'New York') duck=('name="John Smith";city="New York"', '"John Smith"', '"New York"')
 
 **KQL**
 ```kql
@@ -4535,87 +2966,14 @@ datatable(s:string)[ "name=\"John Smith\";city=\"New York\"" ] | parse-kv s as (
 ```
 **Generated SQL**
 ```sql
-SELECT *, TRIM(REGEXP_EXTRACT(s, '(^|;)\s*name\s*=\s*([^;]*)', 2)) AS name, TRIM(REGEXP_EXTRACT(s, '(^|;)\s*city\s*=\s*([^;]*)', 2)) AS city FROM (VALUES ('name=\"John Smith\";city=\"New York\')) AS t(s)
+SELECT *, TRIM(REGEXP_EXTRACT(s, '(^|;)\s*name\s*=\s*([^;]*)', 2)) AS name, TRIM(REGEXP_EXTRACT(s, '(^|;)\s*city\s*=\s*([^;]*)', 2)) AS city FROM (VALUES ('name="John Smith";city="New York"')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[s:String, name:String, city:String] rows=1
     - ('name="John Smith";city="New York"', 'John Smith', 'New York')
 - DuckDB: cols=[s:String, name:String, city:String] rows=1
-    - ('name=\"John Smith\";city=\"New York\', '\"John Smith\"', '\"New York\')
-
-### `agent-parse-search-0010` — MismatchRows (high)
-
-*Detail:* row count: kusto=1 duck=0
-
-**KQL**
-```kql
-datatable(s:string, n:long)[ "alpha apple",1, "beta banana",2, "gamma grape",3 ] | search "a*" | project s
-```
-**Generated SQL**
-```sql
-SELECT s FROM (SELECT 'search_arg0' AS "$table", * FROM (VALUES ('alpha apple', CAST(1 AS BIGINT)), ('beta banana', CAST(2 AS BIGINT)), ('gamma grape', CAST(3 AS BIGINT))) AS t(s, n) WHERE (REGEXP_MATCHES(LOWER(CAST(s AS VARCHAR)), '(^|[^A-Za-z0-9])a\*([^A-Za-z0-9]|$)') OR REGEXP_MATCHES(LOWER(CAST(n AS VARCHAR)), '(^|[^A-Za-z0-9])a\*([^A-Za-z0-9]|$)')))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String] rows=1
-    - ('alpha apple')
-- DuckDB: cols=[s:String] rows=0
-
-### `agent-parse-search-0011` — MismatchRows (high)
-
-*Detail:* row count: kusto=1 duck=0
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","y", "café","z", "delta","x" ] | where * has "café"
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'y'), ('café', 'z'), ('delta', 'x')) AS t(s, tag) WHERE (regexp_matches(CAST(CAST(s AS VARCHAR) AS VARCHAR), '(?i)\bcafé\b') OR regexp_matches(CAST(CAST(tag AS VARCHAR) AS VARCHAR), '(?i)\bcafé\b'))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=1
-    - ('café', 'z')
-- DuckDB: cols=[s:String, tag:String] rows=0
-
-### `agent-parse-search-0018` — MismatchRows (high)
-
-*Detail:* row count: kusto=1 duck=0
-
-**KQL**
-```kql
-datatable(s:string)[ "10.5", "abc", "20", "-3.14" ] | search "10*"
-```
-**Generated SQL**
-```sql
-SELECT 'search_arg0' AS "$table", * FROM (VALUES ('10.5'), ('abc'), ('20'), ('-3.14')) AS t(s) WHERE REGEXP_MATCHES(LOWER(CAST(s AS VARCHAR)), '(^|[^A-Za-z0-9])10\*([^A-Za-z0-9]|$)')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[$table:String, s:String] rows=1
-    - ('search_arg0', '10.5')
-- DuckDB: cols=[$table:String, s:String] rows=0
-
-### `agent-parse-search-0019` — MismatchRows (high)
-
-*Detail:* row count: kusto=2 duck=0
-
-**KQL**
-```kql
-datatable(host:string, env:string)[ "web01","prod", "db02","dev", "web03","prod" ] | search "web*" and env == "prod" | project host
-```
-**Generated SQL**
-```sql
-SELECT host FROM (SELECT 'search_arg0' AS "$table", * FROM (VALUES ('web01', 'prod'), ('db02', 'dev'), ('web03', 'prod')) AS t(host, env) WHERE ((REGEXP_MATCHES(LOWER(CAST(host AS VARCHAR)), '(^|[^A-Za-z0-9])web\*([^A-Za-z0-9]|$)') OR REGEXP_MATCHES(LOWER(CAST(env AS VARCHAR)), '(^|[^A-Za-z0-9])web\*([^A-Za-z0-9]|$)')) AND env = 'prod'))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[host:String] rows=2
-    - ('web01')
-    - ('web03')
-- DuckDB: cols=[host:String] rows=0
+    - ('name="John Smith";city="New York"', '"John Smith"', '"New York"')
 
 ### `agent-parse-search-0040` — MismatchRows (high)
 
@@ -4637,101 +2995,6 @@ SELECT a FROM (SELECT 'search_arg0' AS "$table", * FROM (VALUES ('needle', CAST(
     - ('needle')
     - ('haystack')
 
-### `agent-parse-search-0043` — MismatchRows (high)
-
-*Detail:* row count: kusto=1 duck=0
-
-**KQL**
-```kql
-datatable(s:string, num:int)[ "match123",123, "nomatch",456 ] | where s startswith "match" and num between (100 .. 200) | search "match*" | project s, num
-```
-**Generated SQL**
-```sql
-SELECT s, num FROM (SELECT 'search_arg0' AS "$table", * FROM (SELECT * FROM (VALUES ('match123', 123), ('nomatch', 456)) AS t(s, num) WHERE s ILIKE 'match%' AND num BETWEEN 100 AND 200) WHERE (REGEXP_MATCHES(LOWER(CAST(s AS VARCHAR)), '(^|[^A-Za-z0-9])match\*([^A-Za-z0-9]|$)') OR REGEXP_MATCHES(LOWER(CAST(num AS VARCHAR)), '(^|[^A-Za-z0-9])match\*([^A-Za-z0-9]|$)')))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, num:Int] rows=1
-    - ('match123', 123)
-- DuckDB: cols=[s:String, num:Int] rows=0
-
-### `agent-parse-search-0012` — MismatchRows (high)
-
-*Detail:* row count: kusto=2 duck=0
-
-**KQL**
-```kql
-datatable(s:string)[ "100", "200", "abc", "10.5" ] | search "1*" and not("abc") | project s
-```
-**Generated SQL**
-```sql
-SELECT s FROM (SELECT 'search_arg0' AS "$table", * FROM (VALUES ('100'), ('200'), ('abc'), ('10.5')) AS t(s) WHERE (REGEXP_MATCHES(LOWER(CAST(s AS VARCHAR)), '(^|[^A-Za-z0-9])1\*([^A-Za-z0-9]|$)') AND (NOT REGEXP_MATCHES(LOWER(CAST(s AS VARCHAR)), '(^|[^A-Za-z0-9])abc([^A-Za-z0-9]|$)'))))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String] rows=2
-    - ('100')
-    - ('10.5')
-- DuckDB: cols=[s:String] rows=0
-
-### `agent-parse-search-0025` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('tab', 'here', 'end') duck=('', '', '')
-
-**KQL**
-```kql
-datatable(s:string)[ "tab\there\tend" ] | parse s with a:string "\t" b:string "\t" c:string | project a, b, c
-```
-**Generated SQL**
-```sql
-SELECT a, b, c FROM (SELECT *, REGEXP_EXTRACT(s, '(.*?)\t(.*?)\t(.*)', 1) AS a, REGEXP_EXTRACT(s, '(.*?)\t(.*?)\t(.*)', 2) AS b, REGEXP_EXTRACT(s, '(.*?)\t(.*?)\t(.*)', 3) AS c FROM (VALUES ('tab\there\tend')) AS t(s))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:String, b:String, c:String] rows=1
-    - ('tab', 'here', 'end')
-- DuckDB: cols=[a:String, b:String, c:String] rows=1
-    - ('', '', '')
-
-### `agent-parse-search-0026` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('line1', 'line2', 'line3') duck=('', '', '')
-
-**KQL**
-```kql
-datatable(s:string)[ "line1\nline2\nline3" ] | parse s with x:string "\n" y:string "\n" z:string | project x, y, z
-```
-**Generated SQL**
-```sql
-SELECT x, y, z FROM (SELECT *, REGEXP_EXTRACT(s, '(.*?)\n(.*?)\n(.*)', 1) AS x, REGEXP_EXTRACT(s, '(.*?)\n(.*?)\n(.*)', 2) AS y, REGEXP_EXTRACT(s, '(.*?)\n(.*?)\n(.*)', 3) AS z FROM (VALUES ('line1\nline2\nline3')) AS t(s))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:String, y:String, z:String] rows=1
-    - ('line1', 'line2', 'line3')
-- DuckDB: cols=[x:String, y:String, z:String] rows=1
-    - ('', '', '')
-
-### `agent-parse-search-0031` — MismatchRows (high)
-
-*Detail:* row count: kusto=2 duck=1
-
-**KQL**
-```kql
-datatable(s:string, n:long)[ "café au lait",1, "plain coffee",2 ] | where * has "café" or n between (2 .. 2) | project n
-```
-**Generated SQL**
-```sql
-SELECT n FROM (VALUES ('café au lait', CAST(1 AS BIGINT)), ('plain coffee', CAST(2 AS BIGINT))) AS t(s, n) WHERE (regexp_matches(CAST(CAST(s AS VARCHAR) AS VARCHAR), '(?i)\bcafé\b') OR regexp_matches(CAST(CAST(n AS VARCHAR) AS VARCHAR), '(?i)\bcafé\b')) OR n BETWEEN 2 AND 2
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[n:Int] rows=2
-    - (1)
-    - (2)
-- DuckDB: cols=[n:Int] rows=1
-    - (2)
-
 ### `agent-parse-search-0037` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=('quoted value', 'nested ;semicolon') duck=(''quoted value'', ''nested')
@@ -4742,7 +3005,7 @@ datatable(s:string)[ "key='quoted value';other='nested ;semicolon'" ] | parse-kv
 ```
 **Generated SQL**
 ```sql
-SELECT "key", other FROM (SELECT *, TRIM(REGEXP_EXTRACT(s, '(^|;)\s*key\s*=\s*([^;]*)', 2)) AS key, TRIM(REGEXP_EXTRACT(s, '(^|;)\s*other\s*=\s*([^;]*)', 2)) AS other FROM (VALUES ('key=''quoted value'';other=''nested ;semicolon')) AS t(s))
+SELECT "key", other FROM (SELECT *, TRIM(REGEXP_EXTRACT(s, '(^|;)\s*key\s*=\s*([^;]*)', 2)) AS key, TRIM(REGEXP_EXTRACT(s, '(^|;)\s*other\s*=\s*([^;]*)', 2)) AS other FROM (VALUES ('key=''quoted value'';other=''nested ;semicolon''')) AS t(s))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -4751,68 +3014,7 @@ SELECT "key", other FROM (SELECT *, TRIM(REGEXP_EXTRACT(s, '(^|;)\s*key\s*=\s*([
 - DuckDB: cols=[key:String, other:String] rows=1
     - (''quoted value'', ''nested')
 
-## Family: string-ops (66)
-
-### `agent-string-ops-0004` — MismatchRows (high)
-
-*Detail:* row count: kusto=3 duck=2
-
-**KQL**
-```kql
-datatable(s:string)[ "alpha-beta","alpha_beta","alpha beta","alphabeta" ] | where s has "alpha" | project s
-```
-**Generated SQL**
-```sql
-SELECT s FROM (VALUES ('alpha-beta'), ('alpha_beta'), ('alpha beta'), ('alphabeta')) AS t(s) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\balpha\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String] rows=3
-    - ('alpha-beta')
-    - ('alpha_beta')
-    - ('alpha beta')
-- DuckDB: cols=[s:String] rows=2
-    - ('alpha-beta')
-    - ('alpha beta')
-
-### `agent-string-ops-0013` — MismatchRows (high)
-
-*Detail:* row count: kusto=3 duck=0
-
-**KQL**
-```kql
-datatable(s:string)[ "a1b2c3","abc","123","a1","9z9" ] | where s matches regex @"[a-z][0-9]" | project s
-```
-**Generated SQL**
-```sql
-SELECT s FROM (VALUES ('a1b2c3'), ('abc'), ('123'), ('a1'), ('9z9')) AS t(s) WHERE REGEXP_MATCHES(s, '@"[a-z][0-9]')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String] rows=3
-    - ('a1b2c3')
-    - ('a1')
-    - ('9z9')
-- DuckDB: cols=[s:String] rows=0
-
-### `agent-string-ops-0014` — MismatchRows (high)
-
-*Detail:* row count: kusto=2 duck=0
-
-**KQL**
-```kql
-datatable(s:string)[ "2020-01-15","not a date","1999-12-31","abc-de-fg" ] | where s matches regex @"^\d{4}-\d{2}-\d{2}$" | project s
-```
-**Generated SQL**
-```sql
-SELECT s FROM (VALUES ('2020-01-15'), ('not a date'), ('1999-12-31'), ('abc-de-fg')) AS t(s) WHERE REGEXP_MATCHES(s, '@"^\d{4}-\d{2}-\d{2}$')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String] rows=2
-    - ('2020-01-15')
-    - ('1999-12-31')
-- DuckDB: cols=[s:String] rows=0
+## Family: string-ops (22)
 
 ### `agent-string-ops-0015` — MismatchRows (high)
 
@@ -4837,77 +3039,6 @@ SELECT s, CONCAT(s, '!') AS q FROM (VALUES ('O''Brien'), ('D''Angelo'), ('normal
     - ('D'Angelo', 'D'Angelo!')
     - ('normal', 'normal!')
     - ('it's', 'it's!')
-
-### `agent-string-ops-0016` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('tab	here', 8, -1) duck=('tab\there', 9, -1)
-
-**KQL**
-```kql
-datatable(s:string)[ "tab\there","newline","quote\"here","back\\slash" ] | project s, len=strlen(s), idx=indexof(s,"\\")
-```
-**Generated SQL**
-```sql
-SELECT s, LENGTH(CAST(s AS VARCHAR)) AS len, (INSTR(CAST(s AS VARCHAR), '\\') - 1) AS idx FROM (VALUES ('tab\there'), ('newline'), ('quote\"here'), ('back\\slash')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, len:Int, idx:Int] rows=4
-    - ('tab	here', 8, -1)
-    - ('newline', 7, -1)
-    - ('quote"here', 10, -1)
-    - ('back\slash', 10, 4)
-- DuckDB: cols=[s:String, len:Int, idx:Int] rows=4
-    - ('tab\there', 9, -1)
-    - ('newline', 7, -1)
-    - ('quote\"here', 11, -1)
-    - ('back\\slash', 11, 4)
-
-### `agent-string-ops-0017` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('hello', 'ell', 'lo', 'llo') duck=('hello', 'ell', 'o', 'llo')
-
-**KQL**
-```kql
-datatable(s:string)[ "hello","world","kusto" ] | project orig=s, sub1=substring(s,1,3), subneg=substring(s,-2,2), suboor=substring(s,2,100)
-```
-**Generated SQL**
-```sql
-SELECT s AS orig, SUBSTR(CAST(s AS VARCHAR), (1) + 1, 3) AS sub1, SUBSTR(CAST(s AS VARCHAR), ((-2)) + 1, 2) AS subneg, SUBSTR(CAST(s AS VARCHAR), (2) + 1, 100) AS suboor FROM (VALUES ('hello'), ('world'), ('kusto')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[orig:String, sub1:String, subneg:String, suboor:String] rows=3
-    - ('hello', 'ell', 'lo', 'llo')
-    - ('world', 'orl', 'ld', 'rld')
-    - ('kusto', 'ust', 'to', 'sto')
-- DuckDB: cols=[orig:String, sub1:String, subneg:String, suboor:String] rows=3
-    - ('hello', 'ell', 'o', 'llo')
-    - ('world', 'orl', 'd', 'rld')
-    - ('kusto', 'ust', 'o', 'sto')
-
-### `agent-string-ops-0018` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('hello', '', '', '') duck=('hello', 'h', '', '')
-
-**KQL**
-```kql
-datatable(s:string)[ "hello","abc","" ] | project s, sub_neglen=substring(s,1,-1), sub_zero=substring(s,0,0), sub_big=substring(s,10,5)
-```
-**Generated SQL**
-```sql
-SELECT s, SUBSTR(CAST(s AS VARCHAR), (1) + 1, (-1)) AS sub_neglen, SUBSTR(CAST(s AS VARCHAR), (0) + 1, 0) AS sub_zero, SUBSTR(CAST(s AS VARCHAR), (10) + 1, 5) AS sub_big FROM (VALUES ('hello'), ('abc'), ('')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, sub_neglen:String, sub_zero:String, sub_big:String] rows=3
-    - ('hello', '', '', '')
-    - ('abc', '', '', '')
-    - ('', '', '', '')
-- DuckDB: cols=[s:String, sub_neglen:String, sub_zero:String, sub_big:String] rows=3
-    - ('hello', 'h', '', '')
-    - ('abc', 'a', '', '')
-    - ('', '', '', '')
 
 ### `agent-string-ops-0020` — MismatchRows (high)
 
@@ -4980,78 +3111,6 @@ SELECT s, STRING_SPLIT(CAST(s AS VARCHAR), '=') AS kv, STRING_SPLIT(CAST(s AS VA
     - ('=leading', ["","leading"], ["","leading"])
     - ('trailing=', ["trailing",""], ["trailing",""])
 
-### `agent-string-ops-0023` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('xxabcxx', 'xabcx', 'xabcxx') duck=('xxabcxx', 'abc', 'abcxx')
-
-**KQL**
-```kql
-datatable(s:string)[ "xxabcxx","abc","xxx","" ] | project s, t=trim("x",s), tl=trim_start("x",s)
-```
-**Generated SQL**
-```sql
-SELECT s, TRIM(s, 'x') AS t, LTRIM(s, 'x') AS tl FROM (VALUES ('xxabcxx'), ('abc'), ('xxx'), ('')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, t:String, tl:String] rows=4
-    - ('xxabcxx', 'xabcx', 'xabcxx')
-    - ('abc', 'abc', 'abc')
-    - ('xxx', 'x', 'xx')
-    - ('', '', '')
-- DuckDB: cols=[s:String, t:String, tl:String] rows=4
-    - ('xxabcxx', 'abc', 'abcxx')
-    - ('abc', 'abc', 'abc')
-    - ('xxx', '', '')
-    - ('', '', '')
-
-### `agent-string-ops-0024` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[c:Int|Real], TYPE_MISMATCH[cregex:Int|Real]  
-*Detail:* first differing row[0]: kusto=('hello world hello', 2, 3) duck=('hello world hello', 2, 0)
-
-**KQL**
-```kql
-datatable(s:string)[ "hello world hello","hello","world" ] | project s, c=countof(s,"hello"), cregex=countof(s,"l+","regex")
-```
-**Generated SQL**
-```sql
-SELECT s, (LENGTH(s) - LENGTH(REPLACE(s, 'hello', ''))) / LENGTH('hello') AS c, (LENGTH(s) - LENGTH(REPLACE(s, 'l+', ''))) / LENGTH('l+') AS cregex FROM (VALUES ('hello world hello'), ('hello'), ('world')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, c:Int, cregex:Int] rows=3
-    - ('hello world hello', 2, 3)
-    - ('hello', 1, 1)
-    - ('world', 0, 1)
-- DuckDB: cols=[s:String, c:Real, cregex:Real] rows=3
-    - ('hello world hello', 2, 0)
-    - ('hello', 1, 0)
-    - ('world', 0, 0)
-
-### `agent-string-ops-0025` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('abcabcabc', 0, 3, -1) duck=('abcabcabc', 0, 0, -1)
-
-**KQL**
-```kql
-datatable(s:string)[ "abcabcabc","aaa","xyz" ] | project s, i_first=indexof(s,"a"), i_from=indexof(s,"a",2), i_none=indexof(s,"z")
-```
-**Generated SQL**
-```sql
-SELECT s, (INSTR(CAST(s AS VARCHAR), 'a') - 1) AS i_first, (INSTR(CAST(s AS VARCHAR), 'a') - 1) AS i_from, (INSTR(CAST(s AS VARCHAR), 'z') - 1) AS i_none FROM (VALUES ('abcabcabc'), ('aaa'), ('xyz')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, i_first:Int, i_from:Int, i_none:Int] rows=3
-    - ('abcabcabc', 0, 3, -1)
-    - ('aaa', 0, 2, -1)
-    - ('xyz', -1, -1, 2)
-- DuckDB: cols=[s:String, i_first:Int, i_from:Int, i_none:Int] rows=3
-    - ('abcabcabc', 0, 0, -1)
-    - ('aaa', 0, 0, -1)
-    - ('xyz', -1, -1, 2)
-
 ### `agent-string-ops-0028` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=('a-a-1-True', 'a|a|end') duck=('a-a-1-true', 'a|a|end')
@@ -5077,7 +3136,7 @@ SELECT CONCAT(s, '-', s, '-', 1, '-', TRUE) AS cat, CONCAT_WS('|', s, s, 'end') 
 
 ### `agent-string-ops-0029` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('one two three', 'one_two_three', '[one] [two] [three]') duck=('one two three', 'one_two_three', 'one two three')
+*Detail:* first differing row[0]: kusto=('one two three', 'one_two_three', '[one] [two] [three]') duck=('one two three', 'one_two_three', '[one] two three')
 
 **KQL**
 ```kql
@@ -5085,7 +3144,7 @@ datatable(s:string)[ "one two three","a-b-c","x" ] | project s, repl=replace_str
 ```
 **Generated SQL**
 ```sql
-SELECT s, REPLACE(s, ' ', '_') AS repl, REGEXP_REPLACE(s, '@"(\w+)', '@"[\1]') AS reg FROM (VALUES ('one two three'), ('a-b-c'), ('x')) AS t(s)
+SELECT s, REPLACE(s, ' ', '_') AS repl, REGEXP_REPLACE(s, '(\w+)', '[\1]') AS reg FROM (VALUES ('one two three'), ('a-b-c'), ('x')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5094,32 +3153,9 @@ SELECT s, REPLACE(s, ' ', '_') AS repl, REGEXP_REPLACE(s, '@"(\w+)', '@"[\1]') A
     - ('a-b-c', 'a-b-c', '[a]-[b]-[c]')
     - ('x', 'x', '[x]')
 - DuckDB: cols=[s:String, repl:String, reg:String] rows=3
-    - ('one two three', 'one_two_three', 'one two three')
-    - ('a-b-c', 'a-b-c', 'a-b-c')
-    - ('x', 'x', 'x')
-
-### `agent-string-ops-0031` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('2020-12-31T10:20:30', '12', '2020') duck=('2020-12-31T10:20:30', '', '')
-
-**KQL**
-```kql
-datatable(s:string)[ "2020-12-31T10:20:30","no match here","42-and-7" ] | project s, ext=extract(@"(\d+)-(\d+)",2,s), ext0=extract(@"(\d+)",0,s)
-```
-**Generated SQL**
-```sql
-SELECT s, REGEXP_EXTRACT(s, '@"(\d+)-(\d+)', 2) AS ext, REGEXP_EXTRACT(s, '@"(\d+)', 0) AS ext0 FROM (VALUES ('2020-12-31T10:20:30'), ('no match here'), ('42-and-7')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, ext:String, ext0:String] rows=3
-    - ('2020-12-31T10:20:30', '12', '2020')
-    - ('no match here', '', '')
-    - ('42-and-7', '', '42')
-- DuckDB: cols=[s:String, ext:String, ext0:String] rows=3
-    - ('2020-12-31T10:20:30', '', '')
-    - ('no match here', '', '')
-    - ('42-and-7', '', '')
+    - ('one two three', 'one_two_three', '[one] two three')
+    - ('a-b-c', 'a-b-c', '[a]-b-c')
+    - ('x', 'x', '[x]')
 
 ### `agent-string-ops-0032` — MismatchRows (high)
 
@@ -5136,7 +3172,7 @@ SELECT s, REGEXP_EXTRACT(s, '@"(\d+)-(\d+)', 2) AS ext, REGEXP_EXTRACT(s, '@"(\d
     "c",
     "3"
   ]
-]) duck=('a1 b2 c3', [])
+]) duck=('a1 b2 c3', ["a1","b2","c3"])
 
 **KQL**
 ```kql
@@ -5144,7 +3180,7 @@ datatable(s:string)[ "a1 b2 c3","no digits","x9" ] | project s, all=extract_all(
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_EXTRACT_ALL(s, '@"([a-z])(\d)') AS "all" FROM (VALUES ('a1 b2 c3'), ('no digits'), ('x9')) AS t(s)
+SELECT s, REGEXP_EXTRACT_ALL(s, '([a-z])(\d)') AS "all" FROM (VALUES ('a1 b2 c3'), ('no digits'), ('x9')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5171,223 +3207,9 @@ SELECT s, REGEXP_EXTRACT_ALL(s, '@"([a-z])(\d)') AS "all" FROM (VALUES ('a1 b2 c
   ]
 ])
 - DuckDB: cols=[s:String, all:Unknown] rows=3
-    - ('a1 b2 c3', [])
+    - ('a1 b2 c3', ["a1","b2","c3"])
     - ('no digits', [])
-    - ('x9', [])
-
-### `agent-string-ops-0043` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('hello
-world', [
-  "hello",
-  "world"
-], 5) duck=('hello\nworld', ["hello","world"], 5)
-
-**KQL**
-```kql
-datatable(s:string)[ "hello\nworld","line1\r\nline2","tab\tsep" ] | project s, lines=split(s,"\n"), nl=indexof(s,"\n")
-```
-**Generated SQL**
-```sql
-SELECT s, STRING_SPLIT(CAST(s AS VARCHAR), '\n') AS lines, (INSTR(CAST(s AS VARCHAR), '\n') - 1) AS nl FROM (VALUES ('hello\nworld'), ('line1\r\nline2'), ('tab\tsep')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, lines:Dynamic, nl:Int] rows=3
-    - ('hello
-world', [
-  "hello",
-  "world"
-], 5)
-    - ('line1
-line2', [
-  "line1\r",
-  "line2"
-], 6)
-    - ('tab	sep', [
-  "tab\tsep"
-], -1)
-- DuckDB: cols=[s:String, lines:Unknown, nl:Int] rows=3
-    - ('hello\nworld', ["hello","world"], 5)
-    - ('line1\r\nline2', ["line1\\r","line2"], 7)
-    - ('tab\tsep', ["tab\\tsep"], -1)
-
-### `agent-string-ops-0044` — MismatchRows (high)
-
-*Detail:* row count: kusto=2 duck=0
-
-**KQL**
-```kql
-datatable(s:string)[ "ПриветМир","Привет Мир","МИР привет" ] | where s has "привет" | project s, up=toupper(s)
-```
-**Generated SQL**
-```sql
-SELECT s, UPPER(s) AS up FROM (VALUES ('ПриветМир'), ('Привет Мир'), ('МИР привет')) AS t(s) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\bпривет\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, up:String] rows=2
-    - ('Привет Мир', 'ПРИВЕТ МИР')
-    - ('МИР привет', 'МИР ПРИВЕТ')
-- DuckDB: cols=[s:String, up:String] rows=0
-
-### `agent-string-ops-0006` — MismatchRows (high)
-
-*Detail:* row count: kusto=3 duck=0
-
-**KQL**
-```kql
-datatable(s:string)[ "café résumé","cafe resume","CAFÉ RÉSUMÉ","Café Résumé" ] | where s has "café" | project s, eq = s =~ "café résumé"
-```
-**Generated SQL**
-```sql
-SELECT s, UPPER(s) = UPPER('café résumé') AS eq FROM (VALUES ('café résumé'), ('cafe resume'), ('CAFÉ RÉSUMÉ'), ('Café Résumé')) AS t(s) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\bcafé\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, eq:Bool] rows=3
-    - ('café résumé', True)
-    - ('CAFÉ RÉSUMÉ', True)
-    - ('Café Résumé', True)
-- DuckDB: cols=[s:String, eq:Bool] rows=0
-
-### `agent-string-ops-0012` — MismatchRows (high)
-
-*Detail:* row count: kusto=3 duck=1
-
-**KQL**
-```kql
-datatable(s:string)[ "Hello\tWorld","Hello World","Hello\nWorld" ] | where s has "Hello" and s has "World" | project s, sp = s contains " "
-```
-**Generated SQL**
-```sql
-SELECT s, s ILIKE '% %' AS sp FROM (VALUES ('Hello\tWorld'), ('Hello World'), ('Hello\nWorld')) AS t(s) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\bHello\b') AND regexp_matches(CAST(s AS VARCHAR), '(?i)\bWorld\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, sp:Bool] rows=3
-    - ('Hello	World', False)
-    - ('Hello World', True)
-    - ('Hello
-World', False)
-- DuckDB: cols=[s:String, sp:Bool] rows=1
-    - ('Hello World', True)
-
-### `agent-string-ops-0013` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[cnt:Int|Real]  
-*Detail:* first differing row[0]: kusto=('key:"val"', 'val', 1) duck=('key:\"val\', '', 1)
-
-**KQL**
-```kql
-datatable(s:string)[ "key:\"val\"","key:'val'","key:val" ] | project s, ext=extract(@"key:.?(\w+)",1,s), cnt=countof(s,"val")
-```
-**Generated SQL**
-```sql
-SELECT s, REGEXP_EXTRACT(s, '@"key:.?(\w+)', 1) AS ext, (LENGTH(s) - LENGTH(REPLACE(s, 'val', ''))) / LENGTH('val') AS cnt FROM (VALUES ('key:\"val\'), ('key:''val'), ('key:val')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, ext:String, cnt:Int] rows=3
-    - ('key:"val"', 'val', 1)
-    - ('key:'val'', 'val', 1)
-    - ('key:val', 'al', 1)
-- DuckDB: cols=[s:String, ext:String, cnt:Real] rows=3
-    - ('key:\"val\', '', 1)
-    - ('key:'val', '', 1)
-    - ('key:val', '', 1)
-
-### `agent-string-ops-0014` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[c:Int|Real]  
-*Detail:* first differing row[0]: kusto=('a''b', 2, 1, 2) duck=('a''b', NaN, 0, 0)
-
-**KQL**
-```kql
-datatable(s:string)[ "a''b","a'b'c","'start","end'","''" ] | project s, c=countof(s,"'"), i=indexof(s,"'"), i2=indexof(s,"'",2)
-```
-**Generated SQL**
-```sql
-SELECT s, (LENGTH(s) - LENGTH(REPLACE(s, '', ''))) / LENGTH('') AS c, (INSTR(CAST(s AS VARCHAR), '') - 1) AS i, (INSTR(CAST(s AS VARCHAR), '') - 1) AS i2 FROM (VALUES ('a''''b'), ('a''b''c'), ('start'), ('end'), ('')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, c:Int, i:Int, i2:Int] rows=5
-    - ('a''b', 2, 1, 2)
-    - ('a'b'c', 2, 1, 3)
-    - (''start', 1, 0, -1)
-    - ('end'', 1, 3, 3)
-    - ('''', 2, 0, -1)
-- DuckDB: cols=[s:String, c:Real, i:Int, i2:Int] rows=5
-    - ('a''b', NaN, 0, 0)
-    - ('a'b'c', NaN, 0, 0)
-    - ('start', NaN, 0, 0)
-    - ('end', NaN, 0, 0)
-    - ('', NaN, 0, 0)
-
-### `agent-string-ops-0015` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[cnt:Int|Real]  
-*Detail:* first differing row[0]: kusto=('back\slash', 10, 4, 0) duck=('back\\slash', 11, 4, 0)
-
-**KQL**
-```kql
-datatable(s:string)[ "back\\slash","double\\\\slash","none" ] | project s, len=strlen(s), idx=indexof(s,"\\"), cnt=countof(s,@"\\")
-```
-**Generated SQL**
-```sql
-SELECT s, LENGTH(CAST(s AS VARCHAR)) AS len, (INSTR(CAST(s AS VARCHAR), '\\') - 1) AS idx, (LENGTH(s) - LENGTH(REPLACE(s, '@"\\', ''))) / LENGTH('@"\\') AS cnt FROM (VALUES ('back\\slash'), ('double\\\\slash'), ('none')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, len:Int, idx:Int, cnt:Int] rows=3
-    - ('back\slash', 10, 4, 0)
-    - ('double\\slash', 13, 6, 1)
-    - ('none', 4, -1, 0)
-- DuckDB: cols=[s:String, len:Int, idx:Int, cnt:Real] rows=3
-    - ('back\\slash', 11, 4, 0)
-    - ('double\\\\slash', 15, 6, 0)
-    - ('none', 4, -1, 0)
-
-### `agent-string-ops-0016` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('line1
-line2
-line3', [
-  "line1",
-  "line2",
-  "line3"
-], 3) duck=('line1\r\nline2\r\nline3', ["line1","line2","line3"], 3)
-
-**KQL**
-```kql
-datatable(s:string)[ "line1\r\nline2\r\nline3","one\ntwo","solo" ] | project s, parts=split(s,"\r\n"), n=array_length(split(s,"\r\n"))
-```
-**Generated SQL**
-```sql
-SELECT s, STRING_SPLIT(CAST(s AS VARCHAR), '\r\n') AS parts, LEN(STRING_SPLIT(CAST(s AS VARCHAR), '\r\n')) AS n FROM (VALUES ('line1\r\nline2\r\nline3'), ('one\ntwo'), ('solo')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, parts:Dynamic, n:Int] rows=3
-    - ('line1
-line2
-line3', [
-  "line1",
-  "line2",
-  "line3"
-], 3)
-    - ('one
-two', [
-  "one\ntwo"
-], 1)
-    - ('solo', [
-  "solo"
-], 1)
-- DuckDB: cols=[s:String, parts:Unknown, n:Int] rows=3
-    - ('line1\r\nline2\r\nline3', ["line1","line2","line3"], 3)
-    - ('one\ntwo', ["one\\ntwo"], 1)
-    - ('solo', ["solo"], 1)
+    - ('x9', ["x9"])
 
 ### `agent-string-ops-0018` — MismatchRows (high)
 
@@ -5417,7 +3239,7 @@ SELECT s, LEN(STRING_SPLIT(CAST(s AS VARCHAR), ',')) AS n, STRING_SPLIT(CAST(s A
 
 ### `agent-string-ops-0020` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('one two three', 'one-two-three', 'noe wto htere') duck=('one two three', 'one two three', 'one two three')
+*Detail:* first differing row[0]: kusto=('one two three', 'one-two-three', 'noe wto htere') duck=('one two three', 'one-two three', 'noe two three')
 
 **KQL**
 ```kql
@@ -5425,7 +3247,7 @@ datatable(s:string)[ "one two three","wordword","   " ] | project s, rr=replace_
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_REPLACE(s, '@"\s+', '-') AS rr, REGEXP_REPLACE(s, '@"(\w)(\w)', '@"\2\1') AS rr2 FROM (VALUES ('one two three'), ('wordword'), ('   ')) AS t(s)
+SELECT s, REGEXP_REPLACE(s, '\s+', '-') AS rr, REGEXP_REPLACE(s, '(\w)(\w)', '\2\1') AS rr2 FROM (VALUES ('one two three'), ('wordword'), ('   ')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5434,44 +3256,18 @@ SELECT s, REGEXP_REPLACE(s, '@"\s+', '-') AS rr, REGEXP_REPLACE(s, '@"(\w)(\w)',
     - ('wordword', 'wordword', 'owdrowdr')
     - ('   ', '-', '   ')
 - DuckDB: cols=[s:String, rr:String, rr2:String] rows=3
-    - ('one two three', 'one two three', 'one two three')
-    - ('wordword', 'wordword', 'wordword')
-    - ('   ', '   ', '   ')
+    - ('one two three', 'one-two three', 'noe two three')
+    - ('wordword', 'wordword', 'owrdword')
+    - ('   ', '-', '   ')
 
 ### `agent-string-ops-0021` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('2020-01-02 03:04', [
-  "2020",
-  "01",
-  "02",
-  "03",
-  "04"
-], [
-  [
-    "2",
-    "0"
-  ],
-  [
-    "2",
-    "0"
-  ],
-  [
-    "0",
-    "1"
-  ],
-  [
-    "0",
-    "2"
-  ],
-  [
-    "0",
-    "3"
-  ],
-  [
-    "0",
-    "4"
-  ]
-]) duck=('2020-01-02 03:04', [], [])
+*Detail:* first differing row[1]: kusto=('a1b2c3d4', [
+  "1",
+  "2",
+  "3",
+  "4"
+], null) duck=('a1b2c3d4', ["1","2","3","4"], [])
 
 **KQL**
 ```kql
@@ -5479,7 +3275,7 @@ datatable(s:string)[ "2020-01-02 03:04","a1b2c3d4","nope" ] | project s, all=ext
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_EXTRACT_ALL(s, '@"(\d+)') AS "all", LIST_TRANSFORM(range(1, GREATEST(LEN(REGEXP_EXTRACT_ALL(s, '@"(\d)(\d)', 1)), LEN(REGEXP_EXTRACT_ALL(s, '@"(\d)(\d)', 2))) + 1), lambda i: [REGEXP_EXTRACT_ALL(s, '@"(\d)(\d)', 1)[i], REGEXP_EXTRACT_ALL(s, '@"(\d)(\d)', 2)[i]]) AS all2 FROM (VALUES ('2020-01-02 03:04'), ('a1b2c3d4'), ('nope')) AS t(s)
+SELECT s, REGEXP_EXTRACT_ALL(s, '(\d+)') AS "all", LIST_TRANSFORM(range(1, GREATEST(LEN(REGEXP_EXTRACT_ALL(s, '(\d)(\d)', 1)), LEN(REGEXP_EXTRACT_ALL(s, '(\d)(\d)', 2))) + 1), lambda i: [REGEXP_EXTRACT_ALL(s, '(\d)(\d)', 1)[i], REGEXP_EXTRACT_ALL(s, '(\d)(\d)', 2)[i]]) AS all2 FROM (VALUES ('2020-01-02 03:04'), ('a1b2c3d4'), ('nope')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5524,128 +3320,9 @@ SELECT s, REGEXP_EXTRACT_ALL(s, '@"(\d+)') AS "all", LIST_TRANSFORM(range(1, GRE
 ], null)
     - ('nope', null, null)
 - DuckDB: cols=[s:String, all:Unknown, all2:Unknown] rows=3
-    - ('2020-01-02 03:04', [], [])
-    - ('a1b2c3d4', [], [])
+    - ('2020-01-02 03:04', ["2020","01","02","03","04"], [["2","0"],["2","0"],["0","1"],["0","2"],["0","3"],["0","4"]])
+    - ('a1b2c3d4', ["1","2","3","4"], [])
     - ('nope', [], [])
-
-### `agent-string-ops-0023` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('hello', 'll', '', '') duck=('hello', 'lo', '', '')
-
-**KQL**
-```kql
-datatable(s:string)[ "hello","HELLO","Hello" ] | project s, sub_neg=substring(s,-3,2), sub_negstart=substring(s,-100,3), sub_zerolen=substring(s,2,0)
-```
-**Generated SQL**
-```sql
-SELECT s, SUBSTR(CAST(s AS VARCHAR), ((-3)) + 1, 2) AS sub_neg, SUBSTR(CAST(s AS VARCHAR), ((-100)) + 1, 3) AS sub_negstart, SUBSTR(CAST(s AS VARCHAR), (2) + 1, 0) AS sub_zerolen FROM (VALUES ('hello'), ('HELLO'), ('Hello')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, sub_neg:String, sub_negstart:String, sub_zerolen:String] rows=3
-    - ('hello', 'll', '', '')
-    - ('HELLO', 'LL', '', '')
-    - ('Hello', 'll', '', '')
-- DuckDB: cols=[s:String, sub_neg:String, sub_negstart:String, sub_zerolen:String] rows=3
-    - ('hello', 'lo', '', '')
-    - ('HELLO', 'LO', '', '')
-    - ('Hello', 'lo', '', '')
-
-### `agent-string-ops-0024` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('abcdef', 'def', 'ef', '') duck=('abcdef', 'def', 'f', '')
-
-**KQL**
-```kql
-datatable(s:string)[ "abcdef","xy","" ] | project s, sm1=substring(s,3), sm2=substring(s,-2), sm3=substring(s,100)
-```
-**Generated SQL**
-```sql
-SELECT s, SUBSTR(CAST(s AS VARCHAR), (3) + 1) AS sm1, SUBSTR(CAST(s AS VARCHAR), ((-2)) + 1) AS sm2, SUBSTR(CAST(s AS VARCHAR), (100) + 1) AS sm3 FROM (VALUES ('abcdef'), ('xy'), ('')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, sm1:String, sm2:String, sm3:String] rows=3
-    - ('abcdef', 'def', 'ef', '')
-    - ('xy', '', 'xy', '')
-    - ('', '', '', '')
-- DuckDB: cols=[s:String, sm1:String, sm2:String, sm3:String] rows=3
-    - ('abcdef', 'def', 'f', '')
-    - ('xy', '', 'y', '')
-    - ('', '', '', '')
-
-### `agent-string-ops-0026` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('  pad  ', ' pad ', ' pad ', '  pad  ') duck=('  pad  ', '  pad  ', 'pad', '  pad  ')
-
-**KQL**
-```kql
-datatable(s:string)[ "  pad  ","\t\tx\t\t","yyy","" ] | project s, t=trim(@"\s",s), ts=trim(" ",s), tcustom=trim("y",s)
-```
-**Generated SQL**
-```sql
-SELECT s, TRIM(s, '@"\s') AS t, TRIM(s, ' ') AS ts, TRIM(s, 'y') AS tcustom FROM (VALUES ('  pad  '), ('\t\tx\t\t'), ('yyy'), ('')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, t:String, ts:String, tcustom:String] rows=4
-    - ('  pad  ', ' pad ', ' pad ', '  pad  ')
-    - ('		x		', '	x	', '		x		', '		x		')
-    - ('yyy', 'yyy', 'yyy', 'y')
-    - ('', '', '', '')
-- DuckDB: cols=[s:String, t:String, ts:String, tcustom:String] rows=4
-    - ('  pad  ', '  pad  ', 'pad', '  pad  ')
-    - ('\t\tx\t\t', 't\tx\t\t', '\t\tx\t\t', '\t\tx\t\t')
-    - ('yyy', 'yyy', 'yyy', '')
-    - ('', '', '', '')
-
-### `agent-string-ops-0027` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('xxhelloxx', 'xhelloxx', 'xxhelloxx', 'xhellox') duck=('xxhelloxx', 'helloxx', 'xxhelloxx', 'hello')
-
-**KQL**
-```kql
-datatable(s:string)[ "xxhelloxx","__world__","midxxmid" ] | project s, ts=trim_start("x",s), te=trim_end("_",s), full=trim(@"[x_]",s)
-```
-**Generated SQL**
-```sql
-SELECT s, LTRIM(s, 'x') AS ts, RTRIM(s, '_') AS te, TRIM(s, '@"[x_]') AS "full" FROM (VALUES ('xxhelloxx'), ('__world__'), ('midxxmid')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, ts:String, te:String, full:String] rows=3
-    - ('xxhelloxx', 'xhelloxx', 'xxhelloxx', 'xhellox')
-    - ('__world__', '__world__', '__world_', '_world_')
-    - ('midxxmid', 'midxxmid', 'midxxmid', 'midxxmid')
-- DuckDB: cols=[s:String, ts:String, te:String, full:String] rows=3
-    - ('xxhelloxx', 'helloxx', 'xxhelloxx', 'hello')
-    - ('__world__', '__world__', '__world', 'world')
-    - ('midxxmid', 'midxxmid', 'midxxmid', 'midxxmid')
-
-### `agent-string-ops-0034` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('100%done', '100') duck=('100%done', '')
-
-**KQL**
-```kql
-datatable(s:string)[ "100%done","50% off","%start","end%" ] | where s contains "%" | project s, e=extract(@"(\d+)%",1,s)
-```
-**Generated SQL**
-```sql
-SELECT s, REGEXP_EXTRACT(s, '@"(\d+)%', 1) AS e FROM (VALUES ('100%done'), ('50% off'), ('%start'), ('end%')) AS t(s) WHERE s ILIKE '%%%'
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, e:String] rows=4
-    - ('100%done', '100')
-    - ('50% off', '50')
-    - ('%start', '')
-    - ('end%', '')
-- DuckDB: cols=[s:String, e:String] rows=4
-    - ('100%done', '')
-    - ('50% off', '')
-    - ('%start', '')
-    - ('end%', '')
 
 ### `agent-string-ops-0035` — MismatchRows (high)
 
@@ -5657,7 +3334,7 @@ datatable(s:string)[ "a_b","a%b","a\\b","a[b]" ] | where s contains "%" or s con
 ```
 **Generated SQL**
 ```sql
-SELECT s FROM (VALUES ('a_b'), ('a%b'), ('a\\b'), ('a[b]')) AS t(s) WHERE s ILIKE '%%%' OR s ILIKE '%_%'
+SELECT s FROM (VALUES ('a_b'), ('a%b'), ('a\b'), ('a[b]')) AS t(s) WHERE s ILIKE '%%%' OR s ILIKE '%_%'
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5667,79 +3344,12 @@ SELECT s FROM (VALUES ('a_b'), ('a%b'), ('a\\b'), ('a[b]')) AS t(s) WHERE s ILIK
 - DuckDB: cols=[s:String] rows=4
     - ('a_b')
     - ('a%b')
-    - ('a\\b')
+    - ('a\b')
     - ('a[b]')
-
-### `agent-string-ops-0042` — MismatchRows (high)
-
-*Detail:* row count: kusto=3 duck=0
-
-**KQL**
-```kql
-datatable(s:string)[ "Привет мир","ПРИВЕТ","привет","МИР" ] | where s has "мир" or s has_cs "ПРИВЕТ" | project s, up=toupper(s), lo=tolower(s)
-```
-**Generated SQL**
-```sql
-SELECT s, UPPER(s) AS up, LOWER(s) AS lo FROM (VALUES ('Привет мир'), ('ПРИВЕТ'), ('привет'), ('МИР')) AS t(s) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\bмир\b') OR regexp_matches(CAST(s AS VARCHAR), '\bПРИВЕТ\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, up:String, lo:String] rows=3
-    - ('Привет мир', 'ПРИВЕТ МИР', 'привет мир')
-    - ('ПРИВЕТ', 'ПРИВЕТ', 'привет')
-    - ('МИР', 'МИР', 'мир')
-- DuckDB: cols=[s:String, up:String, lo:String] rows=0
-
-### `agent-string-ops-0002` — MismatchRows (high)
-
-*Detail:* row count: kusto=1 duck=0
-
-**KQL**
-```kql
-datatable(s:string)[ "version=1.2.3","v1.2.3","1.2.3-rc","1_2_3" ] | where s has "1" and s has "3" and s !has "2.3" | project s
-```
-**Generated SQL**
-```sql
-SELECT s FROM (VALUES ('version=1.2.3'), ('v1.2.3'), ('1.2.3-rc'), ('1_2_3')) AS t(s) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\b1\b') AND regexp_matches(CAST(s AS VARCHAR), '(?i)\b3\b') AND NOT regexp_matches(CAST(s AS VARCHAR), '(?i)\b2\.3\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String] rows=1
-    - ('1_2_3')
-- DuckDB: cols=[s:String] rows=0
-
-### `agent-string-ops-0003` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('a=b&c=d', 'a=b&c=d', 'a=b&c=d', '') duck=('a=b&c=d', 'a=b&c=d', 'a=b&c=d', null)
-
-**KQL**
-```kql
-datatable(s:string)[ "key:value;k2:v2","a=b&c=d","x;y;z" ] | mv-expand kv=split(s,";") to typeof(string) | extend pair=split(tostring(kv),":") | project s, kv=tostring(kv), k=tostring(pair[0]), v=tostring(pair[1]) | order by s asc, kv asc
-```
-**Generated SQL**
-```sql
-SELECT s, TRY_CAST(kv AS TEXT) AS kv, TRY_CAST(pair[0 + 1] AS TEXT) AS k, TRY_CAST(pair[1 + 1] AS TEXT) AS v FROM (SELECT *, STRING_SPLIT(CAST(TRY_CAST(kv AS TEXT) AS VARCHAR), ':') AS pair FROM (SELECT t.*, CAST(u.value AS VARCHAR) AS kv FROM (SELECT * FROM (VALUES ('key:value;k2:v2'), ('a=b&c=d'), ('x;y;z')) AS t(s)) AS t CROSS JOIN UNNEST(STRING_SPLIT(CAST(s AS VARCHAR), ';')) AS u(value))) ORDER BY s ASC NULLS FIRST, kv ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, kv:String, k:String, v:String] rows=6
-    - ('a=b&c=d', 'a=b&c=d', 'a=b&c=d', '')
-    - ('key:value;k2:v2', 'k2:v2', 'k2', 'v2')
-    - ('key:value;k2:v2', 'key:value', 'key', 'value')
-    - ('x;y;z', 'x', 'x', '')
-    - ('x;y;z', 'y', 'y', '')
-    - ('x;y;z', 'z', 'z', '')
-- DuckDB: cols=[s:String, kv:String, k:String, v:String] rows=6
-    - ('a=b&c=d', 'a=b&c=d', 'a=b&c=d', null)
-    - ('key:value;k2:v2', 'k2:v2', 'k2', 'v2')
-    - ('key:value;k2:v2', 'key:value', 'key', 'value')
-    - ('x;y;z', 'x', 'x', null)
-    - ('x;y;z', 'y', 'y', null)
-    - ('x;y;z', 'z', 'z', null)
 
 ### `agent-string-ops-0007` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('  spaced  ', ' spaced ', 8, True) duck=('  spaced  ', '  spaced  ', 10, False)
+*Detail:* first differing row[1]: kusto=(' nbsp ', 'nbsp', 4, True) duck=(' nbsp ', ' nbsp ', 6, False)
 
 **KQL**
 ```kql
@@ -5747,7 +3357,7 @@ datatable(s:string)[ "  spaced  "," nbsp ","tab\ttab","plain" ] | project s, t
 ```
 **Generated SQL**
 ```sql
-SELECT s, TRIM(s, '@"\s') AS t, LENGTH(CAST(TRIM(s, '@"\s') AS VARCHAR)) AS tlen, (REGEXP_MATCHES(s, '@"\s')) AS hasws FROM (VALUES ('  spaced  '), (' nbsp '), ('tab\ttab'), ('plain')) AS t(s)
+SELECT s, REGEXP_REPLACE(REGEXP_REPLACE(s, '^(\s)', ''), '(\s)$', '') AS t, LENGTH(CAST(REGEXP_REPLACE(REGEXP_REPLACE(s, '^(\s)', ''), '(\s)$', '') AS VARCHAR)) AS tlen, (REGEXP_MATCHES(s, '\s')) AS hasws FROM (VALUES ('  spaced  '), (' nbsp '), ('tab	tab'), ('plain')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5757,15 +3367,14 @@ SELECT s, TRIM(s, '@"\s') AS t, LENGTH(CAST(TRIM(s, '@"\s') AS VARCHAR)) AS tlen
     - ('tab	tab', 'tab	tab', 7, True)
     - ('plain', 'plain', 5, False)
 - DuckDB: cols=[s:String, t:String, tlen:Int, hasws:Bool] rows=4
-    - ('  spaced  ', '  spaced  ', 10, False)
+    - ('  spaced  ', ' spaced ', 8, True)
     - (' nbsp ', ' nbsp ', 6, False)
-    - ('tab\ttab', 'tab\ttab', 8, False)
+    - ('tab	tab', 'tab	tab', 7, True)
     - ('plain', 'plain', 5, False)
 
 ### `agent-string-ops-0008` — MismatchRows (high)
 
-*Sub-verdicts:* TYPE_MISMATCH[cnt:Int|Real]  
-*Detail:* first differing row[0]: kusto=('abcABCabc', '###', 'abc_ABCabc', 6) duck=('abcABCabc', 'abcABCabc', 'abcABCabc', 0)
+*Detail:* first differing row[0]: kusto=('abcABCabc', '###', 'abc_ABCabc', 6) duck=('abcABCabc', '#ABCabc', 'abc_ABCabc', 6)
 
 **KQL**
 ```kql
@@ -5773,7 +3382,7 @@ datatable(s:string)[ "abcABCabc","XYZxyz","123" ] | project s, ri=replace_regex(
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_REPLACE(s, '@"(?i)abc', '#') AS ri, REGEXP_REPLACE(s, '@"([a-z])([A-Z])', '@"\1_\2') AS rg, (LENGTH(s) - LENGTH(REPLACE(s, '@"[a-z]', ''))) / LENGTH('@"[a-z]') AS cnt FROM (VALUES ('abcABCabc'), ('XYZxyz'), ('123')) AS t(s)
+SELECT s, REGEXP_REPLACE(s, '(?i)abc', '#') AS ri, REGEXP_REPLACE(s, '([a-z])([A-Z])', '\1_\2') AS rg, LEN(REGEXP_EXTRACT_ALL(CAST(s AS VARCHAR), '[a-z]')) AS cnt FROM (VALUES ('abcABCabc'), ('XYZxyz'), ('123')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5781,9 +3390,9 @@ SELECT s, REGEXP_REPLACE(s, '@"(?i)abc', '#') AS ri, REGEXP_REPLACE(s, '@"([a-z]
     - ('abcABCabc', '###', 'abc_ABCabc', 6)
     - ('XYZxyz', 'XYZxyz', 'XYZxyz', 3)
     - ('123', '123', '123', 0)
-- DuckDB: cols=[s:String, ri:String, rg:String, cnt:Real] rows=3
-    - ('abcABCabc', 'abcABCabc', 'abcABCabc', 0)
-    - ('XYZxyz', 'XYZxyz', 'XYZxyz', 0)
+- DuckDB: cols=[s:String, ri:String, rg:String, cnt:Int] rows=3
+    - ('abcABCabc', '#ABCabc', 'abc_ABCabc', 6)
+    - ('XYZxyz', 'XYZxyz', 'XYZxyz', 3)
     - ('123', '123', '123', 0)
 
 ### `agent-string-ops-0009` — MismatchRows (high)
@@ -5801,7 +3410,7 @@ SELECT s, REGEXP_REPLACE(s, '@"(?i)abc', '#') AS ri, REGEXP_REPLACE(s, '@"([a-z]
     "c",
     "3"
   ]
-], 3) duck=('a1b2c3', [], 0)
+], 3) duck=('a1b2c3', ["a1","b2","c3"], 3)
 
 **KQL**
 ```kql
@@ -5809,7 +3418,7 @@ datatable(s:string)[ "a1b2c3","aXbYcZ","abc" ] | project s, ea=extract_all(@"([a
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_EXTRACT_ALL(s, '@"([a-z])(\d)?') AS ea, LEN(REGEXP_EXTRACT_ALL(s, '@"([a-z])(\d)?')) AS n FROM (VALUES ('a1b2c3'), ('aXbYcZ'), ('abc')) AS t(s)
+SELECT s, REGEXP_EXTRACT_ALL(s, '([a-z])(\d)?') AS ea, LEN(REGEXP_EXTRACT_ALL(s, '([a-z])(\d)?')) AS n FROM (VALUES ('a1b2c3'), ('aXbYcZ'), ('abc')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5857,9 +3466,9 @@ SELECT s, REGEXP_EXTRACT_ALL(s, '@"([a-z])(\d)?') AS ea, LEN(REGEXP_EXTRACT_ALL(
   ]
 ], 3)
 - DuckDB: cols=[s:String, ea:Unknown, n:Int] rows=3
-    - ('a1b2c3', [], 0)
-    - ('aXbYcZ', [], 0)
-    - ('abc', [], 0)
+    - ('a1b2c3', ["a1","b2","c3"], 3)
+    - ('aXbYcZ', ["a","b","c"], 3)
+    - ('abc', ["a","b","c"], 3)
 
 ### `agent-string-ops-0010` — MismatchRows (high)
 
@@ -5872,7 +3481,7 @@ datatable(s:string)[ "first.second.third","onlyone","..","a..b" ] | project s, p
 ```
 **Generated SQL**
 ```sql
-SELECT s, STRING_SPLIT(CAST(s AS VARCHAR), '.')[0 + 1] AS p0, STRING_SPLIT(CAST(s AS VARCHAR), '.')[(-1) + 1] AS pneg, LEN(STRING_SPLIT(CAST(s AS VARCHAR), '.')) AS cnt, CONCAT_WS('/', TRY_CAST(STRING_SPLIT(CAST(s AS VARCHAR), '.')[0 + 1] AS TEXT), TRY_CAST(STRING_SPLIT(CAST(s AS VARCHAR), '.')[1 + 1] AS TEXT)) AS joined FROM (VALUES ('first.second.third'), ('onlyone'), ('..'), ('a..b')) AS t(s)
+SELECT s, STRING_SPLIT(CAST(s AS VARCHAR), '.')[0 + 1] AS p0, STRING_SPLIT(CAST(s AS VARCHAR), '.')[(-1) + 1] AS pneg, LEN(STRING_SPLIT(CAST(s AS VARCHAR), '.')) AS cnt, CONCAT_WS('/', COALESCE(TRY_CAST(STRING_SPLIT(CAST(s AS VARCHAR), '.')[0 + 1] AS TEXT), ''), COALESCE(TRY_CAST(STRING_SPLIT(CAST(s AS VARCHAR), '.')[1 + 1] AS TEXT), '')) AS joined FROM (VALUES ('first.second.third'), ('onlyone'), ('..'), ('a..b')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5883,63 +3492,13 @@ SELECT s, STRING_SPLIT(CAST(s AS VARCHAR), '.')[0 + 1] AS p0, STRING_SPLIT(CAST(
     - ('a..b', "a", "b", 3, 'a/')
 - DuckDB: cols=[s:String, p0:String, pneg:String, cnt:Int, joined:String] rows=4
     - ('first.second.third', 'first', null, 3, 'first/second')
-    - ('onlyone', 'onlyone', null, 1, 'onlyone')
+    - ('onlyone', 'onlyone', null, 1, 'onlyone/')
     - ('..', '', null, 3, '/')
     - ('a..b', 'a', null, 3, 'a/')
 
-### `agent-string-ops-0011` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[q:Int|Real]  
-*Detail:* first differing row[0]: kusto=('He said "hi"', 12, 2, 8, -1) duck=('He said \"hi\', 13, 2, 8, -1)
-
-**KQL**
-```kql
-datatable(s:string)[ "He said \"hi\"","tab\there","mix\"\t\"end" ] | project s, l=strlen(s), q=countof(s,"\""), idxq=indexof(s,"\""), idxt=indexof(s,"\t")
-```
-**Generated SQL**
-```sql
-SELECT s, LENGTH(CAST(s AS VARCHAR)) AS l, (LENGTH(s) - LENGTH(REPLACE(s, '\', ''))) / LENGTH('\') AS q, (INSTR(CAST(s AS VARCHAR), '\') - 1) AS idxq, (INSTR(CAST(s AS VARCHAR), '\t') - 1) AS idxt FROM (VALUES ('He said \"hi\'), ('tab\there'), ('mix\"\t\"end')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, l:Int, q:Int, idxq:Int, idxt:Int] rows=3
-    - ('He said "hi"', 12, 2, 8, -1)
-    - ('tab	here', 8, 0, -1, 3)
-    - ('mix"	"end', 9, 2, 3, 4)
-- DuckDB: cols=[s:String, l:Int, q:Real, idxq:Int, idxt:Int] rows=3
-    - ('He said \"hi\', 13, 2, 8, -1)
-    - ('tab\there', 9, 1, 3, 3)
-    - ('mix\"\t\"end', 12, 3, 3, 5)
-
-### `agent-string-ops-0012` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[c:Int|Real]  
-*Detail:* first differing row[0]: kusto=('O'Brien's', 2, 'O''Brien''s', 7) duck=('O'Brien's', NaN, 'O'Brien's', 0)
-
-**KQL**
-```kql
-datatable(s:string)[ "O'Brien's","it''s","''","a'b'c'd" ] | project s, c=countof(s,"'"), repl=replace_string(s,"'","''"), i3=indexof(s,"'",3)
-```
-**Generated SQL**
-```sql
-SELECT s, (LENGTH(s) - LENGTH(REPLACE(s, '', ''))) / LENGTH('') AS c, REPLACE(s, '', '') AS repl, (INSTR(CAST(s AS VARCHAR), '') - 1) AS i3 FROM (VALUES ('O''Brien''s'), ('it''''s'), (''), ('a''b''c''d')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, c:Int, repl:String, i3:Int] rows=4
-    - ('O'Brien's', 2, 'O''Brien''s', 7)
-    - ('it''s', 2, 'it''''s', 3)
-    - ('''', 2, '''''', -1)
-    - ('a'b'c'd', 3, 'a''b''c''d', 3)
-- DuckDB: cols=[s:String, c:Real, repl:String, i3:Int] rows=4
-    - ('O'Brien's', NaN, 'O'Brien's', 0)
-    - ('it''s', NaN, 'it''s', 0)
-    - ('', NaN, '', 0)
-    - ('a'b'c'd', NaN, 'a'b'c'd', 0)
-
 ### `agent-string-ops-0015` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('x', 'y', '', 'x') duck=('x', 'x', '', 'x')
+*Detail:* first differing row[1]: kusto=('xx', 'yy', 'x', 'xx') duck=('xx', 'yx', 'x', 'xx')
 
 **KQL**
 ```kql
@@ -5947,7 +3506,7 @@ datatable(s:string)[ "x","xx","xxx","xxxx" ] | project s, rep=replace_regex(s,@"
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_REPLACE(s, '@"x', CONCAT('y')) AS rep, RTRIM(s, 'x') AS trimmed, SUBSTR(CAST(s AS VARCHAR), (LENGTH(CAST(s AS VARCHAR)) - 2) + 1, 2) AS subneg FROM (VALUES ('x'), ('xx'), ('xxx'), ('xxxx')) AS t(s)
+SELECT s, REGEXP_REPLACE(s, 'x', CONCAT('y')) AS rep, REGEXP_REPLACE(s, '(x)$', '') AS trimmed, (CASE WHEN (2) < 0 THEN '' ELSE SUBSTR(CAST(s AS VARCHAR), (CASE WHEN (LENGTH(CAST(s AS VARCHAR)) - 2) < 0 THEN (LENGTH(CAST(s AS VARCHAR)) - 2) ELSE (LENGTH(CAST(s AS VARCHAR)) - 2) + 1 END), 2) END) AS subneg FROM (VALUES ('x'), ('xx'), ('xxx'), ('xxxx')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5957,15 +3516,15 @@ SELECT s, REGEXP_REPLACE(s, '@"x', CONCAT('y')) AS rep, RTRIM(s, 'x') AS trimmed
     - ('xxx', 'yyy', 'xx', 'xx')
     - ('xxxx', 'yyyy', 'xxx', 'xx')
 - DuckDB: cols=[s:String, rep:String, trimmed:String, subneg:String] rows=4
-    - ('x', 'x', '', 'x')
-    - ('xx', 'xx', '', 'xx')
-    - ('xxx', 'xxx', '', 'xx')
-    - ('xxxx', 'xxxx', '', 'xx')
+    - ('x', 'y', '', 'x')
+    - ('xx', 'yx', 'x', 'xx')
+    - ('xxx', 'yxx', 'xx', 'xx')
+    - ('xxxx', 'yxxx', 'xxx', 'xx')
 
 ### `agent-string-ops-0017` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[cnt:Int|Real]  
-*Detail:* first differing row[0]: kusto=('Hello\nWorld', 12, False, True, 1) duck=('Hello\\nWorld', 13, True, True, 1)
+*Detail:* first differing row[0]: kusto=('Hello\nWorld', 12, False, True, 1) duck=('Hello\nWorld', 12, True, False, 1)
 
 **KQL**
 ```kql
@@ -5973,7 +3532,8 @@ datatable(s:string)[ "Hello\\nWorld","Hello\nWorld","a\\tb","a\tb" ] | project s
 ```
 **Generated SQL**
 ```sql
-SELECT s, LENGTH(CAST(s AS VARCHAR)) AS l, (s ILIKE '%\n%') AS hasnl, (s ILIKE '%\\%') AS hasbs, (LENGTH(s) - LENGTH(REPLACE(s, '\\', ''))) / LENGTH('\\') AS cnt FROM (VALUES ('Hello\\nWorld'), ('Hello\nWorld'), ('a\\tb'), ('a\tb')) AS t(s)
+SELECT s, LENGTH(CAST(s AS VARCHAR)) AS l, (s ILIKE '%\n%') AS hasnl, (s ILIKE '%\\%') AS hasbs, (LENGTH(s) - LENGTH(REPLACE(s, '\', ''))) / LENGTH('\') AS cnt FROM (VALUES ('Hello\nWorld'), ('Hello
+World'), ('a\tb'), ('a	b')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -5984,39 +3544,11 @@ World', 11, True, False, 0)
     - ('a\tb', 4, False, True, 1)
     - ('a	b', 3, False, False, 0)
 - DuckDB: cols=[s:String, l:Int, hasnl:Bool, hasbs:Bool, cnt:Real] rows=4
-    - ('Hello\\nWorld', 13, True, True, 1)
-    - ('Hello\nWorld', 12, True, False, 0)
-    - ('a\\tb', 5, False, True, 1)
-    - ('a\tb', 4, False, False, 0)
-
-### `agent-string-ops-0020` — MismatchRows (high)
-
-*Detail:* row count: kusto=2 duck=0
-
-**KQL**
-```kql
-datatable(s:string)[ "192.168.0.1","10.0.0.255","not.an.ip","1.2.3" ] | where s matches regex @"^\d{1,3}(\.\d{1,3}){3}$" | project s, parts=split(s,"."), oct0=toint(split(s,".")[0])
-```
-**Generated SQL**
-```sql
-SELECT s, STRING_SPLIT(CAST(s AS VARCHAR), '.') AS parts, TRY_CAST(TRUNC(COALESCE(TRY_CAST(STRING_SPLIT(CAST(s AS VARCHAR), '.')[0 + 1] AS DOUBLE), TRY_CAST(TRY_CAST(STRING_SPLIT(CAST(s AS VARCHAR), '.')[0 + 1] AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS oct0 FROM (VALUES ('192.168.0.1'), ('10.0.0.255'), ('not.an.ip'), ('1.2.3')) AS t(s) WHERE REGEXP_MATCHES(s, '@"^\d{1,3}(\.\d{1,3}){3}$')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, parts:Dynamic, oct0:Int] rows=2
-    - ('192.168.0.1', [
-  "192",
-  "168",
-  "0",
-  "1"
-], 192)
-    - ('10.0.0.255', [
-  "10",
-  "0",
-  "0",
-  "255"
-], 10)
-- DuckDB: cols=[s:String, parts:Unknown, oct0:Int] rows=0
+    - ('Hello\nWorld', 12, True, False, 1)
+    - ('Hello
+World', 11, False, False, 0)
+    - ('a\tb', 4, False, False, 1)
+    - ('a	b', 3, False, False, 0)
 
 ### `agent-string-ops-0021` — MismatchRows (high)
 
@@ -6034,7 +3566,7 @@ SELECT s, STRING_SPLIT(CAST(s AS VARCHAR), '.') AS parts, TRY_CAST(TRUNC(COALESC
     "a",
     "b"
   ]
-], 3) duck=('ababab', 'ababab', [], 3)
+], 3) duck=('ababab', 'X', ["ab","ab","ab"], 3)
 
 **KQL**
 ```kql
@@ -6042,7 +3574,7 @@ datatable(s:string)[ "ababab","aaa","abc","" ] | project s, ra=replace_regex(s,@
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_REPLACE(s, '@"(ab)+', 'X') AS ra, REGEXP_EXTRACT_ALL(s, '@"(a)(b)?') AS ea, (LENGTH(s) - LENGTH(REPLACE(s, 'ab', ''))) / LENGTH('ab') AS cnt FROM (VALUES ('ababab'), ('aaa'), ('abc'), ('')) AS t(s)
+SELECT s, REGEXP_REPLACE(s, '(ab)+', 'X') AS ra, REGEXP_EXTRACT_ALL(s, '(a)(b)?') AS ea, (LENGTH(s) - LENGTH(REPLACE(s, 'ab', ''))) / LENGTH('ab') AS cnt FROM (VALUES ('ababab'), ('aaa'), ('abc'), ('')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -6083,39 +3615,14 @@ SELECT s, REGEXP_REPLACE(s, '@"(ab)+', 'X') AS ra, REGEXP_EXTRACT_ALL(s, '@"(a)(
 ], 1)
     - ('', '', null, 0)
 - DuckDB: cols=[s:String, ra:String, ea:Unknown, cnt:Real] rows=4
-    - ('ababab', 'ababab', [], 3)
-    - ('aaa', 'aaa', [], 0)
-    - ('abc', 'abc', [], 1)
+    - ('ababab', 'X', ["ab","ab","ab"], 3)
+    - ('aaa', 'aaa', ["a","a","a"], 0)
+    - ('abc', 'Xc', ["ab"], 1)
     - ('', '', [], 0)
-
-### `agent-string-ops-0024` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('trailing   ', 'trailing  ', 'trailing   ', 10, 'trailing  ') duck=('trailing   ', 'trailing', 'trailing   ', 8, 'trailing')
-
-**KQL**
-```kql
-datatable(s:string)[ "trailing   ","   leading","  both  ","none" ] | project s, te=trim_end(" ",s), ts=trim_start(" ",s), lente=strlen(trim_end(" ",s)), full=trim(" ",s)
-```
-**Generated SQL**
-```sql
-SELECT s, RTRIM(s, ' ') AS te, LTRIM(s, ' ') AS ts, LENGTH(CAST(RTRIM(s, ' ') AS VARCHAR)) AS lente, TRIM(s, ' ') AS "full" FROM (VALUES ('trailing   '), ('   leading'), ('  both  '), ('none')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, te:String, ts:String, lente:Int, full:String] rows=4
-    - ('trailing   ', 'trailing  ', 'trailing   ', 10, 'trailing  ')
-    - ('   leading', '   leading', '  leading', 10, '  leading')
-    - ('  both  ', '  both ', ' both  ', 7, ' both ')
-    - ('none', 'none', 'none', 4, 'none')
-- DuckDB: cols=[s:String, te:String, ts:String, lente:Int, full:String] rows=4
-    - ('trailing   ', 'trailing', 'trailing   ', 8, 'trailing')
-    - ('   leading', '   leading', 'leading', 10, 'leading')
-    - ('  both  ', '  both', 'both  ', 6, 'both')
-    - ('none', 'none', 'none', 4, 'none')
 
 ### `agent-string-ops-0026` — MismatchRows (high)
 
-*Detail:* row count: kusto=3 duck=0
+*Detail:* row count: kusto=3 duck=2
 
 **KQL**
 ```kql
@@ -6123,7 +3630,7 @@ datatable(s:string)[ "ＡＢ１２","AB12","ＡＢ12" ] | where s matches regex 
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_EXTRACT_ALL(s, '@"(\d)') AS dig, LENGTH(CAST(s AS VARCHAR)) AS l FROM (VALUES ('ＡＢ１２'), ('AB12'), ('ＡＢ12')) AS t(s) WHERE REGEXP_MATCHES(s, '@"\d')
+SELECT s, REGEXP_EXTRACT_ALL(s, '(\d)') AS dig, LENGTH(CAST(s AS VARCHAR)) AS l FROM (VALUES ('ＡＢ１２'), ('AB12'), ('ＡＢ12')) AS t(s) WHERE REGEXP_MATCHES(s, '\d')
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -6140,73 +3647,9 @@ SELECT s, REGEXP_EXTRACT_ALL(s, '@"(\d)') AS dig, LENGTH(CAST(s AS VARCHAR)) AS 
   "1",
   "2"
 ], 4)
-- DuckDB: cols=[s:String, dig:Unknown, l:Int] rows=0
-
-### `agent-string-ops-0027` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[cnt:Int|Real]  
-*Detail:* first differing row[0]: kusto=('a\b\c', [
-  "a",
-  "b",
-  "c"
-], 3, 2) duck=('a\\b\\c', ["a\\\\b\\\\c"], 1, 0)
-
-**KQL**
-```kql
-datatable(s:string)[ "a\\b\\c","a\\\\b","\\","noslash" ] | project s, parts=split(s,@"\"), n=array_length(split(s,@"\")), cnt=countof(s,@"\")
-```
-**Generated SQL**
-```sql
-SELECT s, STRING_SPLIT(CAST(s AS VARCHAR), '@"\') AS parts, LEN(STRING_SPLIT(CAST(s AS VARCHAR), '@"\')) AS n, (LENGTH(s) - LENGTH(REPLACE(s, '@"\', ''))) / LENGTH('@"\') AS cnt FROM (VALUES ('a\\b\\c'), ('a\\\\b'), ('\\'), ('noslash')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, parts:Dynamic, n:Int, cnt:Int] rows=4
-    - ('a\b\c', [
-  "a",
-  "b",
-  "c"
-], 3, 2)
-    - ('a\\b', [
-  "a",
-  "",
-  "b"
-], 3, 2)
-    - ('\', [
-  "",
-  ""
-], 2, 1)
-    - ('noslash', [
-  "noslash"
-], 1, 0)
-- DuckDB: cols=[s:String, parts:Unknown, n:Int, cnt:Real] rows=4
-    - ('a\\b\\c', ["a\\\\b\\\\c"], 1, 0)
-    - ('a\\\\b', ["a\\\\\\\\b"], 1, 0)
-    - ('\\', ["\\\\"], 1, 0)
-    - ('noslash', ["noslash"], 1, 0)
-
-### `agent-string-ops-0029` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('abcdefghij', 'defg', 'hij', 'fghij', 'gh') duck=('abcdefghij', 'defg', 'hij', 'fghij', 'hi')
-
-**KQL**
-```kql
-datatable(s:string)[ "abcdefghij","short","" ] | project s, mid=substring(s,3,4), tail=substring(s,strlen(s)-3), oor=substring(s,5,100), negpair=substring(s,-4,2)
-```
-**Generated SQL**
-```sql
-SELECT s, SUBSTR(CAST(s AS VARCHAR), (3) + 1, 4) AS mid, SUBSTR(CAST(s AS VARCHAR), (LENGTH(CAST(s AS VARCHAR)) - 3) + 1) AS tail, SUBSTR(CAST(s AS VARCHAR), (5) + 1, 100) AS oor, SUBSTR(CAST(s AS VARCHAR), ((-4)) + 1, 2) AS negpair FROM (VALUES ('abcdefghij'), ('short'), ('')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, mid:String, tail:String, oor:String, negpair:String] rows=3
-    - ('abcdefghij', 'defg', 'hij', 'fghij', 'gh')
-    - ('short', 'rt', 'ort', '', 'ho')
-    - ('', '', '', '', '')
-- DuckDB: cols=[s:String, mid:String, tail:String, oor:String, negpair:String] rows=3
-    - ('abcdefghij', 'defg', 'hij', 'fghij', 'hi')
-    - ('short', 'rt', 'ort', '', 'or')
-    - ('', '', '', '', '')
+- DuckDB: cols=[s:String, dig:Unknown, l:Int] rows=2
+    - ('AB12', ["1","2"], 4)
+    - ('ＡＢ12', ["1","2"], 4)
 
 ### `agent-string-ops-0030` — MismatchRows (high)
 
@@ -6214,7 +3657,7 @@ SELECT s, SUBSTR(CAST(s AS VARCHAR), (3) + 1, 4) AS mid, SUBSTR(CAST(s AS VARCHA
   ";",
   ",",
   "|"
-], 3, 'x_y_z_w') duck=('x;y,z|w', [], 0, 'x;y,z|w')
+], 3, 'x_y_z_w') duck=('x;y,z|w', [";",",","|"], 3, 'x_y,z|w')
 
 **KQL**
 ```kql
@@ -6222,7 +3665,7 @@ datatable(s:string)[ "x;y,z|w","a-b","single" ] | project s, sp=extract_all(@"([
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_EXTRACT_ALL(s, '@"([;,|-])') AS sp, LEN(REGEXP_EXTRACT_ALL(s, '@"([;,|-])')) AS n, REGEXP_REPLACE(s, '@"[;,|-]', '_') AS repl FROM (VALUES ('x;y,z|w'), ('a-b'), ('single')) AS t(s)
+SELECT s, REGEXP_EXTRACT_ALL(s, '([;,|-])') AS sp, LEN(REGEXP_EXTRACT_ALL(s, '([;,|-])')) AS n, REGEXP_REPLACE(s, '[;,|-]', '_') AS repl FROM (VALUES ('x;y,z|w'), ('a-b'), ('single')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -6237,8 +3680,8 @@ SELECT s, REGEXP_EXTRACT_ALL(s, '@"([;,|-])') AS sp, LEN(REGEXP_EXTRACT_ALL(s, '
 ], 1, 'a_b')
     - ('single', null, null, 'single')
 - DuckDB: cols=[s:String, sp:Unknown, n:Int, repl:String] rows=3
-    - ('x;y,z|w', [], 0, 'x;y,z|w')
-    - ('a-b', [], 0, 'a-b')
+    - ('x;y,z|w', [";",",","|"], 3, 'x_y,z|w')
+    - ('a-b', ["-"], 1, 'a_b')
     - ('single', [], 0, 'single')
 
 ### `agent-string-ops-0032` — MismatchRows (high)
@@ -6247,7 +3690,7 @@ SELECT s, REGEXP_EXTRACT_ALL(s, '@"([;,|-])') AS sp, LEN(REGEXP_EXTRACT_ALL(s, '
 *Detail:* first differing row[0]: kusto=('<tag>text</tag>', 'tag', [
   "tag",
   "/tag"
-], 2) duck=('<tag>text</tag>', '', [], 2)
+], 2) duck=('<tag>text</tag>', 'tag', ["\u003Ctag","\u003C/tag"], 2)
 
 **KQL**
 ```kql
@@ -6255,7 +3698,7 @@ datatable(s:string)[ "<tag>text</tag>","<br/>","plain text","<a href=\"x\">" ] |
 ```
 **Generated SQL**
 ```sql
-SELECT s, REGEXP_EXTRACT(s, '@"<([a-z]+)', 1) AS "inner", REGEXP_EXTRACT_ALL(s, '@"<(/?[a-z]+)') AS "all", (LENGTH(s) - LENGTH(REPLACE(s, '<', ''))) / LENGTH('<') AS cnt FROM (VALUES ('<tag>text</tag>'), ('<br/>'), ('plain text'), ('<a href=\"x\">')) AS t(s)
+SELECT s, REGEXP_EXTRACT(s, '<([a-z]+)', 1) AS "inner", REGEXP_EXTRACT_ALL(s, '<(/?[a-z]+)') AS "all", (LENGTH(s) - LENGTH(REPLACE(s, '<', ''))) / LENGTH('<') AS cnt FROM (VALUES ('<tag>text</tag>'), ('<br/>'), ('plain text'), ('<a href="x">')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -6272,14 +3715,14 @@ SELECT s, REGEXP_EXTRACT(s, '@"<([a-z]+)', 1) AS "inner", REGEXP_EXTRACT_ALL(s, 
   "a"
 ], 1)
 - DuckDB: cols=[s:String, inner:String, all:Unknown, cnt:Real] rows=4
-    - ('<tag>text</tag>', '', [], 2)
-    - ('<br/>', '', [], 1)
+    - ('<tag>text</tag>', 'tag', ["\u003Ctag","\u003C/tag"], 2)
+    - ('<br/>', 'br', ["\u003Cbr"], 1)
     - ('plain text', '', [], 0)
-    - ('<a href=\"x\">', '', [], 1)
+    - ('<a href="x">', 'a', ["\u003Ca"], 1)
 
 ### `agent-string-ops-0036` — MismatchRows (high)
 
-*Detail:* first differing row[1]: kusto=('a	b', 3, 3, 'ab', False) duck=('a\tb', 4, 4, 'ab', False)
+*Detail:* first differing row[2]: kusto=('a b', 3, 3, 'ab', True) duck=('a b', 3, 3, 'ab', False)
 
 **KQL**
 ```kql
@@ -6287,7 +3730,7 @@ datatable(s:string)[ "aaa​bbb","a\tb","a b","ab" ] | project s, l=strlen(s), b
 ```
 **Generated SQL**
 ```sql
-SELECT s, LENGTH(CAST(s AS VARCHAR)) AS l, OCTET_LENGTH(ENCODE(CAST(s AS VARCHAR))) AS b, REPLACE(REPLACE(s, ' ', ''), '\t', '') AS nospace, (regexp_matches(CAST(s AS VARCHAR), '(?i)\b \b')) AS hasspace FROM (VALUES ('aaa​bbb'), ('a\tb'), ('a b'), ('ab')) AS t(s)
+SELECT s, LENGTH(CAST(s AS VARCHAR)) AS l, OCTET_LENGTH(ENCODE(CAST(s AS VARCHAR))) AS b, REPLACE(REPLACE(s, ' ', ''), '	', '') AS nospace, (regexp_matches(CAST(s AS VARCHAR), '(?i)(?:^|[^\p{L}\p{N}]) (?:[^\p{L}\p{N}]|$)')) AS hasspace FROM (VALUES ('aaa​bbb'), ('a	b'), ('a b'), ('ab')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -6298,38 +3741,13 @@ SELECT s, LENGTH(CAST(s AS VARCHAR)) AS l, OCTET_LENGTH(ENCODE(CAST(s AS VARCHAR
     - ('ab', 2, 2, 'ab', False)
 - DuckDB: cols=[s:String, l:Int, b:Int, nospace:String, hasspace:Bool] rows=4
     - ('aaa​bbb', 7, 9, 'aaa​bbb', False)
-    - ('a\tb', 4, 4, 'ab', False)
-    - ('a b', 3, 3, 'ab', True)
+    - ('a	b', 3, 3, 'ab', False)
+    - ('a b', 3, 3, 'ab', False)
     - ('ab', 2, 2, 'ab', False)
-
-### `agent-string-ops-0038` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('{"k":"v"}', True, '"k":"v"', 9) duck=('{\"k\":\"v\"}', True, '', 13)
-
-**KQL**
-```kql
-datatable(s:string)[ "{\"k\":\"v\"}","[1,2,3]","plain","{}" ] | project s, isjson=(s startswith "{" or s startswith "["), inner=extract(@"\{(.*)\}",1,s), l=strlen(s)
-```
-**Generated SQL**
-```sql
-SELECT s, (s ILIKE '{%' OR s ILIKE '[%') AS isjson, REGEXP_EXTRACT(s, '@"\{(.*)\}', 1) AS "inner", LENGTH(CAST(s AS VARCHAR)) AS l FROM (VALUES ('{\"k\":\"v\"}'), ('[1,2,3]'), ('plain'), ('{}')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, isjson:Bool, inner:String, l:Int] rows=4
-    - ('{"k":"v"}', True, '"k":"v"', 9)
-    - ('[1,2,3]', True, '', 7)
-    - ('plain', False, '', 5)
-    - ('{}', True, '', 2)
-- DuckDB: cols=[s:String, isjson:Bool, inner:String, l:Int] rows=4
-    - ('{\"k\":\"v\"}', True, '', 13)
-    - ('[1,2,3]', True, '', 7)
-    - ('plain', False, '', 5)
-    - ('{}', True, '', 2)
 
 ### `agent-string-ops-0039` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('abcXYZabc', False, '#xyz#', True) duck=('abcXYZabc', False, 'abcxyzabc', True)
+*Detail:* first differing row[0]: kusto=('abcXYZabc', False, '#xyz#', True) duck=('abcXYZabc', False, '#xyzabc', True)
 
 **KQL**
 ```kql
@@ -6337,7 +3755,7 @@ datatable(s:string)[ "abcXYZabc","ABCxyzABC","mix" ] | project s, lo_has=(tolowe
 ```
 **Generated SQL**
 ```sql
-SELECT s, (regexp_matches(CAST(LOWER(s) AS VARCHAR), '(?i)\babc\b')) AS lo_has, REGEXP_REPLACE(LOWER(s), '@"abc', '#') AS rep, (UPPER(s) = UPPER('abcxyzabc')) AS eqi FROM (VALUES ('abcXYZabc'), ('ABCxyzABC'), ('mix')) AS t(s)
+SELECT s, (regexp_matches(CAST(LOWER(s) AS VARCHAR), '(?i)(?:^|[^\p{L}\p{N}])abc(?:[^\p{L}\p{N}]|$)')) AS lo_has, REGEXP_REPLACE(LOWER(s), 'abc', '#') AS rep, (UPPER(s) = UPPER('abcxyzabc')) AS eqi FROM (VALUES ('abcXYZabc'), ('ABCxyzABC'), ('mix')) AS t(s)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -6346,305 +3764,11 @@ SELECT s, (regexp_matches(CAST(LOWER(s) AS VARCHAR), '(?i)\babc\b')) AS lo_has, 
     - ('ABCxyzABC', False, '#xyz#', True)
     - ('mix', False, 'mix', False)
 - DuckDB: cols=[s:String, lo_has:Bool, rep:String, eqi:Bool] rows=3
-    - ('abcXYZabc', False, 'abcxyzabc', True)
-    - ('ABCxyzABC', False, 'abcxyzabc', True)
+    - ('abcXYZabc', False, '#xyzabc', True)
+    - ('ABCxyzABC', False, '#xyzabc', True)
     - ('mix', False, 'mix', False)
 
-### `agent-string-ops-0043` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('prefix-MIDDLE-suffix', 'MIDDLE', [
-  "prefix",
-  "MIDDLE",
-  "suffix"
-], 'MIDDLE') duck=('prefix-MIDDLE-suffix', '', ["prefix","MIDDLE","suffix"], 'MIDDLE')
-
-**KQL**
-```kql
-datatable(s:string)[ "prefix-MIDDLE-suffix","a-B-c","nodash" ] | project s, mid=extract(@"-([A-Za-z]+)-",1,s), parts=split(s,"-"), upmid=toupper(tostring(split(s,"-")[1]))
-```
-**Generated SQL**
-```sql
-SELECT s, REGEXP_EXTRACT(s, '@"-([A-Za-z]+)-', 1) AS mid, STRING_SPLIT(CAST(s AS VARCHAR), '-') AS parts, UPPER(TRY_CAST(STRING_SPLIT(CAST(s AS VARCHAR), '-')[1 + 1] AS TEXT)) AS upmid FROM (VALUES ('prefix-MIDDLE-suffix'), ('a-B-c'), ('nodash')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, mid:String, parts:Dynamic, upmid:String] rows=3
-    - ('prefix-MIDDLE-suffix', 'MIDDLE', [
-  "prefix",
-  "MIDDLE",
-  "suffix"
-], 'MIDDLE')
-    - ('a-B-c', 'B', [
-  "a",
-  "B",
-  "c"
-], 'B')
-    - ('nodash', '', [
-  "nodash"
-], '')
-- DuckDB: cols=[s:String, mid:String, parts:Unknown, upmid:String] rows=3
-    - ('prefix-MIDDLE-suffix', '', ["prefix","MIDDLE","suffix"], 'MIDDLE')
-    - ('a-B-c', '', ["a","B","c"], 'B')
-    - ('nodash', '', ["nodash"], null)
-
-### `agent-string-ops-0044` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('trim	me	', 'trim	me', 7, 8, 1) duck=('trim\tme\t', 'trim\tme\t', 10, 10, 0)
-
-**KQL**
-```kql
-datatable(s:string)[ "trim\tme\t","  pad  ","xxstripxx","" ] | project s, multi=trim(@"[\sx]",s), tslen=strlen(trim(@"[\sx]",s)), origlen=strlen(s), diff=(strlen(s) - strlen(trim(@"[\sx]",s)))
-```
-**Generated SQL**
-```sql
-SELECT s, TRIM(s, '@"[\sx]') AS multi, LENGTH(CAST(TRIM(s, '@"[\sx]') AS VARCHAR)) AS tslen, LENGTH(CAST(s AS VARCHAR)) AS origlen, (LENGTH(CAST(s AS VARCHAR)) - LENGTH(CAST(TRIM(s, '@"[\sx]') AS VARCHAR))) AS diff FROM (VALUES ('trim\tme\t'), ('  pad  '), ('xxstripxx'), ('')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, multi:String, tslen:Int, origlen:Int, diff:Int] rows=4
-    - ('trim	me	', 'trim	me', 7, 8, 1)
-    - ('  pad  ', ' pad ', 5, 7, 2)
-    - ('xxstripxx', 'xstripx', 7, 9, 2)
-    - ('', '', 0, 0, 0)
-- DuckDB: cols=[s:String, multi:String, tslen:Int, origlen:Int, diff:Int] rows=4
-    - ('trim\tme\t', 'trim\tme\t', 10, 10, 0)
-    - ('  pad  ', '  pad  ', 7, 7, 0)
-    - ('xxstripxx', 'trip', 4, 9, 5)
-    - ('', '', 0, 0, 0)
-
-### `t1-string-ops-0021` — MismatchRows (high)
-
-*Detail:* row count: kusto=1 duck=0
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", " spaced ","y", "O'Brien","x", "where","kw", "MiXeD","y" ] | where s has "café"
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), (' spaced ', 'y'), ('O''Brien', 'x'), ('where', 'kw'), ('MiXeD', 'y')) AS t(s, tag) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\bcafé\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=1
-    - ('café', 'y')
-- DuckDB: cols=[s:String, tag:String] rows=0
-
-### `t1-string-ops-0022` — MismatchRows (high)
-
-*Detail:* row count: kusto=8 duck=7
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", " spaced ","y", "O'Brien","x", "where","kw", "MiXeD","y" ] | where s has ""
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), (' spaced ', 'y'), ('O''Brien', 'x'), ('where', 'kw'), ('MiXeD', 'y')) AS t(s, tag) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\b\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=8
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('café', 'y')
-    - ('', 'z')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-- DuckDB: cols=[s:String, tag:String] rows=7
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('café', 'y')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-
-### `t1-string-ops-0026` — MismatchRows (high)
-
-*Detail:* row count: kusto=7 duck=8
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", " spaced ","y", "O'Brien","x", "where","kw", "MiXeD","y" ] | where s !has "café"
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), (' spaced ', 'y'), ('O''Brien', 'x'), ('where', 'kw'), ('MiXeD', 'y')) AS t(s, tag) WHERE NOT regexp_matches(CAST(s AS VARCHAR), '(?i)\bcafé\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=7
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('', 'z')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-- DuckDB: cols=[s:String, tag:String] rows=8
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('café', 'y')
-    - ('', 'z')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-
-### `t1-string-ops-0027` — MismatchRows (high)
-
-*Detail:* row count: kusto=0 duck=1
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", " spaced ","y", "O'Brien","x", "where","kw", "MiXeD","y" ] | where s !has ""
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), (' spaced ', 'y'), ('O''Brien', 'x'), ('where', 'kw'), ('MiXeD', 'y')) AS t(s, tag) WHERE NOT regexp_matches(CAST(s AS VARCHAR), '(?i)\b\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=0
-- DuckDB: cols=[s:String, tag:String] rows=1
-    - ('', 'z')
-
-### `t1-string-ops-0031` — MismatchRows (high)
-
-*Detail:* row count: kusto=1 duck=0
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", " spaced ","y", "O'Brien","x", "where","kw", "MiXeD","y" ] | where s has_cs "café"
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), (' spaced ', 'y'), ('O''Brien', 'x'), ('where', 'kw'), ('MiXeD', 'y')) AS t(s, tag) WHERE regexp_matches(CAST(s AS VARCHAR), '\bcafé\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=1
-    - ('café', 'y')
-- DuckDB: cols=[s:String, tag:String] rows=0
-
-### `t1-string-ops-0032` — MismatchRows (high)
-
-*Detail:* row count: kusto=8 duck=7
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", " spaced ","y", "O'Brien","x", "where","kw", "MiXeD","y" ] | where s has_cs ""
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), (' spaced ', 'y'), ('O''Brien', 'x'), ('where', 'kw'), ('MiXeD', 'y')) AS t(s, tag) WHERE regexp_matches(CAST(s AS VARCHAR), '\b\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=8
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('café', 'y')
-    - ('', 'z')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-- DuckDB: cols=[s:String, tag:String] rows=7
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('café', 'y')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-
-### `t1-string-ops-0062` — MismatchRows (high)
-
-*Detail:* row count: kusto=8 duck=7
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", " spaced ","y", "O'Brien","x", "where","kw", "MiXeD","y" ] | where s hasprefix ""
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), (' spaced ', 'y'), ('O''Brien', 'x'), ('where', 'kw'), ('MiXeD', 'y')) AS t(s, tag) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=8
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('café', 'y')
-    - ('', 'z')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-- DuckDB: cols=[s:String, tag:String] rows=7
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('café', 'y')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-
-### `t1-string-ops-0066` — MismatchRows (high)
-
-*Detail:* row count: kusto=1 duck=0
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", " spaced ","y", "O'Brien","x", "where","kw", "MiXeD","y" ] | where s hassuffix "café"
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), (' spaced ', 'y'), ('O''Brien', 'x'), ('where', 'kw'), ('MiXeD', 'y')) AS t(s, tag) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)café\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=1
-    - ('café', 'y')
-- DuckDB: cols=[s:String, tag:String] rows=0
-
-### `t1-string-ops-0067` — MismatchRows (high)
-
-*Detail:* row count: kusto=8 duck=7
-
-**KQL**
-```kql
-datatable(s:string, tag:string)[ "alpha","x", "Beta","x", "café","y", "","z", " spaced ","y", "O'Brien","x", "where","kw", "MiXeD","y" ] | where s hassuffix ""
-```
-**Generated SQL**
-```sql
-SELECT * FROM (VALUES ('alpha', 'x'), ('Beta', 'x'), ('café', 'y'), ('', 'z'), (' spaced ', 'y'), ('O''Brien', 'x'), ('where', 'kw'), ('MiXeD', 'y')) AS t(s, tag) WHERE regexp_matches(CAST(s AS VARCHAR), '(?i)\b')
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, tag:String] rows=8
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('café', 'y')
-    - ('', 'z')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-- DuckDB: cols=[s:String, tag:String] rows=7
-    - ('alpha', 'x')
-    - ('Beta', 'x')
-    - ('café', 'y')
-    - (' spaced ', 'y')
-    - ('O'Brien', 'x')
-    - ('where', 'kw')
-    - ('MiXeD', 'y')
-
-## Family: type-casts-coercion (60)
+## Family: type-casts-coercion (41)
 
 ### `agent-type-casts-coercion-0006` — MismatchRows (high)
 
@@ -6712,25 +3836,6 @@ SELECT *, TRY_CAST(s AS BOOLEAN) AS b FROM (VALUES ('true'), ('True'), ('FALSE')
     - ('', null)
     - ('tRuE', True)
 
-### `agent-type-casts-coercion-0009` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(3.14159, null, 3.3333333333333335) duck=(3.142, null, 3.3333333333333335)
-
-**KQL**
-```kql
-print d1 = todecimal("3.14159"), d2 = todecimal("abc"), d3 = todecimal(10) / todecimal(3)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST('3.14159' AS DECIMAL) AS d1, TRY_CAST('abc' AS DECIMAL) AS d2, TRY_CAST(10 AS DECIMAL) / TRY_CAST(3 AS DECIMAL) AS d3
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[d1:Real, d2:Real, d3:Real] rows=1
-    - (3.14159, null, 3.3333333333333335)
-- DuckDB: cols=[d1:Real, d2:Real, d3:Real] rows=1
-    - (3.142, null, 3.3333333333333335)
-
 ### `agent-type-casts-coercion-0015` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=('dictionary', 'array', 'timespan', 'decimal') duck=('dictionary', 'array', 'timespan', 'real')
@@ -6741,7 +3846,7 @@ print g7 = gettype(dynamic({"a":1})), g8 = gettype(dynamic([1,2])), g9 = gettype
 ```
 **Generated SQL**
 ```sql
-SELECT CASE WHEN TYPEOF('{"a":1}'::JSON) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF('{"a":1}'::JSON) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF('{"a":1}'::JSON) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF('{"a":1}'::JSON) = 'VARCHAR' THEN 'string' WHEN TYPEOF('{"a":1}'::JSON) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF('{"a":1}'::JSON) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF('{"a":1}'::JSON) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF('{"a":1}'::JSON) = 'UUID' THEN 'guid' WHEN TYPEOF('{"a":1}'::JSON) LIKE '%[]' OR TYPEOF('{"a":1}'::JSON) LIKE 'STRUCT%' OR TYPEOF('{"a":1}'::JSON) LIKE 'MAP%' THEN 'array' WHEN TYPEOF('{"a":1}'::JSON) = 'JSON' THEN (CASE WHEN json_type(CAST('{"a":1}'::JSON AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF('{"a":1}'::JSON)) END AS g7, CASE WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(LIST_VALUE(1, 2)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'UUID' THEN 'guid' WHEN TYPEOF(LIST_VALUE(1, 2)) LIKE '%[]' OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'STRUCT%' OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'JSON' THEN (CASE WHEN json_type(CAST(LIST_VALUE(1, 2) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(LIST_VALUE(1, 2))) END AS g8, CASE WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) = 'VARCHAR' THEN 'string' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) = 'UUID' THEN 'guid' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE '%[]' OR TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE 'STRUCT%' OR TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE 'MAP%' THEN 'array' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) = 'JSON' THEN (CASE WHEN json_type(CAST((1000 * INTERVAL '1 millisecond') AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF((1000 * INTERVAL '1 millisecond'))) END AS g9, CASE WHEN TYPEOF(TRY_CAST(1 AS DECIMAL)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(1 AS DECIMAL)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL)) LIKE '%[]' OR TYPEOF(TRY_CAST(1 AS DECIMAL)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(1 AS DECIMAL)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL)) = 'JSON' THEN (CASE WHEN json_type(CAST(TRY_CAST(1 AS DECIMAL) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(1 AS DECIMAL))) END AS g10
+SELECT CASE WHEN TYPEOF('{"a":1}'::JSON) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF('{"a":1}'::JSON) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF('{"a":1}'::JSON) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF('{"a":1}'::JSON) = 'VARCHAR' THEN 'string' WHEN TYPEOF('{"a":1}'::JSON) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF('{"a":1}'::JSON) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF('{"a":1}'::JSON) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF('{"a":1}'::JSON) = 'UUID' THEN 'guid' WHEN TYPEOF('{"a":1}'::JSON) LIKE '%[]' OR TYPEOF('{"a":1}'::JSON) LIKE 'STRUCT%' OR TYPEOF('{"a":1}'::JSON) LIKE 'MAP%' THEN 'array' WHEN TYPEOF('{"a":1}'::JSON) = 'JSON' THEN (CASE json_type(CAST('{"a":1}'::JSON AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF('{"a":1}'::JSON)) END AS g7, CASE WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(LIST_VALUE(1, 2)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'UUID' THEN 'guid' WHEN TYPEOF(LIST_VALUE(1, 2)) LIKE '%[]' OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'STRUCT%' OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'JSON' THEN (CASE json_type(CAST(LIST_VALUE(1, 2) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(LIST_VALUE(1, 2))) END AS g8, CASE WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) = 'VARCHAR' THEN 'string' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) = 'UUID' THEN 'guid' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE '%[]' OR TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE 'STRUCT%' OR TYPEOF((1000 * INTERVAL '1 millisecond')) LIKE 'MAP%' THEN 'array' WHEN TYPEOF((1000 * INTERVAL '1 millisecond')) = 'JSON' THEN (CASE json_type(CAST((1000 * INTERVAL '1 millisecond') AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF((1000 * INTERVAL '1 millisecond'))) END AS g9, CASE WHEN TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) LIKE '%[]' OR TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18))) = 'JSON' THEN (CASE json_type(CAST(TRY_CAST(1 AS DECIMAL(38, 18)) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(1 AS DECIMAL(38, 18)))) END AS g10
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -6749,84 +3854,6 @@ SELECT CASE WHEN TYPEOF('{"a":1}'::JSON) IN ('TINYINT','SMALLINT','INTEGER','BIG
     - ('dictionary', 'array', 'timespan', 'decimal')
 - DuckDB: cols=[g7:String, g8:String, g9:String, g10:String] rows=1
     - ('dictionary', 'array', 'timespan', 'real')
-
-### `agent-type-casts-coercion-0021` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('123', '1.5', 'True', '2020-01-01T00:00:00.0000000Z', '1.00:00:00') duck=('123', '1.5', 'true', '2020-01-01 00:00:00', '24:00:00')
-
-**KQL**
-```kql
-print c1 = tostring(123), c2 = tostring(1.5), c3 = tostring(true), c4 = tostring(datetime(2020-01-01)), c5 = tostring(1d)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(123 AS TEXT) AS c1, TRY_CAST(1.5 AS TEXT) AS c2, TRY_CAST(TRUE AS TEXT) AS c3, TRY_CAST(TIMESTAMP '2020-01-01 00:00:00' AS TEXT) AS c4, TRY_CAST((86400000 * INTERVAL '1 millisecond') AS TEXT) AS c5
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[c1:String, c2:String, c3:String, c4:String, c5:String] rows=1
-    - ('123', '1.5', 'True', '2020-01-01T00:00:00.0000000Z', '1.00:00:00')
-- DuckDB: cols=[c1:String, c2:String, c3:String, c4:String, c5:String] rows=1
-    - ('123', '1.5', 'true', '2020-01-01 00:00:00', '24:00:00')
-
-### `agent-type-casts-coercion-0022` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1.02:03:04, 01:00:00, null) duck=(null, 01:00:00, null)
-
-**KQL**
-```kql
-print ts1 = totimespan("1.02:03:04"), ts2 = totimespan("01:00:00"), ts3 = totimespan("abc")
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST('1.02:03:04' AS INTERVAL) AS ts1, TRY_CAST('01:00:00' AS INTERVAL) AS ts2, TRY_CAST('abc' AS INTERVAL) AS ts3
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ts1:TimeSpan, ts2:TimeSpan, ts3:TimeSpan] rows=1
-    - (1.02:03:04, 01:00:00, null)
-- DuckDB: cols=[ts1:TimeSpan, ts2:TimeSpan, ts3:TimeSpan] rows=1
-    - (null, 01:00:00, null)
-
-### `agent-type-casts-coercion-0024` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(2020-01-01T00:00:00.0000000Z, 637134336000000000, 6.37134336E+17) duck=(2020-01-01T00:00:00.0000000Z, null, null)
-
-**KQL**
-```kql
-datatable(t:datetime)[ datetime(2020-01-01), datetime(2021-06-15 12:30:00) ] | extend asl = tolong(t), asr = todouble(t)
-```
-**Generated SQL**
-```sql
-SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(t AS DOUBLE), TRY_CAST(TRY_CAST(t AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS asl, COALESCE(TRY_CAST(t AS DOUBLE), TRY_CAST(TRY_CAST(t AS BOOLEAN) AS DOUBLE)) AS asr FROM (VALUES (TIMESTAMP '2020-01-01 00:00:00'), (TIMESTAMP '2021-06-15 12:30:00')) AS t(t)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, asl:Int, asr:Real] rows=2
-    - (2020-01-01T00:00:00.0000000Z, 637134336000000000, 6.37134336E+17)
-    - (2021-06-15T12:30:00.0000000Z, 637593570000000000, 6.3759357E+17)
-- DuckDB: cols=[t:DateTime, asl:Int, asr:Real] rows=2
-    - (2020-01-01T00:00:00.0000000Z, null, null)
-    - (2021-06-15T12:30:00.0000000Z, null, null)
-
-### `agent-type-casts-coercion-0025` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1.00:00:00, 864000000000, 36000000000) duck=(1.00:00:00, null, null)
-
-**KQL**
-```kql
-print span = totimespan("1d"), aslong = tolong(1d), asdouble = todouble(1h)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST('1d' AS INTERVAL) AS span, TRY_CAST(TRUNC(COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS aslong, COALESCE(TRY_CAST((3600000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((3600000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE)) AS asdouble
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[span:TimeSpan, aslong:Int, asdouble:Real] rows=1
-    - (1.00:00:00, 864000000000, 36000000000)
-- DuckDB: cols=[span:TimeSpan, aslong:Int, asdouble:Real] rows=1
-    - (1.00:00:00, null, null)
 
 ### `agent-type-casts-coercion-0028` — MismatchRows (high)
 
@@ -6859,25 +3886,6 @@ SELECT *, COALESCE(TRY_CAST(s AS DOUBLE), TRY_CAST(TRY_CAST(s AS BOOLEAN) AS DOU
     - ('NaN', NaN)
     - ('0b101', null)
 
-### `agent-type-casts-coercion-0029` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 0, 'True') duck=(1, 0, 'true')
-
-**KQL**
-```kql
-print bool2int = toint(true), bool2int2 = toint(false), bool2str = tostring(true)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRUE AS DOUBLE), TRY_CAST(TRY_CAST(TRUE AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS bool2int, TRY_CAST(TRUNC(COALESCE(TRY_CAST(FALSE AS DOUBLE), TRY_CAST(TRY_CAST(FALSE AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS bool2int2, TRY_CAST(TRUE AS TEXT) AS bool2str
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[bool2int:Int, bool2int2:Int, bool2str:String] rows=1
-    - (1, 0, 'True')
-- DuckDB: cols=[bool2int:Int, bool2int2:Int, bool2str:String] rows=1
-    - (1, 0, 'true')
-
 ### `agent-type-casts-coercion-0033` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=(10, 3.3333333333333335, 'decimal') duck=(10.0, 3.3333333333333335, 'real')
@@ -6888,7 +3896,7 @@ datatable(d:decimal)[ decimal(10), decimal(3), decimal(0) ] | extend div = d / d
 ```
 **Generated SQL**
 ```sql
-SELECT *, d / 3.0 AS div, CASE WHEN TYPEOF(d) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(d) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(d) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(d) = 'VARCHAR' THEN 'string' WHEN TYPEOF(d) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(d) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(d) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(d) = 'UUID' THEN 'guid' WHEN TYPEOF(d) LIKE '%[]' OR TYPEOF(d) LIKE 'STRUCT%' OR TYPEOF(d) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(d) = 'JSON' THEN (CASE WHEN json_type(CAST(d AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(d)) END AS gt FROM (VALUES (10.0), (3.0), (0.0)) AS t(d)
+SELECT *, d / 3.0 AS div, CASE WHEN TYPEOF(d) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(d) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(d) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(d) = 'VARCHAR' THEN 'string' WHEN TYPEOF(d) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(d) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(d) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(d) = 'UUID' THEN 'guid' WHEN TYPEOF(d) LIKE '%[]' OR TYPEOF(d) LIKE 'STRUCT%' OR TYPEOF(d) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(d) = 'JSON' THEN (CASE json_type(CAST(d AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(d)) END AS gt FROM (VALUES (10.0), (3.0), (0.0)) AS t(d)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -6919,25 +3927,6 @@ SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST('0xFF' AS DOUBLE), TRY_CAST(TRY_CAST('0x
     - (255, 16)
 - DuckDB: cols=[h2i:Int, h2l:Int] rows=1
     - (null, null)
-
-### `agent-type-casts-coercion-0037` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1.5, 2, 0.5) duck=(1.5, 2.0, -1.5)
-
-**KQL**
-```kql
-print mixmod = 7.5 % 2, mixmod2 = 7 % 2.5, negmod = -7.5 % 2
-```
-**Generated SQL**
-```sql
-SELECT 7.5 % 2 AS mixmod, 7 % 2.5 AS mixmod2, (-7.5) % 2 AS negmod
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[mixmod:Real, mixmod2:Real, negmod:Real] rows=1
-    - (1.5, 2, 0.5)
-- DuckDB: cols=[mixmod:Real, mixmod2:Real, negmod:Real] rows=1
-    - (1.5, 2.0, -1.5)
 
 ### `agent-type-casts-coercion-0040` — MismatchRows (high)
 
@@ -6980,34 +3969,6 @@ SELECT CAST('nan' AS DOUBLE) = CAST('nan' AS DOUBLE) AS comp1, CAST('nan' AS DOU
     - (False, True, True)
 - DuckDB: cols=[comp1:Bool, comp2:Bool, comp3:Bool] rows=1
     - (True, False, True)
-
-### `agent-type-casts-coercion-0045` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[x:Dynamic|String]  
-*Detail:* first differing row[2]: kusto=("3", 3, 3, '3') duck=('"3"', 3, 3, '"3"')
-
-**KQL**
-```kql
-datatable(x:dynamic)[ dynamic(1), dynamic(1.5), dynamic("3"), dynamic(true), dynamic(null) ] | extend ti = toint(x), td = todouble(x), ts = tostring(x)
-```
-**Generated SQL**
-```sql
-SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS ti, COALESCE(TRY_CAST(x AS DOUBLE), TRY_CAST(TRY_CAST(x AS BOOLEAN) AS DOUBLE)) AS td, TRY_CAST(x AS TEXT) AS ts FROM (SELECT CAST(x AS JSON) AS x FROM (VALUES (CAST('1'::JSON AS JSON)), (CAST('1.5'::JSON AS JSON)), (CAST('"3"'::JSON AS JSON)), (CAST('true'::JSON AS JSON)), (CAST(NULL AS JSON))) AS t(x))
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Dynamic, ti:Int, td:Real, ts:String] rows=5
-    - (1, 1, 1, '1')
-    - (1.5, 1, 1.5, '1.5')
-    - ("3", 3, 3, '3')
-    - (true, 1, 1, 'true')
-    - (null, null, null, '')
-- DuckDB: cols=[x:String, ti:Int, td:Real, ts:String] rows=5
-    - ('1', 1, 1, '1')
-    - ('1.5', 1, 1.5, '1.5')
-    - ('"3"', 3, 3, '"3"')
-    - ('true', 1, 1, 'true')
-    - (null, null, null, null)
 
 ### `agent-type-casts-coercion-0001` — MismatchRows (high)
 
@@ -7183,7 +4144,7 @@ SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST('9.99'::JSON AS DOUBLE), TRY_CAST(TRY_CA
 
 ### `agent-type-casts-coercion-0016` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(1970-01-01T00:00:00.0000000Z, 621355968000000000, 6.21355968E+17, 1970-01-01T00:00:00.0000000Z) duck=(1970-01-01T00:00:00.0000000Z, null, null, null)
+*Detail:* first differing row[0]: kusto=(1970-01-01T00:00:00.0000000Z, 621355968000000000, 6.21355968E+17, 1970-01-01T00:00:00.0000000Z) duck=(1970-01-01T00:00:00.0000000Z, 621355968000000000, 6.21355968E+17, null)
 
 **KQL**
 ```kql
@@ -7191,7 +4152,7 @@ datatable(t:datetime)[ datetime(1970-01-01), datetime(0001-01-01), datetime(9999
 ```
 **Generated SQL**
 ```sql
-SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(t AS DOUBLE), TRY_CAST(TRY_CAST(t AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS asl, COALESCE(TRY_CAST(t AS DOUBLE), TRY_CAST(TRY_CAST(t AS BOOLEAN) AS DOUBLE)) AS asr, COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(t AS DOUBLE), TRY_CAST(TRY_CAST(t AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS TIMESTAMP), TRY_STRPTIME(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(t AS DOUBLE), TRY_CAST(TRY_CAST(t AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS roundtrip FROM (VALUES (TIMESTAMP '1970-01-01 00:00:00'), (TIMESTAMP '0001-01-01 00:00:00'), (TIMESTAMP '9999-12-31 23:59:59.999999'), (TIMESTAMP '2020-02-29 00:00:00')) AS t(t)
+SELECT *, CAST(ROUND((EXTRACT(EPOCH FROM (t)) - EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00')) * 10000000) AS BIGINT) AS asl, CAST(ROUND((EXTRACT(EPOCH FROM (t)) - EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00')) * 10000000) AS DOUBLE) AS asr, COALESCE(TRY_CAST(CAST(ROUND((EXTRACT(EPOCH FROM (t)) - EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00')) * 10000000) AS BIGINT) AS TIMESTAMP), TRY_STRPTIME(CAST(CAST(ROUND((EXTRACT(EPOCH FROM (t)) - EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00')) * 10000000) AS BIGINT) AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS roundtrip FROM (VALUES (TIMESTAMP '1970-01-01 00:00:00'), (TIMESTAMP '0001-01-01 00:00:00'), (TIMESTAMP '9999-12-31 23:59:59.999999'), (TIMESTAMP '2020-02-29 00:00:00')) AS t(t)
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7201,49 +4162,10 @@ SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(t AS DOUBLE), TRY_CAST(TRY_CAST(t AS 
     - (9999-12-31T23:59:59.9999999Z, 3155378975999999999, 3.155378976E+18, 9999-12-31T23:59:59.9999999Z)
     - (2020-02-29T00:00:00.0000000Z, 637185312000000000, 6.37185312E+17, 2020-02-29T00:00:00.0000000Z)
 - DuckDB: cols=[t:DateTime, asl:Int, asr:Real, roundtrip:DateTime] rows=4
-    - (1970-01-01T00:00:00.0000000Z, null, null, null)
-    - (0001-01-01T00:00:00.0000000Z, null, null, null)
-    - (9999-12-31T23:59:59.9999990Z, null, null, null)
-    - (2020-02-29T00:00:00.0000000Z, null, null, null)
-
-### `agent-type-casts-coercion-0017` — MismatchRows (high)
-
-*Sub-verdicts:* TYPE_MISMATCH[ts_mod:TimeSpan|Real]  
-*Detail:* first differing row[0]: kusto=(864000000000, 864000000000, 1.00:00:00, 24, 04:00:00, 1640261632) duck=(null, null, null, 24, 14400, null)
-
-**KQL**
-```kql
-print ts_long = tolong(1d), ts_real = todouble(1d), ts_back = totimespan(tolong(1d)), ts_div = 1d / 1h, ts_mod = 1d % 5h, ts_int = toint(1h)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS ts_long, COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE)) AS ts_real, TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((86400000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS INTERVAL) AS ts_back, (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond'))) / EXTRACT(EPOCH FROM ((3600000 * INTERVAL '1 millisecond')))) AS ts_div, (EXTRACT(EPOCH FROM ((86400000 * INTERVAL '1 millisecond'))) % NULLIF(EXTRACT(EPOCH FROM ((18000000 * INTERVAL '1 millisecond'))), 0)) AS ts_mod, TRY_CAST(TRUNC(COALESCE(TRY_CAST((3600000 * INTERVAL '1 millisecond') AS DOUBLE), TRY_CAST(TRY_CAST((3600000 * INTERVAL '1 millisecond') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS ts_int
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[ts_long:Int, ts_real:Real, ts_back:TimeSpan, ts_div:Real, ts_mod:TimeSpan, ts_int:Int] rows=1
-    - (864000000000, 864000000000, 1.00:00:00, 24, 04:00:00, 1640261632)
-- DuckDB: cols=[ts_long:Int, ts_real:Real, ts_back:TimeSpan, ts_div:Real, ts_mod:Real, ts_int:Int] rows=1
-    - (null, null, null, 24, 14400, null)
-
-### `agent-type-casts-coercion-0019` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(3.141592653589793, 0.3333333333333333, True, 'decimal', 4294967296) duck=(3.142, 0.3333333333333333, True, 'real', 4294967296.000000)
-
-**KQL**
-```kql
-print dec1 = todecimal("3.14159265358979323846"), dec2 = todecimal(1) / todecimal(3), dec3 = decimal(0.1) + decimal(0.2) == decimal(0.3), dec4 = gettype(todecimal(1) + toint(1)), dec5 = todecimal(2147483648) * todecimal(2)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST('3.14159265358979323846' AS DECIMAL) AS dec1, TRY_CAST(1 AS DECIMAL) / TRY_CAST(3 AS DECIMAL) AS dec2, 0.1 + 0.2 = 0.3 AS dec3, CASE WHEN TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE '%[]' OR TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'JSON' THEN (CASE WHEN json_type(CAST(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(1 AS DECIMAL) + TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER))) END AS dec4, TRY_CAST(2147483648 AS DECIMAL) * TRY_CAST(2 AS DECIMAL) AS dec5
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[dec1:Real, dec2:Real, dec3:Bool, dec4:String, dec5:Real] rows=1
-    - (3.141592653589793, 0.3333333333333333, True, 'decimal', 4294967296)
-- DuckDB: cols=[dec1:Real, dec2:Real, dec3:Bool, dec4:String, dec5:Real] rows=1
-    - (3.142, 0.3333333333333333, True, 'real', 4294967296.000000)
+    - (1970-01-01T00:00:00.0000000Z, 621355968000000000, 6.21355968E+17, null)
+    - (0001-01-01T00:00:00.0000000Z, 0, 0, null)
+    - (9999-12-31T23:59:59.9999990Z, 3155378976000000000, 3.155378976E+18, null)
+    - (2020-02-29T00:00:00.0000000Z, 637185312000000000, 6.37185312E+17, null)
 
 ### `agent-type-casts-coercion-0021` — MismatchRows (high)
 
@@ -7282,7 +4204,7 @@ print chain1 = toint(tostring(todouble(tolong("42")))), chain2 = todouble(tostri
 ```
 **Generated SQL**
 ```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('42' AS DOUBLE), TRY_CAST(TRY_CAST('42' AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('42' AS DOUBLE), TRY_CAST(TRY_CAST('42' AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS BOOLEAN) AS DOUBLE)) AS TEXT) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('42' AS DOUBLE), TRY_CAST(TRY_CAST('42' AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('42' AS DOUBLE), TRY_CAST(TRY_CAST('42' AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS BOOLEAN) AS DOUBLE)) AS TEXT) AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS chain1, COALESCE(TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(3.99 AS DOUBLE), TRY_CAST(TRY_CAST(3.99 AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(3.99 AS DOUBLE), TRY_CAST(TRY_CAST(3.99 AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT) AS BOOLEAN) AS DOUBLE)) AS chain2, TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRY_CAST(TRY_CAST('100' AS DECIMAL) AS TEXT) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRY_CAST('100' AS DECIMAL) AS TEXT) AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS chain3, TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRUE AS DOUBLE), TRY_CAST(TRY_CAST(TRUE AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT) = TRY_CAST(1 AS TEXT) AS chain4
+SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(COALESCE(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('42' AS DOUBLE), TRY_CAST(TRY_CAST('42' AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('42' AS DOUBLE), TRY_CAST(TRY_CAST('42' AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS BOOLEAN) AS DOUBLE)) AS TEXT), '') AS DOUBLE), TRY_CAST(TRY_CAST(COALESCE(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('42' AS DOUBLE), TRY_CAST(TRY_CAST('42' AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('42' AS DOUBLE), TRY_CAST(TRY_CAST('42' AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS BOOLEAN) AS DOUBLE)) AS TEXT), '') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS chain1, COALESCE(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(3.99 AS DOUBLE), TRY_CAST(TRY_CAST(3.99 AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT), '') AS DOUBLE), TRY_CAST(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(3.99 AS DOUBLE), TRY_CAST(TRY_CAST(3.99 AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT), '') AS BOOLEAN) AS DOUBLE)) AS chain2, TRY_CAST(TRUNC(COALESCE(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST('100' AS DECIMAL(38, 18)) AS TEXT), '') AS DOUBLE), TRY_CAST(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST('100' AS DECIMAL(38, 18)) AS TEXT), '') AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS chain3, COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRUE AS DOUBLE), TRY_CAST(TRY_CAST(TRUE AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT), '') = COALESCE(TRY_CAST(1 AS TEXT), '') AS chain4
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7293,7 +4215,7 @@ SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST(TRUN
 
 ### `agent-type-casts-coercion-0023` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('0.30000000000000007', '0.3333333333333333', '9223372036854775807', '-0.0', 'inf', 'NaN') duck=('0.3', '0.3333333333333333', null, '0.0', 'inf', 'nan')
+*Detail:* first differing row[0]: kusto=('0.30000000000000007', '0.3333333333333333', '9223372036854775807', '-0.0', 'inf', 'NaN') duck=('0.3', '0.3333333333333333', '', '0.0', 'inf', 'nan')
 
 **KQL**
 ```kql
@@ -7301,35 +4223,14 @@ print str_round = tostring(0.1 + 0.2), str_dbl = tostring(1.0 / 3.0), str_big = 
 ```
 **Generated SQL**
 ```sql
-SELECT TRY_CAST(0.1 + 0.2 AS TEXT) AS str_round, TRY_CAST(1.0 / 3.0 AS TEXT) AS str_dbl, TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(9223372036854775807 AS DOUBLE), TRY_CAST(TRY_CAST(9223372036854775807 AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS TEXT) AS str_big, TRY_CAST((-0.0) AS TEXT) AS str_neg0, TRY_CAST(CAST('inf' AS DOUBLE) AS TEXT) AS str_inf, TRY_CAST(CAST('nan' AS DOUBLE) AS TEXT) AS str_nan
+SELECT COALESCE(TRY_CAST(0.1 + 0.2 AS TEXT), '') AS str_round, COALESCE(TRY_CAST(1.0 / 3.0 AS TEXT), '') AS str_dbl, COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(9223372036854775807 AS DOUBLE), TRY_CAST(TRY_CAST(9223372036854775807 AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS TEXT), '') AS str_big, COALESCE(TRY_CAST((-0.0) AS TEXT), '') AS str_neg0, COALESCE(TRY_CAST(CAST('inf' AS DOUBLE) AS TEXT), '') AS str_inf, COALESCE(TRY_CAST(CAST('nan' AS DOUBLE) AS TEXT), '') AS str_nan
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[str_round:String, str_dbl:String, str_big:String, str_neg0:String, str_inf:String, str_nan:String] rows=1
     - ('0.30000000000000007', '0.3333333333333333', '9223372036854775807', '-0.0', 'inf', 'NaN')
 - DuckDB: cols=[str_round:String, str_dbl:String, str_big:String, str_neg0:String, str_inf:String, str_nan:String] rows=1
-    - ('0.3', '0.3333333333333333', null, '0.0', 'inf', 'nan')
-
-### `agent-type-casts-coercion-0024` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(True, 1, 1, 1, 'True', 1, True) duck=(True, 1, 1, 1, 'true', 1.000, True)
-
-**KQL**
-```kql
-datatable(b:bool)[ true, false ] | extend asint = toint(b), aslong = tolong(b), asreal = todouble(b), asstr = tostring(b), asdec = todecimal(b), back = tobool(toint(b))
-```
-**Generated SQL**
-```sql
-SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS asint, TRY_CAST(TRUNC(COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS aslong, COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE)) AS asreal, TRY_CAST(b AS TEXT) AS asstr, TRY_CAST(b AS DECIMAL) AS asdec, TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS BOOLEAN) AS back FROM (VALUES (TRUE), (FALSE)) AS t(b)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[b:Bool, asint:Int, aslong:Int, asreal:Real, asstr:String, asdec:Real, back:Bool] rows=2
-    - (True, 1, 1, 1, 'True', 1, True)
-    - (False, 0, 0, 0, 'False', 0, False)
-- DuckDB: cols=[b:Bool, asint:Int, aslong:Int, asreal:Real, asstr:String, asdec:Real, back:Bool] rows=2
-    - (True, 1, 1, 1, 'true', 1.000, True)
-    - (False, 0, 0, 0, 'false', 0.000, False)
+    - ('0.3', '0.3333333333333333', '', '0.0', 'inf', 'nan')
 
 ### `agent-type-casts-coercion-0025` — MismatchRows (high)
 
@@ -7429,25 +4330,6 @@ SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(r AS DOUBLE), TRY_CAST(TRY_CAST(r AS 
     - (-1E+19, null, null, null)
     - (1.5, 1, 1, 1)
 
-### `agent-type-casts-coercion-0035` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 2, 1, 0.5, 2.5, 1) duck=(1, 2, 1, -2.5, 2.5, -2.0)
-
-**KQL**
-```kql
-print modneg1 = (-5) % 3, modneg2 = 5 % (-3), modneg3 = (-5) % (-3), modreal1 = (-5.5) % 3.0, modreal2 = 5.5 % (-3.0), modmix = (-5) % 3.0
-```
-**Generated SQL**
-```sql
-SELECT (((((-5))) % NULLIF(3, 0)) + ABS(3)) % NULLIF(3, 0) AS modneg1, (((5) % NULLIF(((-3)), 0)) + ABS(((-3)))) % NULLIF(((-3)), 0) AS modneg2, (((((-5))) % NULLIF(((-3)), 0)) + ABS(((-3)))) % NULLIF(((-3)), 0) AS modneg3, ((-5.5)) % 3.0 AS modreal1, 5.5 % ((-3.0)) AS modreal2, ((-5)) % 3.0 AS modmix
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[modneg1:Int, modneg2:Int, modneg3:Int, modreal1:Real, modreal2:Real, modmix:Real] rows=1
-    - (1, 2, 1, 0.5, 2.5, 1)
-- DuckDB: cols=[modneg1:Int, modneg2:Int, modneg3:Int, modreal1:Real, modreal2:Real, modmix:Real] rows=1
-    - (1, 2, 1, -2.5, 2.5, -2.0)
-
 ### `agent-type-casts-coercion-0039` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=(null, null, null, False, True) duck=(null, null, null, null, True)
@@ -7458,7 +4340,7 @@ print empty_chain = toint(tostring(toint(""))), null_arith = toint("") + 1, null
 ```
 **Generated SQL**
 ```sql
-SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT) AS DOUBLE), TRY_CAST(TRY_CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT) AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS empty_chain, TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1 AS null_arith, TRY_CAST(TRUNC(COALESCE(TRY_CAST('abc' AS DOUBLE), TRY_CAST(TRY_CAST('abc' AS BOOLEAN) AS DOUBLE))) AS INTEGER) * 0 AS null_mul, TRY_CAST(TRUNC(COALESCE(TRY_CAST('xyz' AS DOUBLE), TRY_CAST(TRY_CAST('xyz' AS BOOLEAN) AS DOUBLE))) AS INTEGER) = 0 AS null_cmp, (TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER) IS NULL) AS null_isnull
+SELECT TRY_CAST(TRUNC(COALESCE(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT), '') AS DOUBLE), TRY_CAST(TRY_CAST(COALESCE(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT), '') AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS empty_chain, TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER) + 1 AS null_arith, TRY_CAST(TRUNC(COALESCE(TRY_CAST('abc' AS DOUBLE), TRY_CAST(TRY_CAST('abc' AS BOOLEAN) AS DOUBLE))) AS INTEGER) * 0 AS null_mul, TRY_CAST(TRUNC(COALESCE(TRY_CAST('xyz' AS DOUBLE), TRY_CAST(TRY_CAST('xyz' AS BOOLEAN) AS DOUBLE))) AS INTEGER) = 0 AS null_cmp, (TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER) IS NULL) AS null_isnull
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7477,7 +4359,7 @@ print gettype_null = gettype(toint("bad")), gettype_dynnull = gettype(dynamic(nu
 ```
 **Generated SQL**
 ```sql
-SELECT CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE '%[]' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'JSON' THEN (CASE WHEN json_type(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER))) END AS gettype_null, CASE WHEN TYPEOF(NULL) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(NULL) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(NULL) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(NULL) = 'VARCHAR' THEN 'string' WHEN TYPEOF(NULL) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(NULL) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(NULL) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(NULL) = 'UUID' THEN 'guid' WHEN TYPEOF(NULL) LIKE '%[]' OR TYPEOF(NULL) LIKE 'STRUCT%' OR TYPEOF(NULL) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(NULL) = 'JSON' THEN (CASE WHEN json_type(CAST(NULL AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(NULL)) END AS gettype_dynnull, CASE WHEN TYPEOF(CAST('nan' AS DOUBLE)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST('nan' AS DOUBLE)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST('nan' AS DOUBLE)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST('nan' AS DOUBLE)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST('nan' AS DOUBLE)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST('nan' AS DOUBLE)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST('nan' AS DOUBLE)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST('nan' AS DOUBLE)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST('nan' AS DOUBLE)) LIKE '%[]' OR TYPEOF(CAST('nan' AS DOUBLE)) LIKE 'STRUCT%' OR TYPEOF(CAST('nan' AS DOUBLE)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST('nan' AS DOUBLE)) = 'JSON' THEN (CASE WHEN json_type(CAST(CAST('nan' AS DOUBLE) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST('nan' AS DOUBLE))) END AS gettype_realnan, CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE '%[]' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'JSON' THEN (CASE WHEN json_type(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER))) END AS gettype_emptystr
+SELECT CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE '%[]' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'JSON' THEN (CASE json_type(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_CAST(TRY_CAST('bad' AS BOOLEAN) AS DOUBLE))) AS INTEGER))) END AS gettype_null, CASE WHEN TYPEOF(NULL) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(NULL) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(NULL) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(NULL) = 'VARCHAR' THEN 'string' WHEN TYPEOF(NULL) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(NULL) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(NULL) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(NULL) = 'UUID' THEN 'guid' WHEN TYPEOF(NULL) LIKE '%[]' OR TYPEOF(NULL) LIKE 'STRUCT%' OR TYPEOF(NULL) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(NULL) = 'JSON' THEN (CASE json_type(CAST(NULL AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(NULL)) END AS gettype_dynnull, CASE WHEN TYPEOF(CAST('nan' AS DOUBLE)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST('nan' AS DOUBLE)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST('nan' AS DOUBLE)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST('nan' AS DOUBLE)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST('nan' AS DOUBLE)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST('nan' AS DOUBLE)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST('nan' AS DOUBLE)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST('nan' AS DOUBLE)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST('nan' AS DOUBLE)) LIKE '%[]' OR TYPEOF(CAST('nan' AS DOUBLE)) LIKE 'STRUCT%' OR TYPEOF(CAST('nan' AS DOUBLE)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST('nan' AS DOUBLE)) = 'JSON' THEN (CASE json_type(CAST(CAST('nan' AS DOUBLE) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST('nan' AS DOUBLE))) END AS gettype_realnan, CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE '%[]' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'JSON' THEN (CASE json_type(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('' AS DOUBLE), TRY_CAST(TRY_CAST('' AS BOOLEAN) AS DOUBLE))) AS INTEGER))) END AS gettype_emptystr
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7489,7 +4371,7 @@ SELECT CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST('bad' AS DOUBLE), TRY_C
 ### `agent-type-casts-coercion-0043` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=(9223372036854775807, 9223372036854775807, 9.223372036854776E+18, -1, 'long') duck=('9223372036854775807', null, 9.223372036854776E+18, null, 'dictionary')
+*Detail:* first differing row[0]: kusto=(9223372036854775807, 9223372036854775807, 9.223372036854776E+18, -1, 'long') duck=('9223372036854775807', null, 9.223372036854776E+18, null, 'long')
 
 **KQL**
 ```kql
@@ -7497,7 +4379,7 @@ datatable(d:dynamic)[ dynamic(9223372036854775807), dynamic(-9223372036854775808
 ```
 **Generated SQL**
 ```sql
-SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS tl, COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE)) AS td, TRY_CAST(TRUNC(COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS ti, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(d AS JSON)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(d AS JSON)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(d AS JSON)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(d AS JSON)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(d AS JSON)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(d AS JSON)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(d AS JSON)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(d AS JSON)) LIKE '%[]' OR TYPEOF(CAST(d AS JSON)) LIKE 'STRUCT%' OR TYPEOF(CAST(d AS JSON)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(d AS JSON)) = 'JSON' THEN (CASE WHEN json_type(CAST(CAST(d AS JSON) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(d AS JSON))) END AS gt FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('9223372036854775807'::JSON AS JSON)), (CAST('-0'::JSON AS JSON)), (CAST('1.7976931348623157E+308'::JSON AS JSON)), (CAST('5E-324'::JSON AS JSON))) AS t(d))
+SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS tl, COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE)) AS td, TRY_CAST(TRUNC(COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS ti, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(d AS JSON)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(d AS JSON)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(d AS JSON)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(d AS JSON)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(d AS JSON)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(d AS JSON)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(d AS JSON)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(d AS JSON)) LIKE '%[]' OR TYPEOF(CAST(d AS JSON)) LIKE 'STRUCT%' OR TYPEOF(CAST(d AS JSON)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(d AS JSON)) = 'JSON' THEN (CASE json_type(CAST(CAST(d AS JSON) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(d AS JSON))) END AS gt FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('9223372036854775807'::JSON AS JSON)), (CAST('-0'::JSON AS JSON)), (CAST('1.7976931348623157E+308'::JSON AS JSON)), (CAST('5E-324'::JSON AS JSON))) AS t(d))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7507,14 +4389,14 @@ SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS 
     - (1.7976931348623157E+308, 9223372036854775807, 1.7976931348623157E+308, 2147483647, 'double')
     - (5E-324, 0, 5E-324, 0, 'double')
 - DuckDB: cols=[d:String, tl:Int, td:Real, ti:Int, gt:String] rows=4
-    - ('9223372036854775807', null, 9.223372036854776E+18, null, 'dictionary')
-    - ('-0', 0, 0, 0, 'dictionary')
-    - ('1.7976931348623157E+308', null, 1.7976931348623157E+308, null, 'dictionary')
-    - ('5E-324', 0, 5E-324, 0, 'dictionary')
+    - ('9223372036854775807', null, 9.223372036854776E+18, null, 'long')
+    - ('-0', 0, 0, 0, 'long')
+    - ('1.7976931348623157E+308', null, 1.7976931348623157E+308, null, 'real')
+    - ('5E-324', 0, 5E-324, 0, 'real')
 
 ### `agent-type-casts-coercion-0046` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(0.3333333333333333, 0, False, True) duck=(0.3333333333333333, 0.000, True, True)
+*Detail:* first differing row[0]: kusto=(0.3333333333333333, 0, False, True) duck=(0.3333333333333333, 0, True, True)
 
 **KQL**
 ```kql
@@ -7522,14 +4404,14 @@ print decimal_div_int = todecimal("1") / 3, decimal_vs_real = todecimal("0.1") +
 ```
 **Generated SQL**
 ```sql
-SELECT TRY_CAST('1' AS DECIMAL) / 3 AS decimal_div_int, TRY_CAST('0.1' AS DECIMAL) + TRY_CAST('0.2' AS DECIMAL) - TRY_CAST('0.3' AS DECIMAL) AS decimal_vs_real, (0.1 + 0.2 = 0.3) AS real_vs_dec, (TRY_CAST('0.1' AS DECIMAL) + TRY_CAST('0.2' AS DECIMAL) = TRY_CAST('0.3' AS DECIMAL)) AS dec_eq
+SELECT TRY_CAST('1' AS DECIMAL(38, 18)) / 3 AS decimal_div_int, TRY_CAST('0.1' AS DECIMAL(38, 18)) + TRY_CAST('0.2' AS DECIMAL(38, 18)) - TRY_CAST('0.3' AS DECIMAL(38, 18)) AS decimal_vs_real, (0.1 + 0.2 = 0.3) AS real_vs_dec, (TRY_CAST('0.1' AS DECIMAL(38, 18)) + TRY_CAST('0.2' AS DECIMAL(38, 18)) = TRY_CAST('0.3' AS DECIMAL(38, 18))) AS dec_eq
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[decimal_div_int:Real, decimal_vs_real:Real, real_vs_dec:Bool, dec_eq:Bool] rows=1
     - (0.3333333333333333, 0, False, True)
 - DuckDB: cols=[decimal_div_int:Real, decimal_vs_real:Real, real_vs_dec:Bool, dec_eq:Bool] rows=1
-    - (0.3333333333333333, 0.000, True, True)
+    - (0.3333333333333333, 0, True, True)
 
 ### `agent-type-casts-coercion-0004` — MismatchRows (high)
 
@@ -7593,7 +4475,7 @@ SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(s AS DOUBLE), TRY_CAST(TRY_CAST(s AS 
 
 ### `agent-type-casts-coercion-0012` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=(3.141592653589793, 'decimal', 0.3333333333333333) duck=(3.142, 'real', 0.3333333333333333)
+*Detail:* first differing row[0]: kusto=(3.141592653589793, 'decimal', 0.3333333333333333) duck=(3.141592653589793238, 'real', 0.3333333333333333)
 
 **KQL**
 ```kql
@@ -7601,14 +4483,14 @@ print x = todecimal("3.14159265358979323846"), y = gettype(todecimal("1.5")), z 
 ```
 **Generated SQL**
 ```sql
-SELECT TRY_CAST('3.14159265358979323846' AS DECIMAL) AS x, CASE WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST('1.5' AS DECIMAL)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL)) LIKE '%[]' OR TYPEOF(TRY_CAST('1.5' AS DECIMAL)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST('1.5' AS DECIMAL)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL)) = 'JSON' THEN (CASE WHEN json_type(CAST(TRY_CAST('1.5' AS DECIMAL) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST('1.5' AS DECIMAL))) END AS y, TRY_CAST(1 AS DECIMAL) / TRY_CAST(3 AS DECIMAL) AS z
+SELECT TRY_CAST('3.14159265358979323846' AS DECIMAL(38, 18)) AS x, CASE WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) LIKE '%[]' OR TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18))) = 'JSON' THEN (CASE json_type(CAST(TRY_CAST('1.5' AS DECIMAL(38, 18)) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST('1.5' AS DECIMAL(38, 18)))) END AS y, TRY_CAST(1 AS DECIMAL(38, 18)) / TRY_CAST(3 AS DECIMAL(38, 18)) AS z
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[x:Real, y:String, z:Real] rows=1
     - (3.141592653589793, 'decimal', 0.3333333333333333)
 - DuckDB: cols=[x:Real, y:String, z:Real] rows=1
-    - (3.142, 'real', 0.3333333333333333)
+    - (3.141592653589793238, 'real', 0.3333333333333333)
 
 ### `agent-type-casts-coercion-0014` — MismatchRows (high)
 
@@ -7641,25 +4523,6 @@ SELECT *, TRY_CAST(s AS INTERVAL) AS ts, (TRY_CAST(s AS INTERVAL) IS NULL) AS is
     - ('-1d', -1.00:00:00, False)
     - ('00:00:00.001', 00:00:00.0010000, False)
 
-### `agent-type-casts-coercion-0015` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1.02:03:04.5000000, 'timespan', 24) duck=(null, 'timespan', 24)
-
-**KQL**
-```kql
-print x = totimespan("1.02:03:04.5"), y = gettype(totimespan("1d")), tot = totimespan("1d")/totimespan("1h")
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST('1.02:03:04.5' AS INTERVAL) AS x, CASE WHEN TYPEOF(TRY_CAST('1d' AS INTERVAL)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST('1d' AS INTERVAL)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST('1d' AS INTERVAL)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST('1d' AS INTERVAL)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST('1d' AS INTERVAL)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST('1d' AS INTERVAL)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST('1d' AS INTERVAL)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST('1d' AS INTERVAL)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST('1d' AS INTERVAL)) LIKE '%[]' OR TYPEOF(TRY_CAST('1d' AS INTERVAL)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST('1d' AS INTERVAL)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST('1d' AS INTERVAL)) = 'JSON' THEN (CASE WHEN json_type(CAST(TRY_CAST('1d' AS INTERVAL) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST('1d' AS INTERVAL))) END AS y, (EXTRACT(EPOCH FROM (TRY_CAST('1d' AS INTERVAL))) / EXTRACT(EPOCH FROM (TRY_CAST('1h' AS INTERVAL)))) AS tot
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:TimeSpan, y:String, tot:Real] rows=1
-    - (1.02:03:04.5000000, 'timespan', 24)
-- DuckDB: cols=[x:TimeSpan, y:String, tot:Real] rows=1
-    - (null, 'timespan', 24)
-
 ### `agent-type-casts-coercion-0017` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=(True, True, True, False, null, null, True) duck=(True, True, True, False, True, null, null)
@@ -7679,46 +4542,6 @@ SELECT TRY_CAST('true' AS BOOLEAN) AS a, TRY_CAST('True' AS BOOLEAN) AS b, TRY_C
 - DuckDB: cols=[a:Bool, b:Bool, c:Bool, d:Bool, e:Bool, f:Bool, g:Bool] rows=1
     - (True, True, True, False, True, null, null)
 
-### `agent-type-casts-coercion-0019` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(True, 1, 1, 1, 'True', True) duck=(True, 1, 1, 1, 'true', True)
-
-**KQL**
-```kql
-datatable(b:bool)[ true, false ] | extend i=toint(b), l=tolong(b), d=todouble(b), s=tostring(b), back=tobool(toint(b))
-```
-**Generated SQL**
-```sql
-SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS i, TRY_CAST(TRUNC(COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS l, COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE)) AS d, TRY_CAST(b AS TEXT) AS s, TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(b AS DOUBLE), TRY_CAST(TRY_CAST(b AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS BOOLEAN) AS back FROM (VALUES (TRUE), (FALSE)) AS t(b)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[b:Bool, i:Int, l:Int, d:Real, s:String, back:Bool] rows=2
-    - (True, 1, 1, 1, 'True', True)
-    - (False, 0, 0, 0, 'False', False)
-- DuckDB: cols=[b:Bool, i:Int, l:Int, d:Real, s:String, back:Bool] rows=2
-    - (True, 1, 1, 1, 'true', True)
-    - (False, 0, 0, 0, 'false', False)
-
-### `agent-type-casts-coercion-0020` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('123', '1.5', 'True', '2020-01-01T00:00:00.0000000Z', '1.00:00:00') duck=('123', '1.5', 'true', '2020-01-01 00:00:00', '24:00:00')
-
-**KQL**
-```kql
-print x = tostring(123), y = tostring(1.5), z = tostring(true), w = tostring(datetime(2020-01-01)), v = tostring(1d)
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(123 AS TEXT) AS x, TRY_CAST(1.5 AS TEXT) AS y, TRY_CAST(TRUE AS TEXT) AS z, TRY_CAST(TIMESTAMP '2020-01-01 00:00:00' AS TEXT) AS w, TRY_CAST((86400000 * INTERVAL '1 millisecond') AS TEXT) AS v
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:String, y:String, z:String, w:String, v:String] rows=1
-    - ('123', '1.5', 'True', '2020-01-01T00:00:00.0000000Z', '1.00:00:00')
-- DuckDB: cols=[x:String, y:String, z:String, w:String, v:String] rows=1
-    - ('123', '1.5', 'true', '2020-01-01 00:00:00', '24:00:00')
-
 ### `agent-type-casts-coercion-0021` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=('1.0', '1.5', '0.30000000000000007', '100000000000.0') duck=('1.0', '1.5', '0.3', '100000000000.0')
@@ -7729,7 +4552,7 @@ print a = tostring(1.0), b = tostring(1.50000), c = tostring(0.1+0.2), d = tostr
 ```
 **Generated SQL**
 ```sql
-SELECT TRY_CAST(1.0 AS TEXT) AS a, TRY_CAST(1.5 AS TEXT) AS b, TRY_CAST(0.1 + 0.2 AS TEXT) AS c, TRY_CAST(100000000000.0 AS TEXT) AS d
+SELECT COALESCE(TRY_CAST(1.0 AS TEXT), '') AS a, COALESCE(TRY_CAST(1.5 AS TEXT), '') AS b, COALESCE(TRY_CAST(0.1 + 0.2 AS TEXT), '') AS c, COALESCE(TRY_CAST(100000000000.0 AS TEXT), '') AS d
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7748,7 +4571,7 @@ print x = gettype(toint(1)), y = gettype(tolong(1)), z = gettype(todouble(1)), w
 ```
 **Generated SQL**
 ```sql
-SELECT CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE '%[]' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'JSON' THEN (CASE WHEN json_type(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER))) END AS x, CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE '%[]' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) = 'JSON' THEN (CASE WHEN json_type(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT))) END AS y, CASE WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) = 'VARCHAR' THEN 'string' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) = 'UUID' THEN 'guid' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE '%[]' OR TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE 'STRUCT%' OR TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) = 'JSON' THEN (CASE WHEN json_type(CAST(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE)) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE)))) END AS z, CASE WHEN TYPEOF(1 + 1) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(1 + 1) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(1 + 1) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(1 + 1) = 'VARCHAR' THEN 'string' WHEN TYPEOF(1 + 1) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(1 + 1) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(1 + 1) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(1 + 1) = 'UUID' THEN 'guid' WHEN TYPEOF(1 + 1) LIKE '%[]' OR TYPEOF(1 + 1) LIKE 'STRUCT%' OR TYPEOF(1 + 1) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(1 + 1) = 'JSON' THEN (CASE WHEN json_type(CAST(1 + 1 AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(1 + 1)) END AS w, CASE WHEN TYPEOF(1 + 1.0) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(1 + 1.0) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(1 + 1.0) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(1 + 1.0) = 'VARCHAR' THEN 'string' WHEN TYPEOF(1 + 1.0) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(1 + 1.0) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(1 + 1.0) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(1 + 1.0) = 'UUID' THEN 'guid' WHEN TYPEOF(1 + 1.0) LIKE '%[]' OR TYPEOF(1 + 1.0) LIKE 'STRUCT%' OR TYPEOF(1 + 1.0) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(1 + 1.0) = 'JSON' THEN (CASE WHEN json_type(CAST(1 + 1.0 AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(1 + 1.0)) END AS v, CASE WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE '%[]' OR TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE 'STRUCT%' OR TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) = 'JSON' THEN (CASE WHEN json_type(CAST(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT))) END AS u
+SELECT CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE '%[]' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER)) = 'JSON' THEN (CASE json_type(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS INTEGER))) END AS x, CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) = 'UUID' THEN 'guid' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE '%[]' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE 'STRUCT%' OR TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT)) = 'JSON' THEN (CASE json_type(CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) AS BIGINT))) END AS y, CASE WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) = 'VARCHAR' THEN 'string' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) = 'UUID' THEN 'guid' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE '%[]' OR TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE 'STRUCT%' OR TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE))) = 'JSON' THEN (CASE json_type(CAST(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE)) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(TRY_CAST(1 AS BOOLEAN) AS DOUBLE)))) END AS z, CASE WHEN TYPEOF(1 + 1) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(1 + 1) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(1 + 1) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(1 + 1) = 'VARCHAR' THEN 'string' WHEN TYPEOF(1 + 1) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(1 + 1) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(1 + 1) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(1 + 1) = 'UUID' THEN 'guid' WHEN TYPEOF(1 + 1) LIKE '%[]' OR TYPEOF(1 + 1) LIKE 'STRUCT%' OR TYPEOF(1 + 1) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(1 + 1) = 'JSON' THEN (CASE json_type(CAST(1 + 1 AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(1 + 1)) END AS w, CASE WHEN TYPEOF(1 + 1.0) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(1 + 1.0) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(1 + 1.0) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(1 + 1.0) = 'VARCHAR' THEN 'string' WHEN TYPEOF(1 + 1.0) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(1 + 1.0) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(1 + 1.0) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(1 + 1.0) = 'UUID' THEN 'guid' WHEN TYPEOF(1 + 1.0) LIKE '%[]' OR TYPEOF(1 + 1.0) LIKE 'STRUCT%' OR TYPEOF(1 + 1.0) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(1 + 1.0) = 'JSON' THEN (CASE json_type(CAST(1 + 1.0 AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(1 + 1.0)) END AS v, CASE WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE '%[]' OR TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE 'STRUCT%' OR TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT)) = 'JSON' THEN (CASE json_type(CAST(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(TRUNC(CAST(1 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT))) END AS u
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7759,7 +4582,7 @@ SELECT CASE WHEN TYPEOF(TRY_CAST(TRUNC(COALESCE(TRY_CAST(1 AS DOUBLE), TRY_CAST(
 
 ### `agent-type-casts-coercion-0024` — MismatchRows (high)
 
-*Detail:* first differing row[0]: kusto=('null', 'long', 'string', 'array') duck=('"null"', 'dictionary', 'dictionary', 'array')
+*Detail:* first differing row[0]: kusto=('null', 'long', 'string', 'array') duck=('"null"', 'long', 'string', 'array')
 
 **KQL**
 ```kql
@@ -7767,19 +4590,19 @@ print x = gettype(dynamic(null)), y = gettype(dynamic(1)), z = gettype(dynamic("
 ```
 **Generated SQL**
 ```sql
-SELECT CASE WHEN TYPEOF(NULL) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(NULL) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(NULL) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(NULL) = 'VARCHAR' THEN 'string' WHEN TYPEOF(NULL) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(NULL) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(NULL) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(NULL) = 'UUID' THEN 'guid' WHEN TYPEOF(NULL) LIKE '%[]' OR TYPEOF(NULL) LIKE 'STRUCT%' OR TYPEOF(NULL) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(NULL) = 'JSON' THEN (CASE WHEN json_type(CAST(NULL AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(NULL)) END AS x, CASE WHEN TYPEOF('1'::JSON) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF('1'::JSON) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF('1'::JSON) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF('1'::JSON) = 'VARCHAR' THEN 'string' WHEN TYPEOF('1'::JSON) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF('1'::JSON) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF('1'::JSON) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF('1'::JSON) = 'UUID' THEN 'guid' WHEN TYPEOF('1'::JSON) LIKE '%[]' OR TYPEOF('1'::JSON) LIKE 'STRUCT%' OR TYPEOF('1'::JSON) LIKE 'MAP%' THEN 'array' WHEN TYPEOF('1'::JSON) = 'JSON' THEN (CASE WHEN json_type(CAST('1'::JSON AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF('1'::JSON)) END AS y, CASE WHEN TYPEOF('"s"'::JSON) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF('"s"'::JSON) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF('"s"'::JSON) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF('"s"'::JSON) = 'VARCHAR' THEN 'string' WHEN TYPEOF('"s"'::JSON) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF('"s"'::JSON) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF('"s"'::JSON) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF('"s"'::JSON) = 'UUID' THEN 'guid' WHEN TYPEOF('"s"'::JSON) LIKE '%[]' OR TYPEOF('"s"'::JSON) LIKE 'STRUCT%' OR TYPEOF('"s"'::JSON) LIKE 'MAP%' THEN 'array' WHEN TYPEOF('"s"'::JSON) = 'JSON' THEN (CASE WHEN json_type(CAST('"s"'::JSON AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF('"s"'::JSON)) END AS z, CASE WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(LIST_VALUE(1, 2)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'UUID' THEN 'guid' WHEN TYPEOF(LIST_VALUE(1, 2)) LIKE '%[]' OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'STRUCT%' OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'JSON' THEN (CASE WHEN json_type(CAST(LIST_VALUE(1, 2) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(LIST_VALUE(1, 2))) END AS w
+SELECT CASE WHEN TYPEOF(NULL) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(NULL) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(NULL) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(NULL) = 'VARCHAR' THEN 'string' WHEN TYPEOF(NULL) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(NULL) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(NULL) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(NULL) = 'UUID' THEN 'guid' WHEN TYPEOF(NULL) LIKE '%[]' OR TYPEOF(NULL) LIKE 'STRUCT%' OR TYPEOF(NULL) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(NULL) = 'JSON' THEN (CASE json_type(CAST(NULL AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(NULL)) END AS x, CASE WHEN TYPEOF('1'::JSON) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF('1'::JSON) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF('1'::JSON) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF('1'::JSON) = 'VARCHAR' THEN 'string' WHEN TYPEOF('1'::JSON) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF('1'::JSON) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF('1'::JSON) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF('1'::JSON) = 'UUID' THEN 'guid' WHEN TYPEOF('1'::JSON) LIKE '%[]' OR TYPEOF('1'::JSON) LIKE 'STRUCT%' OR TYPEOF('1'::JSON) LIKE 'MAP%' THEN 'array' WHEN TYPEOF('1'::JSON) = 'JSON' THEN (CASE json_type(CAST('1'::JSON AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF('1'::JSON)) END AS y, CASE WHEN TYPEOF('"s"'::JSON) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF('"s"'::JSON) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF('"s"'::JSON) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF('"s"'::JSON) = 'VARCHAR' THEN 'string' WHEN TYPEOF('"s"'::JSON) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF('"s"'::JSON) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF('"s"'::JSON) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF('"s"'::JSON) = 'UUID' THEN 'guid' WHEN TYPEOF('"s"'::JSON) LIKE '%[]' OR TYPEOF('"s"'::JSON) LIKE 'STRUCT%' OR TYPEOF('"s"'::JSON) LIKE 'MAP%' THEN 'array' WHEN TYPEOF('"s"'::JSON) = 'JSON' THEN (CASE json_type(CAST('"s"'::JSON AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF('"s"'::JSON)) END AS z, CASE WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(LIST_VALUE(1, 2)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(LIST_VALUE(1, 2)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'UUID' THEN 'guid' WHEN TYPEOF(LIST_VALUE(1, 2)) LIKE '%[]' OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'STRUCT%' OR TYPEOF(LIST_VALUE(1, 2)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(LIST_VALUE(1, 2)) = 'JSON' THEN (CASE json_type(CAST(LIST_VALUE(1, 2) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(LIST_VALUE(1, 2))) END AS w
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
 - Kusto: cols=[x:String, y:String, z:String, w:String] rows=1
     - ('null', 'long', 'string', 'array')
 - DuckDB: cols=[x:String, y:String, z:String, w:String] rows=1
-    - ('"null"', 'dictionary', 'dictionary', 'array')
+    - ('"null"', 'long', 'string', 'array')
 
 ### `agent-type-casts-coercion-0025` — MismatchRows (high)
 
 *Sub-verdicts:* TYPE_MISMATCH[d:Dynamic|String]  
-*Detail:* first differing row[0]: kusto=(1, 'long', 1, 1, '1') duck=('1', 'dictionary', 1, 1, '1')
+*Detail:* first differing row[1]: kusto=(1.5, 'double', 1, 1.5, '1.5') duck=('1.5', 'real', 1, 1.5, '1.5')
 
 **KQL**
 ```kql
@@ -7787,7 +4610,7 @@ datatable(d:dynamic)[ dynamic(1), dynamic(1.5), dynamic("5"), dynamic(true), dyn
 ```
 **Generated SQL**
 ```sql
-SELECT *, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(d AS JSON)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(d AS JSON)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(d AS JSON)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(d AS JSON)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(d AS JSON)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(d AS JSON)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(d AS JSON)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(d AS JSON)) LIKE '%[]' OR TYPEOF(CAST(d AS JSON)) LIKE 'STRUCT%' OR TYPEOF(CAST(d AS JSON)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(d AS JSON)) = 'JSON' THEN (CASE WHEN json_type(CAST(CAST(d AS JSON) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(d AS JSON))) END AS gt, TRY_CAST(TRUNC(COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS toi, COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE)) AS tod, TRY_CAST(d AS TEXT) AS tos FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('1'::JSON AS JSON)), (CAST('1.5'::JSON AS JSON)), (CAST('"5"'::JSON AS JSON)), (CAST('true'::JSON AS JSON)), (CAST(NULL AS JSON))) AS t(d))
+SELECT *, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(CAST(d AS JSON)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(CAST(d AS JSON)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(CAST(d AS JSON)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(CAST(d AS JSON)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(CAST(d AS JSON)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(CAST(d AS JSON)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(CAST(d AS JSON)) = 'UUID' THEN 'guid' WHEN TYPEOF(CAST(d AS JSON)) LIKE '%[]' OR TYPEOF(CAST(d AS JSON)) LIKE 'STRUCT%' OR TYPEOF(CAST(d AS JSON)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(CAST(d AS JSON)) = 'JSON' THEN (CASE json_type(CAST(CAST(d AS JSON) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(CAST(d AS JSON))) END AS gt, TRY_CAST(TRUNC(COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS toi, COALESCE(TRY_CAST(d AS DOUBLE), TRY_CAST(TRY_CAST(d AS BOOLEAN) AS DOUBLE)) AS tod, COALESCE(json_extract_string(d, '$'), '') AS tos FROM (SELECT CAST(d AS JSON) AS d FROM (VALUES (CAST('1'::JSON AS JSON)), (CAST('1.5'::JSON AS JSON)), (CAST('"5"'::JSON AS JSON)), (CAST('true'::JSON AS JSON)), (CAST(NULL AS JSON))) AS t(d))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7798,49 +4621,11 @@ SELECT *, CASE WHEN TYPEOF(CAST(d AS JSON)) IN ('TINYINT','SMALLINT','INTEGER','
     - (true, 'bool', 1, 1, 'true')
     - (null, 'null', null, null, '')
 - DuckDB: cols=[d:String, gt:String, toi:Int, tod:Real, tos:String] rows=5
-    - ('1', 'dictionary', 1, 1, '1')
-    - ('1.5', 'dictionary', 1, 1.5, '1.5')
-    - ('"5"', 'dictionary', 5, 5, '"5"')
-    - ('true', 'dictionary', 1, 1, 'true')
-    - (null, 'dictionary', null, null, null)
-
-### `agent-type-casts-coercion-0027` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(2, 2.5, 2.5, 1, 1.5, 0.5) duck=(2, 2.5, 2.5, 1, 1.5, -1.5)
-
-**KQL**
-```kql
-print x = 5 / 2, y = 5.0 / 2, z = 5 / 2.0, w = 5 % 2, v = 5.5 % 2.0, u = -5.5 % 2.0
-```
-**Generated SQL**
-```sql
-SELECT CAST(TRUNC(CAST(5 AS DOUBLE) / NULLIF(2, 0)) AS BIGINT) AS x, 5.0 / 2 AS y, 5 / 2.0 AS z, (((5) % NULLIF(2, 0)) + ABS(2)) % NULLIF(2, 0) AS w, 5.5 % 2.0 AS v, (-5.5) % 2.0 AS u
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int, y:Real, z:Real, w:Int, v:Real, u:Real] rows=1
-    - (2, 2.5, 2.5, 1, 1.5, 0.5)
-- DuckDB: cols=[x:Int, y:Real, z:Real, w:Int, v:Real, u:Real] rows=1
-    - (2, 2.5, 2.5, 1, 1.5, -1.5)
-
-### `agent-type-casts-coercion-0028` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 2, 1, 0.5, 2.5) duck=(1, 2, 1, -2.5, 2.5)
-
-**KQL**
-```kql
-print a = (-5) % 3, b = 5 % (-3), c = (-5) % (-3), d = (-5.5) % 3.0, e = 5.5 % (-3.0)
-```
-**Generated SQL**
-```sql
-SELECT (((((-5))) % NULLIF(3, 0)) + ABS(3)) % NULLIF(3, 0) AS a, (((5) % NULLIF(((-3)), 0)) + ABS(((-3)))) % NULLIF(((-3)), 0) AS b, (((((-5))) % NULLIF(((-3)), 0)) + ABS(((-3)))) % NULLIF(((-3)), 0) AS c, ((-5.5)) % 3.0 AS d, 5.5 % ((-3.0)) AS e
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[a:Int, b:Int, c:Int, d:Real, e:Real] rows=1
-    - (1, 2, 1, 0.5, 2.5)
-- DuckDB: cols=[a:Int, b:Int, c:Int, d:Real, e:Real] rows=1
-    - (1, 2, 1, -2.5, 2.5)
+    - ('1', 'long', 1, 1, '1')
+    - ('1.5', 'real', 1, 1.5, '1.5')
+    - ('"5"', 'string', 5, 5, '5')
+    - ('true', 'bool', 1, 1, 'true')
+    - (null, 'dictionary', null, null, '')
 
 ### `agent-type-casts-coercion-0039` — MismatchRows (high)
 
@@ -7886,7 +4671,7 @@ print x = bin(5, 2), y = bin(5.5, 2), z = bin(-5, 2), w = bin(-5.5, 2.0), gt = g
 ```
 **Generated SQL**
 ```sql
-SELECT FLOOR((5)/(2))*(2) AS x, FLOOR((5.5)/(2))*(2) AS y, FLOOR(((-5))/(2))*(2) AS z, FLOOR(((-5.5))/(2.0))*(2.0) AS w, CASE WHEN TYPEOF(FLOOR((5)/(2))*(2)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(FLOOR((5)/(2))*(2)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(FLOOR((5)/(2))*(2)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(FLOOR((5)/(2))*(2)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(FLOOR((5)/(2))*(2)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(FLOOR((5)/(2))*(2)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(FLOOR((5)/(2))*(2)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(FLOOR((5)/(2))*(2)) = 'UUID' THEN 'guid' WHEN TYPEOF(FLOOR((5)/(2))*(2)) LIKE '%[]' OR TYPEOF(FLOOR((5)/(2))*(2)) LIKE 'STRUCT%' OR TYPEOF(FLOOR((5)/(2))*(2)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(FLOOR((5)/(2))*(2)) = 'JSON' THEN (CASE WHEN json_type(CAST(FLOOR((5)/(2))*(2) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(FLOOR((5)/(2))*(2))) END AS gt
+SELECT FLOOR((5)/(2))*(2) AS x, FLOOR((5.5)/(2))*(2) AS y, FLOOR(((-5))/(2))*(2) AS z, FLOOR(((-5.5))/(2.0))*(2.0) AS w, CASE WHEN TYPEOF(FLOOR((5)/(2))*(2)) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(FLOOR((5)/(2))*(2)) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(FLOOR((5)/(2))*(2)) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(FLOOR((5)/(2))*(2)) = 'VARCHAR' THEN 'string' WHEN TYPEOF(FLOOR((5)/(2))*(2)) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(FLOOR((5)/(2))*(2)) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(FLOOR((5)/(2))*(2)) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(FLOOR((5)/(2))*(2)) = 'UUID' THEN 'guid' WHEN TYPEOF(FLOOR((5)/(2))*(2)) LIKE '%[]' OR TYPEOF(FLOOR((5)/(2))*(2)) LIKE 'STRUCT%' OR TYPEOF(FLOOR((5)/(2))*(2)) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(FLOOR((5)/(2))*(2)) = 'JSON' THEN (CASE json_type(CAST(FLOOR((5)/(2))*(2) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(FLOOR((5)/(2))*(2))) END AS gt
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7933,7 +4718,7 @@ print x = todatetime(0), y = todatetime(1), z = gettype(todatetime(1)), w = toda
 ```
 **Generated SQL**
 ```sql
-SELECT COALESCE(TRY_CAST(0 AS TIMESTAMP), TRY_STRPTIME(CAST(0 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS x, COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS y, CASE WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) = 'VARCHAR' THEN 'string' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) = 'UUID' THEN 'guid' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE '%[]' OR TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE 'STRUCT%' OR TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) = 'JSON' THEN (CASE WHEN json_type(CAST(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS VARCHAR)) = 'ARRAY' THEN 'array' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])))) END AS z, COALESCE(TRY_CAST(1.5 AS TIMESTAMP), TRY_STRPTIME(CAST(1.5 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS w
+SELECT COALESCE(TRY_CAST(0 AS TIMESTAMP), TRY_STRPTIME(CAST(0 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS x, COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS y, CASE WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT') THEN 'long' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) IN ('FLOAT','DOUBLE','REAL') OR TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE 'DECIMAL%' THEN 'real' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) = 'VARCHAR' THEN 'string' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) = 'BOOLEAN' THEN 'bool' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) IN ('TIMESTAMP','DATE','TIMESTAMP WITH TIME ZONE','TIMESTAMP_NS','TIMESTAMP_MS','TIMESTAMP_S') THEN 'datetime' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE 'INTERVAL%' THEN 'timespan' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) = 'UUID' THEN 'guid' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE '%[]' OR TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE 'STRUCT%' OR TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) LIKE 'MAP%' THEN 'array' WHEN TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M']))) = 'JSON' THEN (CASE json_type(CAST(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS VARCHAR)) WHEN 'ARRAY' THEN 'array' WHEN 'OBJECT' THEN 'dictionary' WHEN 'VARCHAR' THEN 'string' WHEN 'BIGINT' THEN 'long' WHEN 'UBIGINT' THEN 'long' WHEN 'DOUBLE' THEN 'real' WHEN 'BOOLEAN' THEN 'bool' WHEN 'NULL' THEN 'null' ELSE 'dictionary' END) ELSE LOWER(TYPEOF(COALESCE(TRY_CAST(1 AS TIMESTAMP), TRY_STRPTIME(CAST(1 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])))) END AS z, COALESCE(TRY_CAST(1.5 AS TIMESTAMP), TRY_STRPTIME(CAST(1.5 AS VARCHAR), ['%-d.%-m.%Y, %H:%M:%S', '%-d.%-m.%Y %H:%M:%S', '%-d.%-m.%Y', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d-%b-%y %H:%M:%S', '%d-%b-%Y %H:%M:%S', '%d %b %Y %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M'])) AS w
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7941,37 +4726,6 @@ SELECT COALESCE(TRY_CAST(0 AS TIMESTAMP), TRY_STRPTIME(CAST(0 AS VARCHAR), ['%-d
     - (0001-01-01T00:00:00.0000000Z, 0001-01-01T00:00:00.0000001Z, 'datetime', 0001-01-01T00:00:00.0000001Z)
 - DuckDB: cols=[x:DateTime, y:DateTime, z:String, w:DateTime] rows=1
     - (null, null, 'datetime', null)
-
-### `agent-type-casts-coercion-0048` — MismatchRows (high)
-
-*Detail:* first differing row[1]: kusto=('	456	', 456, 456) duck=('\t456\t', null, null)
-
-**KQL**
-```kql
-datatable(s:string)[ "  123  ", "\t456\t", "00789", "+0", "-0", "007", "0b101" ] | extend toi=toint(s), tol=tolong(s)
-```
-**Generated SQL**
-```sql
-SELECT *, TRY_CAST(TRUNC(COALESCE(TRY_CAST(s AS DOUBLE), TRY_CAST(TRY_CAST(s AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS toi, TRY_CAST(TRUNC(COALESCE(TRY_CAST(s AS DOUBLE), TRY_CAST(TRY_CAST(s AS BOOLEAN) AS DOUBLE))) AS BIGINT) AS tol FROM (VALUES ('  123  '), ('\t456\t'), ('00789'), ('+0'), ('-0'), ('007'), ('0b101')) AS t(s)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[s:String, toi:Int, tol:Int] rows=7
-    - ('  123  ', 123, 123)
-    - ('	456	', 456, 456)
-    - ('00789', 789, 789)
-    - ('+0', 0, 0)
-    - ('-0', 0, 0)
-    - ('007', 7, 7)
-    - ('0b101', null, null)
-- DuckDB: cols=[s:String, toi:Int, tol:Int] rows=7
-    - ('  123  ', 123, 123)
-    - ('\t456\t', null, null)
-    - ('00789', 789, 789)
-    - ('+0', 0, 0)
-    - ('-0', 0, 0)
-    - ('007', 7, 7)
-    - ('0b101', null, null)
 
 ### `agent-type-casts-coercion-0049` — MismatchRows (high)
 
@@ -7983,7 +4737,7 @@ print a = 0.1 + 0.2 == 0.3, b = 0.1 + 0.2, c = todecimal(0.1) + todecimal(0.2) =
 ```
 **Generated SQL**
 ```sql
-SELECT 0.1 + 0.2 = 0.3 AS a, 0.1 + 0.2 AS b, TRY_CAST(0.1 AS DECIMAL) + TRY_CAST(0.2 AS DECIMAL) = TRY_CAST(0.3 AS DECIMAL) AS c
+SELECT 0.1 + 0.2 = 0.3 AS a, 0.1 + 0.2 AS b, TRY_CAST(0.1 AS DECIMAL(38, 18)) + TRY_CAST(0.2 AS DECIMAL(38, 18)) = TRY_CAST(0.3 AS DECIMAL(38, 18)) AS c
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -7992,51 +4746,7 @@ SELECT 0.1 + 0.2 = 0.3 AS a, 0.1 + 0.2 AS b, TRY_CAST(0.1 AS DECIMAL) + TRY_CAST
 - DuckDB: cols=[a:Bool, b:Real, c:Bool] rows=1
     - (True, 0.3, True)
 
-### `agent-type-casts-coercion-0057` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('', 0, True) duck=(null, null, null)
-
-**KQL**
-```kql
-print x = tostring(toint("abc")), y = strlen(tostring(toint("abc"))), z = tostring(toint("abc")) == ""
-```
-**Generated SQL**
-```sql
-SELECT TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('abc' AS DOUBLE), TRY_CAST(TRY_CAST('abc' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT) AS x, LENGTH(CAST(TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('abc' AS DOUBLE), TRY_CAST(TRY_CAST('abc' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT) AS VARCHAR)) AS y, TRY_CAST(TRY_CAST(TRUNC(COALESCE(TRY_CAST('abc' AS DOUBLE), TRY_CAST(TRY_CAST('abc' AS BOOLEAN) AS DOUBLE))) AS INTEGER) AS TEXT) = '' AS z
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:String, y:Int, z:Bool] rows=1
-    - ('', 0, True)
-- DuckDB: cols=[x:String, y:Int, z:Bool] rows=1
-    - (null, null, null)
-
-## Family: window-series-scan (42)
-
-### `agent-window-series-scan-0001` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 20, 100) duck=(1, 20, 1)
-
-**KQL**
-```kql
-datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | sort by k asc, v desc | serialize rn = row_number(100)
-```
-**Generated SQL**
-```sql
-SELECT *, ROW_NUMBER() OVER (ORDER BY k ASC NULLS FIRST, v DESC NULLS LAST) AS rn FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT))) AS t(k, v) ORDER BY k ASC NULLS FIRST, v DESC NULLS LAST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, v:Int, rn:Int] rows=4
-    - (1, 20, 100)
-    - (1, 10, 101)
-    - (2, 30, 102)
-    - (2, 30, 103)
-- DuckDB: cols=[k:Int, v:Int, rn:Int] rows=4
-    - (1, 20, 1)
-    - (1, 10, 2)
-    - (2, 30, 3)
-    - (2, 30, 4)
+## Family: window-series-scan (32)
 
 ### `agent-window-series-scan-0002` — MismatchRows (high)
 
@@ -8048,7 +4758,7 @@ datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30 ] | sort by k asc | serialize 
 ```
 **Generated SQL**
 ```sql
-SELECT *, ROW_NUMBER() OVER (ORDER BY k ASC NULLS FIRST) AS rn FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT))) AS t(k, v) ORDER BY k ASC NULLS FIRST
+SELECT *, (ROW_NUMBER() OVER (ORDER BY k ASC NULLS FIRST) + (1 - 1)) AS rn FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT))) AS t(k, v) ORDER BY k ASC NULLS FIRST
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -8062,85 +4772,6 @@ SELECT *, ROW_NUMBER() OVER (ORDER BY k ASC NULLS FIRST) AS rn FROM (VALUES (CAS
     - (1, 20, 2)
     - (2, 30, 3)
     - (2, 30, 4)
-
-### `agent-window-series-scan-0004` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('a', 1, null, 5) duck=('a', 1, null, 2)
-
-**KQL**
-```kql
-datatable(g:string, v:long)[ "a",1, "a",2, "b",5, "b",7, "b",9 ] | sort by g asc, v asc | serialize p2 = prev(v, 2), n2 = next(v, 2)
-```
-**Generated SQL**
-```sql
-SELECT *, LAG(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS p2, LEAD(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS n2 FROM (VALUES ('a', CAST(1 AS BIGINT)), ('a', CAST(2 AS BIGINT)), ('b', CAST(5 AS BIGINT)), ('b', CAST(7 AS BIGINT)), ('b', CAST(9 AS BIGINT))) AS t(g, v) ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, v:Int, p2:Int, n2:Int] rows=5
-    - ('a', 1, null, 5)
-    - ('a', 2, null, 7)
-    - ('b', 5, 1, 9)
-    - ('b', 7, 2, null)
-    - ('b', 9, 5, null)
-- DuckDB: cols=[g:String, v:Int, p2:Int, n2:Int] rows=5
-    - ('a', 1, null, 2)
-    - ('a', 2, 1, 5)
-    - ('b', 5, 2, 7)
-    - ('b', 7, 5, 9)
-    - ('b', 9, 7, null)
-
-### `agent-window-series-scan-0005` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=('a', 1, -999, 2) duck=('a', 1, null, 2)
-
-**KQL**
-```kql
-datatable(g:string, v:long)[ "a",1, "a",2, "b",5, "b",7 ] | sort by g asc, v asc | serialize p = prev(v, 1, -999), n = next(v, 1, -999)
-```
-**Generated SQL**
-```sql
-SELECT *, LAG(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS p, LEAD(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS n FROM (VALUES ('a', CAST(1 AS BIGINT)), ('a', CAST(2 AS BIGINT)), ('b', CAST(5 AS BIGINT)), ('b', CAST(7 AS BIGINT))) AS t(g, v) ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, v:Int, p:Int, n:Int] rows=4
-    - ('a', 1, -999, 2)
-    - ('a', 2, 1, 5)
-    - ('b', 5, 2, 7)
-    - ('b', 7, 5, -999)
-- DuckDB: cols=[g:String, v:Int, p:Int, n:Int] rows=4
-    - ('a', 1, null, 2)
-    - ('a', 2, 1, 5)
-    - ('b', 5, 2, 7)
-    - ('b', 7, 5, null)
-
-### `agent-window-series-scan-0008` — MismatchRows (high)
-
-*Detail:* first differing row[2]: kusto=('b', 1, 1) duck=('b', 1, 9)
-
-**KQL**
-```kql
-datatable(g:string, x:long)[ "a",5, "a",3, "b",8, "b",1, "b",9 ] | sort by g asc, x asc | serialize cs = row_cumsum(x, g != prev(g))
-```
-**Generated SQL**
-```sql
-SELECT *, SUM(x) OVER (ORDER BY g ASC NULLS FIRST, x ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS cs FROM (VALUES ('a', CAST(5 AS BIGINT)), ('a', CAST(3 AS BIGINT)), ('b', CAST(8 AS BIGINT)), ('b', CAST(1 AS BIGINT)), ('b', CAST(9 AS BIGINT))) AS t(g, x) ORDER BY g ASC NULLS FIRST, x ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, x:Int, cs:Int] rows=5
-    - ('a', 3, 3)
-    - ('a', 5, 8)
-    - ('b', 1, 1)
-    - ('b', 8, 9)
-    - ('b', 9, 18)
-- DuckDB: cols=[g:String, x:Int, cs:Int] rows=5
-    - ('a', 3, 3)
-    - ('a', 5, 8)
-    - ('b', 1, 9)
-    - ('b', 8, 17)
-    - ('b', 9, 26)
 
 ### `agent-window-series-scan-0013` — MismatchRows (high)
 
@@ -8264,7 +4895,7 @@ SELECT *, json_object('min', LIST_MIN(LIST_FILTER(s, x -> x IS NOT NULL)), 'min_
 ### `agent-window-series-scan-0032` — MismatchRows (high)
 
 *Sub-verdicts:* NAME_MISMATCH, TYPE_MISMATCH[Sub:Int|String]  
-*Detail:* first differing row[0]: kusto=('b', 30, 'x', 30) duck=('a', 30, 'y', 'y')
+*Detail:* first differing row[0]: kusto=('b', 30, 'x', 30) duck=('b', 30, 'x', 'x')
 
 **KQL**
 ```kql
@@ -8281,9 +4912,9 @@ SELECT cat, Tot, sub, Sub FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat OR
     - ('a', 30, 'y', 20)
     - ('a', 30, 'x', 10)
 - DuckDB: cols=[cat:String, Tot:Int, sub:String, sub:String] rows=3
+    - ('b', 30, 'x', 'x')
     - ('a', 30, 'y', 'y')
     - ('a', 30, 'x', 'x')
-    - ('b', 30, 'x', 'x')
 
 ### `agent-window-series-scan-0042` — MismatchRows (high)
 
@@ -8303,36 +4934,9 @@ SELECT LIST(COALESCE(s_val, 0) ORDER BY _ts) AS s, LIST(strftime(_axis._ts, '%Y-
 - DuckDB: cols=[s:Unknown, t:Unknown] rows=1
     - (null, null)
 
-### `agent-window-series-scan-0000` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 10, 1, null, 30, 10) duck=(1, 10, 1, null, 20, 10)
-
-**KQL**
-```kql
-datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30, 3,5 ] | sort by k asc, v asc | serialize rn = row_number(), p2 = prev(v,2), n2 = next(v,2), cs = row_cumsum(v, k != prev(k))
-```
-**Generated SQL**
-```sql
-SELECT *, ROW_NUMBER() OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) AS rn, LAG(v) OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) AS p2, LEAD(v) OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) AS n2, SUM(v) OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS cs FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(3 AS BIGINT), CAST(5 AS BIGINT))) AS t(k, v) ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, v:Int, rn:Int, p2:Int, n2:Int, cs:Int] rows=5
-    - (1, 10, 1, null, 30, 10)
-    - (1, 20, 2, null, 30, 30)
-    - (2, 30, 3, 10, 5, 30)
-    - (2, 30, 4, 20, null, 60)
-    - (3, 5, 5, 30, null, 5)
-- DuckDB: cols=[k:Int, v:Int, rn:Int, p2:Int, n2:Int, cs:Int] rows=5
-    - (1, 10, 1, null, 20, 10)
-    - (1, 20, 2, 10, 30, 30)
-    - (2, 30, 3, 20, 30, 60)
-    - (2, 30, 4, 30, 5, 90)
-    - (3, 5, 5, 30, null, 95)
-
 ### `agent-window-series-scan-0003` — MismatchRows (high)
 
-*Detail:* first differing row[2]: kusto=('b', 10, 10) duck=('b', 10, 4.666666666666667)
+*Detail:* first differing row[2]: kusto=('b', 10, 10) duck=('b', 10, 3.3333333333333335)
 
 **KQL**
 ```kql
@@ -8340,7 +4944,7 @@ datatable(g:string, v:real)[ "a",1.5, "a",2.5, "b",10.0, "b",20.0, "b",30.0 ] | 
 ```
 **Generated SQL**
 ```sql
-SELECT *, SUM(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) / ROW_NUMBER() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS avgsofar FROM (VALUES ('a', CAST(1.5 AS DOUBLE)), ('a', CAST(2.5 AS DOUBLE)), ('b', CAST(10.0 AS DOUBLE)), ('b', CAST(20.0 AS DOUBLE)), ('b', CAST(30.0 AS DOUBLE))) AS t(g, v) ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST
+SELECT * EXCLUDE (_rb0, _rg0), SUM(v) OVER (PARTITION BY _rg0 ROWS UNBOUNDED PRECEDING) / (ROW_NUMBER() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) + (1 - 1)) AS avgsofar FROM (SELECT *, SUM(CASE WHEN _rb0 THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING) AS _rg0 FROM (SELECT *, (g IS DISTINCT FROM LAG(g) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST)) AS _rb0 FROM (SELECT * FROM (VALUES ('a', CAST(1.5 AS DOUBLE)), ('a', CAST(2.5 AS DOUBLE)), ('b', CAST(10.0 AS DOUBLE)), ('b', CAST(20.0 AS DOUBLE)), ('b', CAST(30.0 AS DOUBLE))) AS t(g, v) ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST)))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -8353,9 +4957,9 @@ SELECT *, SUM(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST ROWS UNBOUN
 - DuckDB: cols=[g:String, v:Real, avgsofar:Real] rows=5
     - ('a', 1.5, 1.5)
     - ('a', 2.5, 2)
-    - ('b', 10, 4.666666666666667)
-    - ('b', 20, 8.5)
-    - ('b', 30, 12.8)
+    - ('b', 10, 3.3333333333333335)
+    - ('b', 20, 7.5)
+    - ('b', 30, 12)
 
 ### `agent-window-series-scan-0013` — MismatchRows (high)
 
@@ -8575,79 +5179,6 @@ SELECT LIST(COALESCE(mn_val, 0) ORDER BY _ts) AS mn, LIST(COALESCE(mx_val, 0) OR
 - DuckDB: cols=[mn:Unknown, mx:Unknown, av:Unknown, t:Unknown] rows=1
     - ([10,0,0,40], [10,0,0,40], '<unreadable:IndexOutOfRangeException>', ["2021-01-01T00:00:00.0000000Z","2021-01-02T00:00:00.0000000Z","2021-01-03T00:00:00.0000000Z","2021-01-04T00:00:00.0000000Z"])
 
-### `agent-window-series-scan-0033` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(2021-01-01T00:00:00.0000000Z, 5, null, 5, 5) duck=(2021-01-01T00:00:00.0000000Z, 5, null, 5, null)
-
-**KQL**
-```kql
-datatable(t:datetime, v:long)[ datetime(2021-01-01),5, datetime(2021-01-02),3, datetime(2021-01-03),8 ] | sort by t asc | serialize dt = t - prev(t), cs = row_cumsum(v), rate = v - prev(v, 1, 0)
-```
-**Generated SQL**
-```sql
-SELECT *, t - LAG(t) OVER (ORDER BY t ASC NULLS FIRST) AS dt, SUM(v) OVER (ORDER BY t ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS cs, v - LAG(v) OVER (ORDER BY t ASC NULLS FIRST) AS rate FROM (VALUES (TIMESTAMP '2021-01-01 00:00:00', CAST(5 AS BIGINT)), (TIMESTAMP '2021-01-02 00:00:00', CAST(3 AS BIGINT)), (TIMESTAMP '2021-01-03 00:00:00', CAST(8 AS BIGINT))) AS t(t, v) ORDER BY t ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:DateTime, v:Int, dt:TimeSpan, cs:Int, rate:Int] rows=3
-    - (2021-01-01T00:00:00.0000000Z, 5, null, 5, 5)
-    - (2021-01-02T00:00:00.0000000Z, 3, 1.00:00:00, 8, -2)
-    - (2021-01-03T00:00:00.0000000Z, 8, 1.00:00:00, 16, 5)
-- DuckDB: cols=[t:DateTime, v:Int, dt:TimeSpan, cs:Int, rate:Int] rows=3
-    - (2021-01-01T00:00:00.0000000Z, 5, null, 5, null)
-    - (2021-01-02T00:00:00.0000000Z, 3, 1.00:00:00, 8, -2)
-    - (2021-01-03T00:00:00.0000000Z, 8, 1.00:00:00, 16, 5)
-
-### `agent-window-series-scan-0035` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, -1, -1) duck=(1, null, 2)
-
-**KQL**
-```kql
-datatable(x:long)[ 1,2,3 ] | sort by x asc | serialize p3 = prev(x, 3, -1), n3 = next(x, 3, -1)
-```
-**Generated SQL**
-```sql
-SELECT *, LAG(x) OVER (ORDER BY x ASC NULLS FIRST) AS p3, LEAD(x) OVER (ORDER BY x ASC NULLS FIRST) AS n3 FROM (VALUES (CAST(1 AS BIGINT)), (CAST(2 AS BIGINT)), (CAST(3 AS BIGINT))) AS t(x) ORDER BY x ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[x:Int, p3:Int, n3:Int] rows=3
-    - (1, -1, -1)
-    - (2, -1, -1)
-    - (3, -1, -1)
-- DuckDB: cols=[x:Int, p3:Int, n3:Int] rows=3
-    - (1, null, 2)
-    - (2, 1, 3)
-    - (3, 2, null)
-
-### `agent-window-series-scan-0036` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 10, 0, 0, 10) duck=(1, 10, null, null, null)
-
-**KQL**
-```kql
-datatable(t:long, v:long)[ 1,10, 2,20, 3,30, 4,40, 5,50 ] | sort by t asc | serialize p1 = prev(v,1,0), p2 = prev(v,2,0) | extend w = v + p1 + p2
-```
-**Generated SQL**
-```sql
-SELECT *, v + p1 + p2 AS w FROM (SELECT *, LAG(v) OVER (ORDER BY t ASC NULLS FIRST) AS p1, LAG(v) OVER (ORDER BY t ASC NULLS FIRST) AS p2 FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(2 AS BIGINT), CAST(20 AS BIGINT)), (CAST(3 AS BIGINT), CAST(30 AS BIGINT)), (CAST(4 AS BIGINT), CAST(40 AS BIGINT)), (CAST(5 AS BIGINT), CAST(50 AS BIGINT))) AS t(t, v) ORDER BY t ASC NULLS FIRST)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:Int, v:Int, p1:Int, p2:Int, w:Int] rows=5
-    - (1, 10, 0, 0, 10)
-    - (2, 20, 10, 0, 30)
-    - (3, 30, 20, 10, 60)
-    - (4, 40, 30, 20, 90)
-    - (5, 50, 40, 30, 120)
-- DuckDB: cols=[t:Int, v:Int, p1:Int, p2:Int, w:Int] rows=5
-    - (1, 10, null, null, null)
-    - (2, 20, 10, 10, 40)
-    - (3, 30, 20, 20, 70)
-    - (4, 40, 30, 30, 100)
-    - (5, 50, 40, 40, 130)
-
 ### `agent-window-series-scan-0037` — MismatchRows (high)
 
 *Detail:* first differing row[0]: kusto=([
@@ -8740,62 +5271,6 @@ SELECT *, LIST_TRANSFORM(GENERATE_SERIES(1, LEN(s)), i -> LIST_SUM(LIST_TRANSFOR
     - ('a', [10,30,0], [1,3,5], [10,30,0])
     - ('b', [5,0,50], [1,3,5], [5,0,50])
 
-### `agent-window-series-scan-0042` — MismatchRows (high)
-
-*Detail:* first differing row[3]: kusto=('b', 4, 4, 4) duck=('b', 4, 4, 7)
-
-**KQL**
-```kql
-datatable(g:string, x:long)[ "a",3, "a",1, "a",2, "b",6, "b",4, "b",5 ] | sort by g asc, x asc | serialize delta = iff(g != prev(g), x, x - prev(x)) | serialize cm = row_cumsum(delta, g != prev(g))
-```
-**Generated SQL**
-```sql
-SELECT *, SUM(delta) OVER (ORDER BY g ASC NULLS FIRST, x ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS cm FROM (SELECT *, CASE WHEN g IS DISTINCT FROM LAG(g) OVER (ORDER BY g ASC NULLS FIRST, x ASC NULLS FIRST) THEN x ELSE x - LAG(x) OVER (ORDER BY g ASC NULLS FIRST, x ASC NULLS FIRST) END AS delta FROM (VALUES ('a', CAST(3 AS BIGINT)), ('a', CAST(1 AS BIGINT)), ('a', CAST(2 AS BIGINT)), ('b', CAST(6 AS BIGINT)), ('b', CAST(4 AS BIGINT)), ('b', CAST(5 AS BIGINT))) AS t(g, x) ORDER BY g ASC NULLS FIRST, x ASC NULLS FIRST)
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, x:Int, delta:Int, cm:Int] rows=6
-    - ('a', 1, 1, 1)
-    - ('a', 2, 1, 2)
-    - ('a', 3, 1, 3)
-    - ('b', 4, 4, 4)
-    - ('b', 5, 1, 5)
-    - ('b', 6, 1, 6)
-- DuckDB: cols=[g:String, x:Int, delta:Int, cm:Int] rows=6
-    - ('a', 1, 1, 1)
-    - ('a', 2, 1, 2)
-    - ('a', 3, 1, 3)
-    - ('b', 4, 4, 7)
-    - ('b', 5, 1, 8)
-    - ('b', 6, 1, 9)
-
-### `agent-window-series-scan-0000` — MismatchRows (high)
-
-*Detail:* first differing row[3]: kusto=('b', 1, 1, 1, 0.01639344262295082) duck=('b', 1, 61, 1, 1)
-
-**KQL**
-```kql
-datatable(g:string, v:long)[ "a",10, "a",20, "a",30, "b",1, "b",2 ] | sort by g asc, v asc | serialize cs = row_cumsum(v, g != prev(g)), tot = toscalar(1), share = todouble(row_cumsum(v, g != prev(g))) / row_cumsum(v, false)
-```
-**Generated SQL**
-```sql
-SELECT *, SUM(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS cs, (SELECT 1 AS value LIMIT 1) AS tot, COALESCE(TRY_CAST(SUM(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS DOUBLE), TRY_CAST(TRY_CAST(SUM(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS BOOLEAN) AS DOUBLE)) / SUM(v) OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS share FROM (VALUES ('a', CAST(10 AS BIGINT)), ('a', CAST(20 AS BIGINT)), ('a', CAST(30 AS BIGINT)), ('b', CAST(1 AS BIGINT)), ('b', CAST(2 AS BIGINT))) AS t(g, v) ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, v:Int, cs:Int, tot:Int, share:Real] rows=5
-    - ('a', 10, 10, 1, 1)
-    - ('a', 20, 30, 1, 1)
-    - ('a', 30, 60, 1, 1)
-    - ('b', 1, 1, 1, 0.01639344262295082)
-    - ('b', 2, 3, 1, 0.047619047619047616)
-- DuckDB: cols=[g:String, v:Int, cs:Int, tot:Int, share:Real] rows=5
-    - ('a', 10, 10, 1, 1)
-    - ('a', 20, 30, 1, 1)
-    - ('a', 30, 60, 1, 1)
-    - ('b', 1, 61, 1, 1)
-    - ('b', 2, 63, 1, 1)
-
 ### `agent-window-series-scan-0001` — MismatchRows (high)
 
 *Detail:* first differing row[3]: kusto=('b', 3, 1, 1, 1, 1) duck=('b', 3, 3, 4, 4, 1)
@@ -8806,7 +5281,7 @@ datatable(g:string, v:long)[ "a",5, "a",5, "a",8, "b",3, "b",3 ] | sort by g asc
 ```
 **Generated SQL**
 ```sql
-SELECT *, DENSE_RANK() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS rd, RANK() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS rm, ROW_NUMBER() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS rn, RANK() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) - DENSE_RANK() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS gap FROM (VALUES ('a', CAST(5 AS BIGINT)), ('a', CAST(5 AS BIGINT)), ('a', CAST(8 AS BIGINT)), ('b', CAST(3 AS BIGINT)), ('b', CAST(3 AS BIGINT))) AS t(g, v) ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST
+SELECT *, DENSE_RANK() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS rd, RANK() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS rm, (ROW_NUMBER() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) + (1 - 1)) AS rn, RANK() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) - DENSE_RANK() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS gap FROM (VALUES ('a', CAST(5 AS BIGINT)), ('a', CAST(5 AS BIGINT)), ('a', CAST(8 AS BIGINT)), ('b', CAST(3 AS BIGINT)), ('b', CAST(3 AS BIGINT))) AS t(g, v) ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -8822,33 +5297,6 @@ SELECT *, DENSE_RANK() OVER (ORDER BY g ASC NULLS FIRST, v ASC NULLS FIRST) AS r
     - ('a', 8, 2, 3, 3, 1)
     - ('b', 3, 3, 4, 4, 1)
     - ('b', 3, 3, 4, 5, 1)
-
-### `agent-window-series-scan-0004` — MismatchRows (high)
-
-*Detail:* first differing row[2]: kusto=('y', 3, 3, 3) duck=('y', 3, 3, 6)
-
-**KQL**
-```kql
-datatable(g:string, v:long)[ "z",1, "z",2, "y",3, "y",4, "x",5 ] | sort by g desc, v asc | serialize first_in_g = iff(g != prev(g), v, prev(v)), runsum = row_cumsum(v, g != prev(g))
-```
-**Generated SQL**
-```sql
-SELECT *, CASE WHEN g IS DISTINCT FROM LAG(g) OVER (ORDER BY g DESC NULLS LAST, v ASC NULLS FIRST) THEN v ELSE LAG(v) OVER (ORDER BY g DESC NULLS LAST, v ASC NULLS FIRST) END AS first_in_g, SUM(v) OVER (ORDER BY g DESC NULLS LAST, v ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS runsum FROM (VALUES ('z', CAST(1 AS BIGINT)), ('z', CAST(2 AS BIGINT)), ('y', CAST(3 AS BIGINT)), ('y', CAST(4 AS BIGINT)), ('x', CAST(5 AS BIGINT))) AS t(g, v) ORDER BY g DESC NULLS LAST, v ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[g:String, v:Int, first_in_g:Int, runsum:Int] rows=5
-    - ('z', 1, 1, 1)
-    - ('z', 2, 1, 3)
-    - ('y', 3, 3, 3)
-    - ('y', 4, 3, 7)
-    - ('x', 5, 5, 5)
-- DuckDB: cols=[g:String, v:Int, first_in_g:Int, runsum:Int] rows=5
-    - ('z', 1, 1, 1)
-    - ('z', 2, 1, 3)
-    - ('y', 3, 3, 6)
-    - ('y', 4, 3, 10)
-    - ('x', 5, 5, 15)
 
 ### `agent-window-series-scan-0005` — MismatchRows (high)
 
@@ -8871,54 +5319,6 @@ SELECT *, ROW_NUMBER() OVER () AS rn2 FROM (SELECT *, cs * 100 / 21 AS pctcum FR
 - DuckDB: cols=[x:Int, cs:Int, pctcum:Real, rn2:Int] rows=2
     - (5, 15, 71.42857142857143, 1)
     - (6, 21, 100, 2)
-
-### `agent-window-series-scan-0006` — MismatchRows (high)
-
-*Detail:* first differing row[0]: kusto=(1, 20, 20) duck=(1, 20, null)
-
-**KQL**
-```kql
-datatable(k:long, v:long)[ 1,10, 1,10, 1,20, 2,5, 2,5 ] | sort by k asc, v asc | summarize mx = max(v) by k | sort by k asc | serialize d = mx - prev(mx, 1, 0)
-```
-**Generated SQL**
-```sql
-SELECT *, mx - LAG(mx) OVER (ORDER BY k ASC NULLS FIRST) AS d FROM (SELECT k, MAX(v) AS mx FROM (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(5 AS BIGINT)), (CAST(2 AS BIGINT), CAST(5 AS BIGINT))) AS t(k, v) ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) GROUP BY ALL) ORDER BY k ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[k:Int, mx:Int, d:Int] rows=2
-    - (1, 20, 20)
-    - (2, 5, -15)
-- DuckDB: cols=[k:Int, mx:Int, d:Int] rows=2
-    - (1, 20, null)
-    - (2, 5, -15)
-
-### `agent-window-series-scan-0007` — MismatchRows (high)
-
-*Detail:* first differing row[1]: kusto=(2, 3, True, 3) duck=(2, 3, True, 8)
-
-**KQL**
-```kql
-datatable(t:long, v:long, f:bool)[ 1,5,false, 2,3,true, 3,8,false, 4,1,true, 5,9,false ] | sort by t asc | serialize cs = row_cumsum(v, f)
-```
-**Generated SQL**
-```sql
-SELECT *, SUM(v) OVER (ORDER BY t ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS cs FROM (VALUES (CAST(1 AS BIGINT), CAST(5 AS BIGINT), FALSE), (CAST(2 AS BIGINT), CAST(3 AS BIGINT), TRUE), (CAST(3 AS BIGINT), CAST(8 AS BIGINT), FALSE), (CAST(4 AS BIGINT), CAST(1 AS BIGINT), TRUE), (CAST(5 AS BIGINT), CAST(9 AS BIGINT), FALSE)) AS t(t, v, f) ORDER BY t ASC NULLS FIRST
-```
-**Kusto (oracle)** vs **DuckDB (translated)**
-
-- Kusto: cols=[t:Int, v:Int, f:Bool, cs:Int] rows=5
-    - (1, 5, False, 5)
-    - (2, 3, True, 3)
-    - (3, 8, False, 11)
-    - (4, 1, True, 1)
-    - (5, 9, False, 10)
-- DuckDB: cols=[t:Int, v:Int, f:Bool, cs:Int] rows=5
-    - (1, 5, False, 5)
-    - (2, 3, True, 8)
-    - (3, 8, False, 16)
-    - (4, 1, True, 17)
-    - (5, 9, False, 26)
 
 ### `agent-window-series-scan-0008` — MismatchRows (high)
 
@@ -9112,7 +5512,7 @@ datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,40, 2,50 ] | sort by k asc, v asc
 ```
 **Generated SQL**
 ```sql
-SELECT * FROM (SELECT k, MAX(within) AS maxwithin, COALESCE(SUM(v), 0) AS tot FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) AS within, SUM(v) OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST ROWS UNBOUNDED PRECEDING) AS cumg FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(2 AS BIGINT), CAST(40 AS BIGINT)), (CAST(2 AS BIGINT), CAST(50 AS BIGINT))) AS t(k, v) ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) GROUP BY ALL) ORDER BY k ASC NULLS FIRST
+SELECT * FROM (SELECT k, MAX(within) AS maxwithin, COALESCE(SUM(v), 0) AS tot FROM (SELECT * EXCLUDE (_rb0, _rg0), (ROW_NUMBER() OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) + (1 - 1)) AS within, SUM(v) OVER (PARTITION BY _rg0 ROWS UNBOUNDED PRECEDING) AS cumg FROM (SELECT *, SUM(CASE WHEN _rb0 THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING) AS _rg0 FROM (SELECT *, (k IS DISTINCT FROM LAG(k) OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST)) AS _rb0 FROM (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(2 AS BIGINT), CAST(40 AS BIGINT)), (CAST(2 AS BIGINT), CAST(50 AS BIGINT))) AS t(k, v) ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST)))) GROUP BY ALL) ORDER BY k ASC NULLS FIRST
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
@@ -9349,26 +5749,32 @@ SELECT * FROM (SELECT g, COUNT(*) AS approximate_count_g FROM (VALUES ('a', CAST
     - ('c', 1)
     - ('d', 1)
 
-### `agent-window-series-scan-0020` — MismatchOrder (medium)
+### `agent-window-series-scan-0000` — MismatchOrder (medium)
 
 *Detail:* rows match as a set but order differs
 
 **KQL**
 ```kql
-datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","y",20, "a","y",5, "b","x",30, "b","z",5, "c","x",1 ] | top-nested 2 of cat by Tot=sum(v), top-nested 1 of sub by SubTot=sum(v)
+datatable(k:long, v:long)[ 1,10, 1,20, 2,30, 2,30, 3,5 ] | sort by k asc, v asc | serialize rn = row_number(), p2 = prev(v,2), n2 = next(v,2), cs = row_cumsum(v, k != prev(k))
 ```
 **Generated SQL**
 ```sql
-SELECT cat, Tot, sub, SubTot FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat ORDER BY SubTot DESC) AS _rn1 FROM (SELECT _src.cat, _src.sub, _prev.Tot, COALESCE(SUM(v), 0) AS SubTot FROM (SELECT * FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'y', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT)), ('b', 'z', CAST(5 AS BIGINT)), ('c', 'x', CAST(1 AS BIGINT))) AS t(cat, sub, v)) AS _src INNER JOIN (SELECT cat, Tot FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY Tot DESC) AS _rn0 FROM (SELECT cat, COALESCE(SUM(v), 0) AS Tot FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'y', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT)), ('b', 'z', CAST(5 AS BIGINT)), ('c', 'x', CAST(1 AS BIGINT))) AS t(cat, sub, v) GROUP BY cat)) WHERE _rn0 <= 2) AS _prev ON _src.cat = _prev.cat GROUP BY _src.cat, _src.sub, _prev.Tot)) WHERE _rn1 <= 1
+SELECT * EXCLUDE (_rb0, _rg0), ROW_NUMBER() OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) AS rn, LAG(v, 2) OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) AS p2, LEAD(v, 2) OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST) AS n2, SUM(v) OVER (PARTITION BY _rg0 ROWS UNBOUNDED PRECEDING) AS cs FROM (SELECT *, SUM(CASE WHEN _rb0 THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING) AS _rg0 FROM (SELECT *, (k IS DISTINCT FROM LAG(k) OVER (ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST)) AS _rb0 FROM (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (CAST(1 AS BIGINT), CAST(20 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(2 AS BIGINT), CAST(30 AS BIGINT)), (CAST(3 AS BIGINT), CAST(5 AS BIGINT))) AS t(k, v) ORDER BY k ASC NULLS FIRST, v ASC NULLS FIRST)))
 ```
 **Kusto (oracle)** vs **DuckDB (translated)**
 
-- Kusto: cols=[cat:String, Tot:Int, sub:String, SubTot:Int] rows=2
-    - ('b', 35, 'x', 30)
-    - ('a', 35, 'y', 25)
-- DuckDB: cols=[cat:String, Tot:Int, sub:String, SubTot:Int] rows=2
-    - ('a', 35, 'y', 25)
-    - ('b', 35, 'x', 30)
+- Kusto: cols=[k:Int, v:Int, rn:Int, p2:Int, n2:Int, cs:Int] rows=5
+    - (1, 10, 1, null, 30, 10)
+    - (1, 20, 2, null, 30, 30)
+    - (2, 30, 3, 10, 5, 30)
+    - (2, 30, 4, 20, null, 60)
+    - (3, 5, 5, 30, null, 5)
+- DuckDB: cols=[k:Int, v:Int, rn:Int, p2:Int, n2:Int, cs:Int] rows=5
+    - (1, 10, 1, null, 30, 10)
+    - (1, 20, 2, null, 30, 30)
+    - (3, 5, 5, 30, null, 5)
+    - (2, 30, 3, 10, 5, 30)
+    - (2, 30, 4, 20, null, 60)
 
 ### `agent-window-series-scan-0024` — MismatchOrder (medium)
 
@@ -9392,4 +5798,81 @@ SELECT * FROM (SELECT g, SUM(v) AS approximate_sum_v FROM (VALUES ('a', CAST(1 A
     - ('b', 3)
     - ('c', 15)
     - ('d', 15)
+
+### `agent-window-series-scan-0040` — MismatchOrder (medium)
+
+*Detail:* rows match as a set but order differs
+
+**KQL**
+```kql
+datatable(cat:string, sub:string, v:long)[ "a","x",10, "a","x",20, "a","y",5, "b","x",30 ] | top-nested 2 of cat by sum(v), top-nested 2 of sub by sum(v), top-nested 1 of v by sum(v)
+```
+**Generated SQL**
+```sql
+SELECT cat, aggregated_cat, sub, aggregated_sub, v, aggregated_v FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat, sub ORDER BY aggregated_v DESC) AS _rn2 FROM (SELECT _src.cat, _src.sub, _src.v, _prev.aggregated_cat, _prev.aggregated_sub, COALESCE(SUM(v), 0) AS aggregated_v FROM (SELECT * FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'x', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT))) AS t(cat, sub, v)) AS _src INNER JOIN (SELECT cat, aggregated_cat, sub, aggregated_sub FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY cat ORDER BY aggregated_sub DESC) AS _rn1 FROM (SELECT _src.cat, _src.sub, _prev.aggregated_cat, COALESCE(SUM(v), 0) AS aggregated_sub FROM (SELECT * FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'x', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT))) AS t(cat, sub, v)) AS _src INNER JOIN (SELECT cat, aggregated_cat FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY aggregated_cat DESC) AS _rn0 FROM (SELECT cat, COALESCE(SUM(v), 0) AS aggregated_cat FROM (VALUES ('a', 'x', CAST(10 AS BIGINT)), ('a', 'x', CAST(20 AS BIGINT)), ('a', 'y', CAST(5 AS BIGINT)), ('b', 'x', CAST(30 AS BIGINT))) AS t(cat, sub, v) GROUP BY cat)) WHERE _rn0 <= 2) AS _prev ON _src.cat = _prev.cat GROUP BY _src.cat, _src.sub, _prev.aggregated_cat)) WHERE _rn1 <= 2) AS _prev ON _src.cat = _prev.cat AND _src.sub = _prev.sub GROUP BY _src.cat, _src.sub, _src.v, _prev.aggregated_cat, _prev.aggregated_sub)) WHERE _rn2 <= 1
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[cat:String, aggregated_cat:Int, sub:String, aggregated_sub:Int, v:Int, aggregated_v:Int] rows=3
+    - ('a', 35, 'x', 30, 20, 20)
+    - ('a', 35, 'y', 5, 5, 5)
+    - ('b', 30, 'x', 30, 30, 30)
+- DuckDB: cols=[cat:String, aggregated_cat:Int, sub:String, aggregated_sub:Int, v:Int, aggregated_v:Int] rows=3
+    - ('a', 35, 'x', 30, 20, 20)
+    - ('b', 30, 'x', 30, 30, 30)
+    - ('a', 35, 'y', 5, 5, 5)
+
+### `agent-window-series-scan-0004` — MismatchOrder (medium)
+
+*Detail:* rows match as a set but order differs
+
+**KQL**
+```kql
+datatable(g:string, v:long)[ "z",1, "z",2, "y",3, "y",4, "x",5 ] | sort by g desc, v asc | serialize first_in_g = iff(g != prev(g), v, prev(v)), runsum = row_cumsum(v, g != prev(g))
+```
+**Generated SQL**
+```sql
+SELECT * EXCLUDE (_rb0, _rg0), CASE WHEN g IS DISTINCT FROM LAG(g) OVER (ORDER BY g DESC NULLS LAST, v ASC NULLS FIRST) THEN v ELSE LAG(v) OVER (ORDER BY g DESC NULLS LAST, v ASC NULLS FIRST) END AS first_in_g, SUM(v) OVER (PARTITION BY _rg0 ROWS UNBOUNDED PRECEDING) AS runsum FROM (SELECT *, SUM(CASE WHEN _rb0 THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING) AS _rg0 FROM (SELECT *, (g IS DISTINCT FROM LAG(g) OVER (ORDER BY g DESC NULLS LAST, v ASC NULLS FIRST)) AS _rb0 FROM (SELECT * FROM (VALUES ('z', CAST(1 AS BIGINT)), ('z', CAST(2 AS BIGINT)), ('y', CAST(3 AS BIGINT)), ('y', CAST(4 AS BIGINT)), ('x', CAST(5 AS BIGINT))) AS t(g, v) ORDER BY g DESC NULLS LAST, v ASC NULLS FIRST)))
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[g:String, v:Int, first_in_g:Int, runsum:Int] rows=5
+    - ('z', 1, 1, 1)
+    - ('z', 2, 1, 3)
+    - ('y', 3, 3, 3)
+    - ('y', 4, 3, 7)
+    - ('x', 5, 5, 5)
+- DuckDB: cols=[g:String, v:Int, first_in_g:Int, runsum:Int] rows=5
+    - ('y', 3, 3, 3)
+    - ('y', 4, 3, 7)
+    - ('x', 5, 5, 5)
+    - ('z', 1, 1, 1)
+    - ('z', 2, 1, 3)
+
+### `agent-window-series-scan-0007` — MismatchOrder (medium)
+
+*Detail:* rows match as a set but order differs
+
+**KQL**
+```kql
+datatable(t:long, v:long, f:bool)[ 1,5,false, 2,3,true, 3,8,false, 4,1,true, 5,9,false ] | sort by t asc | serialize cs = row_cumsum(v, f)
+```
+**Generated SQL**
+```sql
+SELECT * EXCLUDE (_rb0, _rg0), SUM(v) OVER (PARTITION BY _rg0 ROWS UNBOUNDED PRECEDING) AS cs FROM (SELECT *, SUM(CASE WHEN _rb0 THEN 1 ELSE 0 END) OVER (ROWS UNBOUNDED PRECEDING) AS _rg0 FROM (SELECT *, (f) AS _rb0 FROM (SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(5 AS BIGINT), FALSE), (CAST(2 AS BIGINT), CAST(3 AS BIGINT), TRUE), (CAST(3 AS BIGINT), CAST(8 AS BIGINT), FALSE), (CAST(4 AS BIGINT), CAST(1 AS BIGINT), TRUE), (CAST(5 AS BIGINT), CAST(9 AS BIGINT), FALSE)) AS t(t, v, f) ORDER BY t ASC NULLS FIRST)))
+```
+**Kusto (oracle)** vs **DuckDB (translated)**
+
+- Kusto: cols=[t:Int, v:Int, f:Bool, cs:Int] rows=5
+    - (1, 5, False, 5)
+    - (2, 3, True, 3)
+    - (3, 8, False, 11)
+    - (4, 1, True, 1)
+    - (5, 9, False, 10)
+- DuckDB: cols=[t:Int, v:Int, f:Bool, cs:Int] rows=5
+    - (2, 3, True, 3)
+    - (3, 8, False, 11)
+    - (1, 5, False, 5)
+    - (4, 1, True, 1)
+    - (5, 9, False, 10)
 

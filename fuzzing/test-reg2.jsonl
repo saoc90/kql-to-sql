@@ -1,0 +1,21 @@
+{"Id":"h-stdev","Tier":2,"Family":"reg2","Kql":"datatable(g:string,x:long)[\"a\",5,\"b\",1,\"b\",3]|summarize sd=stdev(x) by g|sort by g asc"}
+{"Id":"h-makelist-dyn","Tier":2,"Family":"reg2","Kql":"datatable(d:dynamic)[dynamic({\"a\":1}),dynamic({\"b\":2})]|summarize l=make_list(d)"}
+{"Id":"l-arraylen-obj","Tier":2,"Family":"reg2","Kql":"print d=dynamic({\"a\":1})|extend al=array_length(d)"}
+{"Id":"l-bagmerge","Tier":2,"Family":"reg2","Kql":"print m=bag_merge(dynamic({\"a\":1,\"b\":2}),dynamic({\"b\":3,\"c\":4}))"}
+{"Id":"l-negidx","Tier":2,"Family":"reg2","Kql":"print d=dynamic([1,2,3])|extend last=d[-1]"}
+{"Id":"l-setunion","Tier":2,"Family":"reg2","Kql":"print u=set_union(dynamic([1,2,3]),dynamic([3,4]),dynamic([5]))"}
+{"Id":"k-tostringts","Tier":2,"Family":"reg2","Kql":"print s=tostring(1d+2h)"}
+{"Id":"k-bin7d","Tier":2,"Family":"reg2","Kql":"print b=bin(datetime(1955-11-05),7d)"}
+{"Id":"j-substrneg","Tier":2,"Family":"reg2","Kql":"print s=substring(\"hello\",-2,2)"}
+{"Id":"j-trimregex","Tier":2,"Family":"reg2","Kql":"print t=trim(\"x\",\"xxabcxx\")"}
+{"Id":"j-countofregex","Tier":2,"Family":"reg2","Kql":"print c=countof(\"hello world\",\"l+\",\"regex\")"}
+{"Id":"j-indexofstart","Tier":2,"Family":"reg2","Kql":"print i=indexof(\"abcabc\",\"a\",2)"}
+{"Id":"e-hasaccent","Tier":2,"Family":"reg2","Kql":"datatable(s:string)[\"I like café au lait\"]|where s has \"café\""}
+{"Id":"e-hasempty","Tier":2,"Family":"reg2","Kql":"datatable(s:string)[\"a\",\"\",\"\"]|where s has \"\"|count"}
+{"Id":"e-searchwild","Tier":2,"Family":"reg2","Kql":"datatable(h:string)[\"web01\",\"db02\",\"web03\"]|search \"web*\"|count"}
+{"Id":"f-tolongdt","Tier":2,"Family":"reg2","Kql":"print n=tolong(datetime(2020-01-01))"}
+{"Id":"f-tostringdt","Tier":2,"Family":"reg2","Kql":"print s=tostring(datetime(2020-01-01 12:30:00))"}
+{"Id":"f-realmod","Tier":2,"Family":"reg2","Kql":"print m=(-7.5)%2"}
+{"Id":"f-todecimal","Tier":2,"Family":"reg2","Kql":"print d=todecimal(\"3.14159\")"}
+{"Id":"f-totimespan","Tier":2,"Family":"reg2","Kql":"print t=totimespan(\"1.02:03:04\")"}
+{"Id":"i-mvapplysum","Tier":2,"Family":"reg2","Kql":"print d=dynamic([{\"v\":1},{\"v\":2},{\"v\":3},{\"v\":4}])|mv-apply e=d on (where toint(e.v)%2==0|summarize s=sum(toint(e.v)))"}

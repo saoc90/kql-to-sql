@@ -97,6 +97,33 @@ public class GeneratedRegressionTests
         // Theme C: prev offset+default; row_number start index.
         { "prev-offset-default", "datatable(t:long,v:long)[1,10,2,20,3,30] | sort by t asc | serialize p = prev(v, 1, -1)" },
         { "row_number-start", "datatable(t:long)[1,2,3] | sort by t asc | serialize rn = row_number(5)" },
+
+        // --- "fix all fixable" value-correctness pass (themes H/L/K/J/E/F/I) ---
+        // H: stdev of a single-element group is 0.
+        { "stdev-single-row", "datatable(g:string,x:long)[\"a\",5,\"b\",1,\"b\",3] | summarize sd=stdev(x) by g | sort by g asc" },
+        // L: array_length of a non-array dynamic is null; bag_merge first-wins; negative index; set_union variadic.
+        { "array_length-nonarray", "print d=dynamic({\"a\":1}) | extend al=array_length(d)" },
+        { "bag_merge-first-wins", "print m=bag_merge(dynamic({\"a\":1,\"b\":2}), dynamic({\"b\":3,\"c\":4}))" },
+        { "set_union-variadic", "print u=set_union(dynamic([1,2,3]), dynamic([3,4]), dynamic([5]))" },
+        // K: tostring(timespan) day-dotted; bin 7d aligns to 0001 origin.
+        { "tostring-timespan", "print s=tostring(1d+2h)" },
+        { "bin-7d-origin", "print b=bin(datetime(1955-11-05), 7d)" },
+        // J: substring negative; trim regex; countof regex; indexof start.
+        { "substring-negative", "print s=substring(\"hello\", -2, 2)" },
+        { "trim-regex", "print t=trim(\"x\", \"xxabcxx\")" },
+        { "countof-regex", "print c=countof(\"hello world\", \"l+\", \"regex\")" },
+        { "indexof-start", "print i=indexof(\"abcabc\", \"a\", 2)" },
+        // E: has unicode boundary; empty needle; search wildcard.
+        { "has-unicode", "datatable(s:string)[\"I like café au lait\"] | where s has \"café\"" },
+        { "has-empty-needle", "datatable(s:string)[\"a\",\"\",\"\"] | where s has \"\" | count" },
+        { "search-wildcard", "datatable(h:string)[\"web01\",\"db02\",\"web03\"] | search \"web*\" | count" },
+        // F: tolong(datetime)->ticks; tostring(datetime)->ISO; real Euclidean modulo; todecimal precision.
+        { "tolong-datetime-ticks", "print n=tolong(datetime(2020-01-01))" },
+        { "tostring-datetime-iso", "print s=tostring(datetime(2020-01-01 12:30:00))" },
+        { "real-modulo-euclidean", "print m=(-7.5)%2" },
+        { "todecimal-precision", "print d=todecimal(\"3.14159\")" },
+        // I: mv-apply ending in summarize collapses per source row.
+        { "mvapply-summarize-collapse", "print d=dynamic([{\"v\":1},{\"v\":2},{\"v\":3},{\"v\":4}]) | mv-apply e=d on (where toint(e.v)%2==0 | summarize s=sum(toint(e.v)))" },
     };
 
     [SkippableTheory]
