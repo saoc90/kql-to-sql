@@ -893,6 +893,9 @@ internal class AdvancedHandlers : OperatorHandlerBase
             {
                 var name = sne.Name.SimpleName;
                 var value = Expr.ConvertExpression(sne.Expression);
+                // Tag JSON/dynamic results so a later bare reference (d[i], array funcs) navigates as JSON.
+                if (Expressions.ExpressionSqlBuilder.LooksLikeJsonResult(value))
+                    Expr.MarkJsonColumn(name);
                 parts.Add($"{value} AS {name}");
             }
             else

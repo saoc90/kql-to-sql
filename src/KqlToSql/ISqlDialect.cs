@@ -37,9 +37,10 @@ public interface ISqlDialect
         $"json_extract({baseSql}, '$.' || {keyExpr})";
 
     /// <summary>Index a JSON array by a 0-based (possibly dynamic) integer position expression,
-    /// returning the navigable JSON element.</summary>
+    /// returning the navigable JSON element. A negative index counts from the end (Kusto d[-1] = last),
+    /// rendered with DuckDB's '$[#-N]' length-relative path syntax.</summary>
     string JsonIndexByPosition(string baseSql, string indexExpr) =>
-        $"json_extract({baseSql}, '$[' || ({indexExpr}) || ']')";
+        $"json_extract({baseSql}, '$[' || (CASE WHEN ({indexExpr}) < 0 THEN '#' ELSE '' END) || ({indexExpr}) || ']')";
 
     /// <summary>Generates a SELECT clause that excludes specific columns (e.g. "* EXCLUDE (col)").</summary>
     string SelectExclude(string[] columns);

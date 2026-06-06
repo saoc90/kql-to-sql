@@ -264,23 +264,29 @@ public class DuckDbDialect : ISqlDialect
             // to a native LIST<JSON> via '$[*]' so LIST_* builtins type-check on both forms. When an
             // input was JSON, the array-returning result is wrapped in TO_JSON so it serializes as a
             // JSON array (numbers unquoted) matching the dynamic oracle, and stays navigable downstream.
-            "array_length" => $"LEN({CoerceArr(args[0])})",
+            // array_length of a non-array dynamic (object/scalar) is null in Kusto, not 0.
+            "array_length" => IsJsonArg(args[0])
+                ? $"CASE WHEN json_type({args[0]}) = 'ARRAY' THEN LEN({CoerceArr(args[0])}) ELSE NULL END"
+                : $"LEN({args[0]})",
             "array_index_of" => $"(LIST_POSITION({CoerceArr(args[0])}, {args[1]}) - 1)",
             "array_sort_asc" => WrapArr(IsJsonArg(args[0]), $"LIST_SORT({CoerceArr(args[0])})"),
             "array_sort_desc" => WrapArr(IsJsonArg(args[0]), $"LIST_REVERSE_SORT({CoerceArr(args[0])})"),
             "array_concat" => WrapArr(args.Any(IsJsonArg), $"LIST_CONCAT({string.Join(", ", args.Select(CoerceArr))})"),
             "array_reverse" => WrapArr(IsJsonArg(args[0]), $"LIST_REVERSE({CoerceArr(args[0])})"),
-            "array_slice" when args.Length == 3 => WrapArr(IsJsonArg(args[0]), $"LIST_SLICE({CoerceArr(args[0])}, {args[1]} + 1, {args[2]} + 1)"),
+            // array_slice(arr, start, end): 0-based inclusive; negative indices count from the end. DuckDB
+            // LIST_SLICE is 1-based inclusive with negatives from the end — so add 1 only to non-negative bounds.
+            "array_slice" when args.Length == 3 => WrapArr(IsJsonArg(args[0]), $"LIST_SLICE({CoerceArr(args[0])}, {SliceBound(args[1])}, {SliceBound(args[2])})"),
             // array_sum: elements may be JSON values (from dynamic navigation / pack_array of JSON) or
             // native numbers. TRY_CAST each element to DOUBLE so both forms sum (and non-numerics → null).
             "array_sum" => $"LIST_SUM(LIST_TRANSFORM({CoerceArr(args[0])}, x -> TRY_CAST(x AS DOUBLE)))",
             "array_avg" => $"LIST_AVG(LIST_TRANSFORM({CoerceArr(args[0])}, x -> TRY_CAST(x AS DOUBLE)))",
             "bag_keys" => $"JSON_KEYS({args[0]})",
             "bag_has_key" => $"(JSON_EXTRACT({args[0]}, '$.' || TRIM({args[1]}, '\"''')) IS NOT NULL)",
-            "bag_merge" => $"JSON_MERGE_PATCH({args[0]}, {args[1]})",
-            "set_difference" => $"LIST_FILTER({args[0]}, x -> NOT LIST_CONTAINS({args[1]}, x))",
-            "set_intersect" => $"LIST_FILTER({args[0]}, x -> LIST_CONTAINS({args[1]}, x))",
-            "set_union" => $"LIST_DISTINCT(LIST_CONCAT({args[0]}, {args[1]}))",
+            "bag_merge" => BuildBagMerge(args),
+            "set_difference" => WrapArr(args.Any(IsJsonArg), $"LIST_FILTER({CoerceArr(args[0])}, x -> NOT LIST_CONTAINS({CoerceArr(args[1])}, x))"),
+            "set_intersect" => WrapArr(args.Any(IsJsonArg), $"LIST_FILTER({CoerceArr(args[0])}, x -> LIST_CONTAINS({CoerceArr(args[1])}, x))"),
+            // set_union is variadic; union all args then dedup.
+            "set_union" => WrapArr(args.Any(IsJsonArg), $"LIST_DISTINCT(LIST_CONCAT({string.Join(", ", args.Select(CoerceArr))}))"),
             "treepath" => $"JSON_KEYS({args[0]})",
             "zip" => BuildZip(args),
 
@@ -627,6 +633,23 @@ public class DuckDbDialect : ISqlDialect
     /// converted to a native LIST&lt;JSON&gt; by extracting all elements with the '$[*]' wildcard path.</summary>
     private static string CoerceArr(string sql) =>
         IsJsonArg(sql) ? $"json_extract({sql}, '$[*]')" : sql;
+
+    /// <summary>Maps a KQL 0-based array_slice bound to DuckDB's 1-based LIST_SLICE bound: non-negative
+    /// indices get +1; negative indices (count from the end) pass through unchanged.</summary>
+    private static string SliceBound(string b) =>
+        $"(CASE WHEN ({b}) < 0 THEN ({b}) ELSE ({b}) + 1 END)";
+
+    /// <summary>bag_merge(b1, b2, …): merge property bags with FIRST-wins on key conflicts (Kusto keeps the
+    /// earliest bag's value), ignoring null bags. DuckDB JSON_MERGE_PATCH(x, y) lets y override x, so we
+    /// fold from the LAST arg toward the first (each earlier bag overrides) and COALESCE nulls to {}.</summary>
+    private static string BuildBagMerge(string[] args)
+    {
+        string Coalesce(string a) => $"COALESCE({a}, '{{}}'::JSON)";
+        var acc = Coalesce(args[^1]);
+        for (int k = args.Length - 2; k >= 0; k--)
+            acc = $"JSON_MERGE_PATCH({acc}, {Coalesce(args[k])})";
+        return acc;
+    }
 
     /// <summary>For make_list/make_set over a dynamic/JSON element column, re-serialize the aggregated
     /// LIST as a JSON array (TO_JSON) so each element keeps its dynamic value (object/number) rather than
