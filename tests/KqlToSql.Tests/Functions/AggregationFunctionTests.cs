@@ -312,15 +312,9 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_bag(State)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT histogram(State) AS bag_State FROM StormEvents", sql);
-
-        using var conn = StormEventsDatabase.GetConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT histogram(State) FROM StormEvents";
-        var expected = cmd.ExecuteScalar();
-        Assert.Equal(expected?.ToString(), result?.ToString());
+        // make_bag merges the group's property bags into one object (first-wins), not a histogram.
+        // (End-to-end bag-merge semantics are covered by the differential regression tests.)
+        Assert.Equal("SELECT COALESCE(list_reduce(LIST(State) FILTER (WHERE State IS NOT NULL), lambda acc, x: json_merge_patch(x, acc)), '{}'::JSON) AS bag_State FROM StormEvents", sql);
     }
 
     [Fact]
@@ -329,15 +323,7 @@ public class AggregationFunctionTests
         var converter = new KqlToSqlConverter();
         var kql = "StormEvents | summarize make_bag_if(State, InjuriesDirect > 0)";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT histogram(State) FILTER (WHERE InjuriesDirect > 0) AS bag_State FROM StormEvents", sql);
-
-        using var conn = StormEventsDatabase.GetConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        var result = cmd.ExecuteScalar();
-        cmd.CommandText = "SELECT histogram(State) FILTER (WHERE InjuriesDirect > 0) FROM StormEvents";
-        var expected = cmd.ExecuteScalar();
-        Assert.Equal(expected?.ToString(), result?.ToString());
+        Assert.Equal("SELECT COALESCE(list_reduce(LIST(State) FILTER (WHERE (InjuriesDirect > 0) AND State IS NOT NULL), lambda acc, x: json_merge_patch(x, acc)), '{}'::JSON) AS bag_State FROM StormEvents", sql);
     }
 
     [Fact]

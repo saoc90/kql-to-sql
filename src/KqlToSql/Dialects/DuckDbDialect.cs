@@ -468,8 +468,11 @@ public class DuckDbDialect : ISqlDialect
             "hll" => $"hll({args[0]})",
             "hll_if" => $"hll({args[0]}) FILTER (WHERE {args[1]})",
             "hll_merge" => $"hll_merge({args[0]})",
-            "make_bag" => $"histogram({args[0]})",
-            "make_bag_if" => $"histogram({args[0]}) FILTER (WHERE {args[1]})",
+            // make_bag merges the group's property bags into one object (first bag wins on key conflict,
+            // null bags ignored) — NOT a histogram of occurrences. Collect the bags into a JSON array and
+            // fold with json_merge_patch(x, acc) so earlier bags override later ones; empty group -> {}.
+            "make_bag" => BuildMakeBag($"LIST({args[0]}) FILTER (WHERE {args[0]} IS NOT NULL)"),
+            "make_bag_if" => BuildMakeBag($"LIST({args[0]}) FILTER (WHERE ({args[1]}) AND {args[0]} IS NOT NULL)"),
             // Kusto make_list/make_set IGNORE null values (only make_list_with_nulls keeps them).
             // Over an empty/all-null group Kusto -> [] (empty array); DuckDB LIST -> NULL, so COALESCE to [].
             // For dynamic/JSON element columns, wrap in TO_JSON so the result is a JSON array of the actual
@@ -647,6 +650,11 @@ public class DuckDbDialect : ISqlDialect
     /// indices get +1; negative indices (count from the end) pass through unchanged.</summary>
     private static string SliceBound(string b) =>
         $"(CASE WHEN ({b}) < 0 THEN ({b}) ELSE ({b}) + 1 END)";
+
+    /// <summary>Folds an aggregated LIST of property bags (JSON[]) into one merged object, first-wins on
+    /// key conflicts (json_merge_patch(x, acc) keeps acc, i.e. the earlier bag). Empty group → {}.</summary>
+    private static string BuildMakeBag(string listAgg) =>
+        $"COALESCE(list_reduce({listAgg}, lambda acc, x: json_merge_patch(x, acc)), '{{}}'::JSON)";
 
     /// <summary>bag_merge(b1, b2, …): merge property bags with FIRST-wins on key conflicts (Kusto keeps the
     /// earliest bag's value), ignoring null bags. DuckDB JSON_MERGE_PATCH(x, y) lets y override x, so we
