@@ -62,6 +62,12 @@ internal class ExpressionSqlBuilder
     /// downstream `col / N` uses KQL integer (truncating) division instead of DuckDB real division.</summary>
     internal void MarkIntegerColumn(string name) => _integerColumns.Add(name);
 
+    // The active `partition by <key>` column SQL, set while a partition subquery is translated. summarize
+    // adds it to GROUP BY (not SELECT) and top/window aggregates PARTITION BY it, so the subquery runs
+    // independently per partition. Null when not inside a partition operator.
+    private string? _partitionKey;
+    internal string? PartitionKey { get => _partitionKey; set => _partitionKey = value; }
+
     private readonly HashSet<string> _boolColumns = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Records a column as bool-typed (datatable bool column / boolean extend result) so
     /// tostring(col) renders Kusto's capitalized 'True'/'False' instead of DuckDB's lowercase.</summary>

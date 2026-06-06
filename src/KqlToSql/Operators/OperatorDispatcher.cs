@@ -128,14 +128,17 @@ internal sealed class OperatorDispatcher
 
     private string ApplyPartition(string leftSql, PartitionOperator partition)
     {
-        // partition by Col (subquery) — run subquery per partition then UNION ALL.
-        // Approximation: apply the subquery to the whole leftSql with the by-column kept.
-        // For simple aggregation/top-N subqueries this gives the right shape.
+        // partition by Col (subquery) — run the subquery INDEPENDENTLY per partition. We thread the key
+        // through ExpressionBuilder.PartitionKey so summarize groups by it (without selecting it) and
+        // top/window aggregates partition by it; the subquery's natural output is then per-partition.
         var byCol = ExpressionBuilder.ConvertExpression(partition.ByExpression);
-        if (partition.Operand is PartitionSubquery sub)
+        if (partition.Operand is not PartitionSubquery sub)
+            return leftSql;
+
+        var prevKey = ExpressionBuilder.PartitionKey;
+        ExpressionBuilder.PartitionKey = byCol;
+        try
         {
-            // The subquery may be a QueryOperator OR a PipeExpression (chain of operators).
-            // Handle both: for pipe, walk its chain applying each operator to leftSql.
             if (sub.Subquery is QueryOperator qOp)
                 return ApplyOperator(leftSql, qOp);
             if (sub.Subquery is PipeExpression pipe)
@@ -160,8 +163,9 @@ internal sealed class OperatorDispatcher
                     sql = ApplyOperator(sql, op);
                 return sql;
             }
+            return leftSql;
         }
-        return leftSql;
+        finally { ExpressionBuilder.PartitionKey = prevKey; }
     }
 
     private string ApplyInvoke(string leftSql, InvokeOperator invoke)

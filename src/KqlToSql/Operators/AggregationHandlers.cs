@@ -80,7 +80,16 @@ internal sealed class AggregationHandlers : OperatorHandlerBase
         // Use ExtractFromAsRelation so a trailing ORDER BY / LIMIT on leftSql doesn't emit
         // 'FROM T ORDER BY X GROUP BY ALL' (which DuckDB rejects).
         var sql = $"SELECT {selectList} FROM {ExtractFromAsRelation(leftSql)}";
-        if (byColumns.Length > 0)
+        // Inside `partition by <key> (...)`, group additionally by the partition key — but do NOT add it
+        // to the SELECT (Kusto's partition-summarize output excludes the key). Forces an explicit GROUP BY
+        // list (GROUP BY ALL wouldn't include the unselected key).
+        var partKey = Expr.PartitionKey;
+        if (partKey != null)
+        {
+            var groups = byColumns.Select(b => b.Group).Append(partKey);
+            sql += $" GROUP BY {string.Join(", ", groups)}";
+        }
+        else if (byColumns.Length > 0)
         {
             sql += Dialect.SupportsGroupByAll
                 ? " GROUP BY ALL"

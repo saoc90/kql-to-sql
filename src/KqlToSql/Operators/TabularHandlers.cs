@@ -554,6 +554,15 @@ if (leftIsTimespan || rightIsTimespan) return true;
             order = $"{expr} DESC";
         }
 
+        // Inside `partition by <key> (top N by ...)`, top-N applies PER partition: rank within each key
+        // group and keep the first N (QUALIFY window), preserving all columns as Kusto does.
+        var partKey = Expr.PartitionKey;
+        if (partKey != null)
+        {
+            var inner = $"SELECT * FROM {ExtractFromAsRelation(leftSql)}";
+            return Dialect.Qualify(inner, $"ROW_NUMBER() OVER (PARTITION BY {partKey} ORDER BY {order}) <= {count}");
+        }
+
         // Mirror ApplySort: if leftSql already carries a top-level trailing ORDER BY
         // (e.g. a preceding | sort by / | order by / | top) or a top-level GROUP BY,
         // wrap it as a subquery so we don't emit an invalid doubled ORDER BY or place
