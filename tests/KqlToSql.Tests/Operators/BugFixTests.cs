@@ -97,7 +97,8 @@ public class BugFixTests
     {
         var converter = new KqlToSqlConverter();
         var sql = converter.Convert("StormEvents | extend remainder = InjuriesDirect % 2");
-        Assert.Equal("SELECT *, InjuriesDirect % 2 AS remainder FROM StormEvents", sql);
+        // KQL modulo is Euclidean (result in [0,|b|)) for all numeric types.
+        Assert.Equal("SELECT *, (((InjuriesDirect) % NULLIF(2, 0)) + ABS(2)) % NULLIF(2, 0) AS remainder FROM StormEvents", sql);
     }
 
     [Fact]

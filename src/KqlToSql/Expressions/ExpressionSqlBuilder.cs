@@ -146,8 +146,9 @@ internal class ExpressionSqlBuilder
         ["double"] = "DOUBLE",
         ["real"] = "DOUBLE",
         ["float"] = "DOUBLE",
-        ["todecimal"] = "DECIMAL",
-        ["decimal"] = "DECIMAL",
+        // KQL decimal is high-precision; DuckDB bare DECIMAL defaults to scale 3 (truncates 3.14159 -> 3.142).
+        ["todecimal"] = "DECIMAL(38, 18)",
+        ["decimal"] = "DECIMAL(38, 18)",
         ["todatetime"] = "TIMESTAMP",
         ["datetime"] = "TIMESTAMP",
         ["totimespan"] = "INTERVAL",
@@ -612,6 +613,11 @@ internal class ExpressionSqlBuilder
         if (InferScalarKind(node) == ScalarKind.TimeSpan || IsIntervalExpression(a))
             return $"COALESCE({_dialect.TimespanToString(a)}, '')";
 
+        // A datetime renders as Kusto's ISO-8601 'yyyy-MM-ddTHH:mm:ss.fffffffZ' (7-digit fraction + Z),
+        // not DuckDB's '2020-01-01 00:00:00'. %f gives 6 µs digits; append a 7th '0' and the Z.
+        if ((node is NameReference dnr && IsDateTimeColumn(dnr.SimpleName)) || InferScalarKind(node) == ScalarKind.DateTime)
+            return $"COALESCE(STRFTIME({a}, '%Y-%m-%dT%H:%M:%S.%f') || '0Z', '')";
+
         if (ExpressionReturnsBool(node))
             return $"COALESCE(CASE WHEN {a} THEN 'True' WHEN NOT {a} THEN 'False' END, '')";
 
@@ -693,6 +699,19 @@ internal class ExpressionSqlBuilder
             // textual formats, not just ISO-8601); other conversions are null-safe casts.
             if (string.Equals(sqlType, "TIMESTAMP", StringComparison.OrdinalIgnoreCase))
                 return _dialect.ParseDateTime(arg);
+
+            // Numeric cast of a datetime/timespan yields its tick count (100ns): a datetime is ticks since
+            // 0001-01-01, a timespan is its own tick count. (Kusto tolong(datetime)/tolong(timespan).)
+            bool numericTarget = sqlType is "BIGINT" or "INTEGER" or "DOUBLE";
+            if (numericTarget)
+            {
+                var k = InferScalarKind(argNode);
+                if (k == ScalarKind.DateTime)
+                    return $"CAST(ROUND((EXTRACT(EPOCH FROM ({arg})) - EXTRACT(EPOCH FROM TIMESTAMP '0001-01-01 00:00:00')) * 10000000) AS {sqlType})";
+                if (k == ScalarKind.TimeSpan)
+                    return $"CAST(ROUND(EXTRACT(EPOCH FROM ({arg})) * 10000000) AS {sqlType})";
+            }
+
             // KQL type conversions return null on failure (e.g. tolong('') → null)
             return _dialect.SafeCast(arg, sqlType);
         }
@@ -1715,9 +1734,8 @@ internal class ExpressionSqlBuilder
         // interval % interval -> epoch-seconds remainder (DuckDB rejects INTERVAL % INTERVAL).
         if (IsIntervalSql(left) && IsIntervalSql(right))
             return $"(EXTRACT(EPOCH FROM ({left})) % NULLIF(EXTRACT(EPOCH FROM ({right})), 0))";
-        if (IsIntegerKqlExpr(bin.Left) && IsIntegerKqlExpr(bin.Right))
-            return $"((({left}) % NULLIF({right}, 0)) + ABS({right})) % NULLIF({right}, 0)";
-        return $"{left} % {right}";
+        // KQL modulo is Euclidean (result in [0,|b|)) for reals as well as integers: -7.5 % 2 == 0.5.
+        return $"((({left}) % NULLIF({right}, 0)) + ABS({right})) % NULLIF({right}, 0)";
     }
 
     /// <summary>Coerce a dynamic (JSON) operand to a number for arithmetic; no-op for non-JSON SQL.</summary>
