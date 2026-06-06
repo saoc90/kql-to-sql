@@ -381,8 +381,24 @@ public static class Comparator
         var ca = TryCanonicalizeJson(a, sortArrays, out var oka);
         var cb = TryCanonicalizeJson(b, sortArrays, out var okb);
         if (oka && okb) return string.Equals(ca, cb, StringComparison.Ordinal);
-        // One or both aren't valid JSON: compare trimmed raw text.
-        return string.Equals(a.Trim(), b.Trim(), StringComparison.Ordinal);
+        // Exactly one side is valid JSON (or neither): a dynamic JSON string scalar ("x") and the same
+        // text as a plain string (x) are equal — unwrap a JSON string scalar before the raw comparison.
+        var ua = oka ? UnwrapJsonStringScalar(ca) : a.Trim();
+        var ub = okb ? UnwrapJsonStringScalar(cb) : b.Trim();
+        return string.Equals(ua, ub, StringComparison.Ordinal);
+    }
+
+    /// <summary>If the canonical JSON is a string scalar ("…"), returns its unwrapped text; else the input.</summary>
+    private static string UnwrapJsonStringScalar(string canonicalJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(canonicalJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.String)
+                return doc.RootElement.GetString() ?? canonicalJson;
+        }
+        catch { /* not parseable — fall through */ }
+        return canonicalJson;
     }
 
     private static string TryCanonicalizeJson(string s, bool sortArrays, out bool ok)
