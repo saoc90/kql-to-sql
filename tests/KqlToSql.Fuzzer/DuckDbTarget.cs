@@ -72,6 +72,19 @@ public sealed class DuckDbTarget
         return new EngineResult(columns, rows, null, ErrorStage.None);
     }
 
+    // System.Text.Json serializes a BigInteger (DuckDB HUGEINT, e.g. SUM over BIGINT) as its POCO
+    // properties ({"IsPowerOfTwo":…}); write it as a raw number instead so make_list(sum(...)) compares.
+    private sealed class BigIntegerJsonConverter : System.Text.Json.Serialization.JsonConverter<System.Numerics.BigInteger>
+    {
+        public override System.Numerics.BigInteger Read(ref System.Text.Json.Utf8JsonReader r, Type t, System.Text.Json.JsonSerializerOptions o)
+            => System.Numerics.BigInteger.Parse(r.GetString() ?? "0");
+        public override void Write(System.Text.Json.Utf8JsonWriter w, System.Numerics.BigInteger v, System.Text.Json.JsonSerializerOptions o)
+            => w.WriteRawValue(v.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions JsonOpts = new()
+    { Converters = { new BigIntegerJsonConverter() } };
+
     private static object? ReadCell(DbDataReader reader, int i)
     {
         if (reader.IsDBNull(i)) return null;
@@ -79,10 +92,11 @@ public sealed class DuckDbTarget
         {
             var v = reader.GetValue(i);
             if (v is DBNull) return null;
+            if (v is System.Numerics.BigInteger bi) return bi;  // scalar HUGEINT — let the comparator coerce
             // DuckDB LIST/STRUCT columns come back as List<>/arrays; Kusto returns the same data as a
             // dynamic JSON array/object. Canonicalize to JSON so the comparator's dynamic path applies.
             if (v is not string && v is not byte[] && v is System.Collections.IEnumerable)
-                return new DynamicJson(System.Text.Json.JsonSerializer.Serialize(v));
+                return new DynamicJson(System.Text.Json.JsonSerializer.Serialize(v, JsonOpts));
             return v;
         }
         catch
