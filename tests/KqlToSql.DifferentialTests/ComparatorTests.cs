@@ -108,6 +108,34 @@ public class ComparatorTests
     }
 
     [Fact]
+    public void Json_text_strings_compared_canonically_key_order_ignored()
+    {
+        // Both engines return JSON-as-string (e.g. dynamic_to_json / tostring(dynamic)); Kusto sorts keys,
+        // DuckDB keeps insertion order. Object key order is tolerated dynamic-JSON formatting.
+        var k = Result(new[] { Col("j", TypeClass.String) }, new object?[] { "{\"a\":1,\"b\":2}" });
+        var d = Result(new[] { Col("j", TypeClass.String) }, new object?[] { "{\"b\":2,\"a\":1}" });
+        Assert.Equal(Outcome.Match, Compare(k, d).Outcome);
+    }
+
+    [Fact]
+    public void Json_text_strings_value_difference_still_mismatches()
+    {
+        var k = Result(new[] { Col("j", TypeClass.String) }, new object?[] { "{\"a\":1}" });
+        var d = Result(new[] { Col("j", TypeClass.String) }, new object?[] { "{\"a\":2}" });
+        Assert.Equal(Outcome.MismatchRows, Compare(k, d).Outcome);
+    }
+
+    [Fact]
+    public void Json_text_array_order_still_mismatches_by_default()
+    {
+        // Arrays stay order-sensitive unless the query opts into set semantics — real array-order bugs
+        // (sort/mv-expand) must not be masked by the JSON-text tolerance.
+        var k = Result(new[] { Col("a", TypeClass.String) }, new object?[] { "[1,2,3]" });
+        var d = Result(new[] { Col("a", TypeClass.String) }, new object?[] { "[3,2,1]" });
+        Assert.Equal(Outcome.MismatchRows, Compare(k, d).Outcome);
+    }
+
+    [Fact]
     public void Null_versus_empty_string_mismatch_by_default()
     {
         var k = Result(new[] { Col("s", TypeClass.String) }, new object?[] { null });

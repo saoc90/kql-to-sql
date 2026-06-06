@@ -522,6 +522,10 @@ internal class AdvancedHandlers : OperatorHandlerBase
 
             var unnestClause = $"CROSS JOIN UNNEST({coerced}) AS {unnestAlias}(value)";
             var valueExpr = cast != null ? $"CAST({unnestAlias}.value AS {cast})" : $"{unnestAlias}.value";
+            // When mv-expand replaces a column in place, keep its ORIGINAL position (Kusto does) via
+            // * REPLACE, rather than EXCLUDE + append-at-end which reorders the schema.
+            if (excludeName && Dialect.SelectReplace(sourceAlias, name, valueExpr) is { } replace)
+                return $"SELECT {replace} FROM {aliasedFrom} {unnestClause}";
             return $"SELECT {excludePart}, {valueExpr} AS {name} FROM {aliasedFrom} {unnestClause}";
         }
 
@@ -685,9 +689,17 @@ internal class AdvancedHandlers : OperatorHandlerBase
     {
         var originalFrom = ExtractFrom(leftSql);
 
-        var selectColumns = new List<string>();
+        var selectColumns = new List<string>();   // internal carry-forward names (collision-proof agg aliases)
+        var outColumns = new List<string>();       // final projection: maps internal agg names back to Kusto names
         var prevGroupCols = new List<string>();
         string? prevFilteredSql = null;
+
+        // Aggregate columns get a unique internal alias (_tnagg{i}) for all internal use (ranking, joins,
+        // carry-forward) and are mapped to their Kusto output name only in the final projection. This avoids
+        // a DuckDB case-folding collision when an aggregate's Kusto name differs only in case from an `of`
+        // column (e.g. `top-nested of sub by Sub=sum(v)` — DuckDB treats `sub` and `Sub` as the same column,
+        // so `ORDER BY Sub` and the final select would otherwise bind to the `sub` group key, not the sum).
+        static string AggInternal(int clauseIndex) => $"_tnagg{clauseIndex}";
 
         // Kusto names a top-nested aggregate column after its explicit name when
         // one is given (e.g. `Cnt=count()` -> `Cnt`), otherwise `aggregated_<subject>`.
@@ -739,9 +751,12 @@ internal class AdvancedHandlers : OperatorHandlerBase
                 aggSql = Expr.ConvertExpression(aggExpr);
             }
 
-            var aggAlias = AggAliasFor(clause);
+            var aggAlias = AggAliasFor(clause);   // Kusto output name (applied only in the final projection)
+            var aggInternal = AggInternal(i);     // collision-proof internal name used everywhere upstream
             selectColumns.Add(column);
-            selectColumns.Add(aggAlias);
+            selectColumns.Add(aggInternal);
+            outColumns.Add(column);
+            outColumns.Add($"{aggInternal} AS {aggAlias}");
 
             var groupBy = new List<string>(prevGroupCols) { column };
             var partitionBy = prevGroupCols.Count > 0
@@ -765,16 +780,13 @@ internal class AdvancedHandlers : OperatorHandlerBase
             {
                 for (int p = 0; p < i; p++)
                 {
-                    if (topNested.Clauses[p].Element is TopNestedClause prevClause)
-                    {
-                        var prevAggAlias = AggAliasFor(prevClause);
-                        prevAggCols.Add($"_prev.{prevAggAlias}");
-                    }
+                    if (topNested.Clauses[p].Element is TopNestedClause)
+                        prevAggCols.Add($"_prev.{AggInternal(p)}");
                 }
             }
-            var allSelectCols = groupColExprs.Concat(prevAggCols).Append($"{aggSql} AS {aggAlias}");
+            var allSelectCols = groupColExprs.Concat(prevAggCols).Append($"{aggSql} AS {aggInternal}");
             var innerSelect = $"SELECT {string.Join(", ", allSelectCols)} FROM {sourceSql} GROUP BY {string.Join(", ", groupColExprs.Concat(prevAggCols))}";
-            var ranked = $"SELECT *, ROW_NUMBER() OVER ({partitionBy}ORDER BY {aggAlias} {direction}) AS _rn{i} FROM ({innerSelect})";
+            var ranked = $"SELECT *, ROW_NUMBER() OVER ({partitionBy}ORDER BY {aggInternal} {direction}) AS _rn{i} FROM ({innerSelect})";
             prevFilteredSql = count != null
                 ? $"SELECT {string.Join(", ", selectColumns)} FROM ({ranked}) WHERE _rn{i} <= {count}"
                 : $"SELECT {string.Join(", ", selectColumns)} FROM ({ranked})";
@@ -782,7 +794,9 @@ internal class AdvancedHandlers : OperatorHandlerBase
             prevGroupCols.Add(column);
         }
 
-        return prevFilteredSql ?? leftSql;
+        // Map the internal agg aliases to their Kusto output names in one final projection. The `of` columns
+        // and the (distinct) internal agg names never collide case-insensitively, so this binds unambiguously.
+        return prevFilteredSql == null ? leftSql : $"SELECT {string.Join(", ", outColumns)} FROM ({prevFilteredSql})";
     }
 
     internal string ApplySample(string leftSql, SampleOperator sample)

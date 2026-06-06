@@ -256,6 +256,15 @@ public static class Comparator
         if (a is DynamicJson || b is DynamicJson)
             return JsonEqual(ToJsonText(a), ToJsonText(b), opts.SortJsonArrays);
 
+        // Both sides are JSON-text strings (e.g. dynamic_to_json / tostring(dynamic) emitted on both
+        // engines): tolerate object key-order, whitespace and number-format differences — Kusto leaves
+        // dynamic-JSON formatting unspecified (its tostring sorts keys; a displayed dynamic does not).
+        // Restricted to *structured* JSON (object/array) so ordinary scalar strings stay strict, and
+        // arrays remain order-sensitive unless the query opted into set semantics — so real value,
+        // structure and array-order differences are still caught.
+        if (a is string js1 && b is string js2 && LooksStructuredJson(js1) && LooksStructuredJson(js2))
+            return JsonEqual(js1, js2, opts.SortJsonArrays);
+
         // numeric (covers int/long/double/decimal/float widening across engines)
         if (IsNumeric(a) && IsNumeric(b))
             return NumericEqual(a, b, opts);
@@ -375,6 +384,14 @@ public static class Comparator
         string s => s,
         _ => JsonSerializer.Serialize(o),
     };
+
+    /// <summary>True if the (trimmed) string is structured JSON — begins with '{' or '['. Scalar JSON
+    /// (numbers, quoted strings, booleans) is excluded so ordinary string cells keep strict comparison.</summary>
+    private static bool LooksStructuredJson(string s)
+    {
+        var t = s.AsSpan().Trim();
+        return t.Length >= 2 && (t[0] == '{' || t[0] == '[');
+    }
 
     public static bool JsonEqual(string a, string b, bool sortArrays = false)
     {

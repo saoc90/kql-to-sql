@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace KqlToSql;
 
 /// <summary>
@@ -64,6 +66,16 @@ public interface ISqlDialect
 
     /// <summary>Generates a SELECT clause that excludes specific columns (e.g. "* EXCLUDE (col)").</summary>
     string SelectExclude(string[] columns);
+
+    /// <summary>Replaces a column in place, preserving its position (e.g. "alias.* REPLACE (expr AS col)").
+    /// Returns null when the dialect can't replace-in-place (caller falls back to EXCLUDE + append).</summary>
+    string? SelectReplace(string starAlias, string col, string expr) => null;
+
+    /// <summary>Replaces one or more columns in place over a bare star, preserving each column's position
+    /// (e.g. "* REPLACE (e1 AS c1, e2 AS c2)"). Used by extend when it redefines existing columns so they
+    /// keep their original position (Kusto semantics) instead of being dropped and re-appended at the end.
+    /// Returns null when the dialect can't replace-in-place (caller falls back to EXCLUDE + append).</summary>
+    string? SelectStarReplace(IReadOnlyList<(string Col, string Expr)> replacements) => null;
 
     /// <summary>Generates a SELECT clause that renames specific columns (e.g. "* RENAME (old AS new)").</summary>
     string SelectRename(string[] mappings);

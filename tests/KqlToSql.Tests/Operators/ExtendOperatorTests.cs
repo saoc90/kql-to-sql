@@ -49,9 +49,9 @@ public class ExtendOperatorTests
         var kql = "StormEvents | extend X = InjuriesDirect | extend X = X + 100 | project State, X | take 3";
         var sql = converter.Convert(kql);
 
-        // Should use EXCLUDE to drop old X before re-adding
-        Assert.Contains("EXCLUDE (X)", sql);
-        Assert.Contains("X + 100 AS X", sql);
+        // Redefining an existing column replaces it in place (REPLACE), keeping its original position
+        // instead of dropping + re-appending it at the end.
+        Assert.Contains("REPLACE (X + 100 AS X)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();

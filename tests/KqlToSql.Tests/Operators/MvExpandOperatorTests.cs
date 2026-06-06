@@ -12,7 +12,9 @@ public class MvExpandOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "range x from 1 to 1 step 1 | extend arr=pack_array(1,2,3) | mv-expand arr";
         var sql = converter.Convert(kql);
-        Assert.Equal("SELECT t.* EXCLUDE (arr), u.value AS arr FROM (SELECT *, LIST_VALUE(1, 2, 3) AS arr FROM (SELECT generate_series AS x FROM generate_series(CAST(1 AS BIGINT), CAST(1 AS BIGINT), CAST(1 AS BIGINT)))) AS t CROSS JOIN UNNEST(t.arr) AS u(value)", sql);
+        // mv-expand replaces the source column in place (REPLACE), keeping its original position
+        // so downstream column order matches Kusto's (arr stays where extend put it).
+        Assert.Equal("SELECT t.* REPLACE (u.value AS arr) FROM (SELECT *, LIST_VALUE(1, 2, 3) AS arr FROM (SELECT generate_series AS x FROM generate_series(CAST(1 AS BIGINT), CAST(1 AS BIGINT), CAST(1 AS BIGINT)))) AS t CROSS JOIN UNNEST(t.arr) AS u(value)", sql);
 
         using var conn = StormEventsDatabase.GetConnection();
         using var cmd = conn.CreateCommand();
@@ -30,12 +32,12 @@ public class MvExpandOperatorTests
     public void MvExpand_ParseJsonTostring_ExcludesInnerIdentifier()
     {
         // Kusto auto-names mv-expand parse_json(tostring(Value)) output as 'Value'
-        // (innermost identifier). The EXCLUDE clause must use 'Value', not the raw expression.
+        // (innermost identifier). The in-place REPLACE must use 'Value', not the raw expression.
         var converter = new KqlToSqlConverter();
         var kql = "datatable(Value:string) [ \"[1,2,3]\" ] | mv-expand parse_json(tostring(Value))";
         var sql = converter.Convert(kql);
-        Assert.Contains("EXCLUDE (Value)", sql);
-        Assert.DoesNotContain("EXCLUDE (parse_json", sql);
+        Assert.Contains("REPLACE (u.value AS Value)", sql);
+        Assert.DoesNotContain("REPLACE (parse_json", sql);
         Assert.Contains("u.value AS Value", sql);
     }
 
@@ -48,7 +50,7 @@ public class MvExpandOperatorTests
         var converter = new KqlToSqlConverter();
         var kql = "datatable(X:string) [ \"[1,2,3]\" ] | mv-expand parse_json(X)";
         var sql = converter.Convert(kql);
-        Assert.Contains("EXCLUDE (X)", sql);
+        Assert.Contains("REPLACE (u.value AS X)", sql);
         Assert.Contains("u.value AS X", sql);
     }
 

@@ -226,7 +226,9 @@ internal class TabularHandlers : OperatorHandlerBase
 
     private string ApplyExtendCore(string leftSql, ExtendOperator extend)
     {
-        var extras = new List<(string Expr, string Name)>();
+        // AppendExpr = "<expr> AS <name>" (or bare for a no-op name ref) for the append path;
+        // RawExpr / QuotedName feed the replace-in-place path; Name is the unquoted name for detection.
+        var extras = new List<(string AppendExpr, string RawExpr, string Name, string QuotedName)>();
         // KQL auto-numbers anonymous (unnamed, non-path, non-identifier) extend results Column1, Column2, ...
         int anonCounter = 0;
         foreach (var se in extend.Expressions)
@@ -246,7 +248,7 @@ internal class TabularHandlers : OperatorHandlerBase
                 // Tag JSON/dynamic results so a later bare reference (mv-expand / array funcs) coerces.
                 if (Expressions.ExpressionSqlBuilder.LooksLikeJsonResult(convertedSql))
                     Expr.MarkJsonColumn(name);
-                extras.Add(($"{convertedSql} AS {quotedName}", name));
+                extras.Add(($"{convertedSql} AS {quotedName}", convertedSql, name, quotedName));
             }
             else if (se.Element is CompoundNamedExpression cne)
             {
@@ -258,7 +260,7 @@ internal class TabularHandlers : OperatorHandlerBase
                     var n = nameNode.Element is NameDeclaration nd
                         ? nd.SimpleName
                         : nameNode.Element.ToString().Trim();
-                    extras.Add(($"{rhs}[{idx + 1}] AS {n}", n));
+                    extras.Add(($"{rhs}[{idx + 1}] AS {n}", $"{rhs}[{idx + 1}]", n, n));
                     idx++;
                 }
             }
@@ -273,11 +275,11 @@ internal class TabularHandlers : OperatorHandlerBase
                 var colSql = Expr.ConvertExpression(se.Element);
                 if (synthesized != null)
                 {
-                    extras.Add(($"{colSql} AS {synthesized}", synthesized));
+                    extras.Add(($"{colSql} AS {synthesized}", colSql, synthesized, synthesized));
                 }
                 else if (se.Element is NameReference)
                 {
-                    extras.Add((colSql, colSql));
+                    extras.Add((colSql, colSql, colSql, colSql));
                 }
                 else if (se.Element is FunctionCallExpression outerFce &&
                          outerFce.ArgumentList.Expressions.Count > 0 &&
@@ -285,13 +287,13 @@ internal class TabularHandlers : OperatorHandlerBase
                 {
                     // KQL: extend round(Pct = x/y*100, 2) — the inner name=... labels the extend's output.
                     var innerName = innerNamed.Name.SimpleName;
-                    extras.Add(($"{colSql} AS {innerName}", innerName));
+                    extras.Add(($"{colSql} AS {innerName}", colSql, innerName, innerName));
                 }
                 else
                 {
                     anonCounter++;
                     var autoName = $"Column{anonCounter}";
-                    extras.Add(($"{colSql} AS {autoName}", autoName));
+                    extras.Add(($"{colSql} AS {autoName}", colSql, autoName, autoName));
                 }
             }
         }
@@ -311,24 +313,48 @@ internal class TabularHandlers : OperatorHandlerBase
         // EXCLUDE a column not present in the FROM — so we stick to the text heuristics there.
         // Only when leftSql is a bare CTE/table reference (`SELECT * FROM <name>`) do the input columns
         // equal the referenced relation's columns, making an EXCLUDE on a model-reported column valid.
-        // Broader shapes (`SELECT * FROM (subquery)`, mv-apply on-subqueries) can diverge from the model
-        // and either EXCLUDE an absent column or change the output shape, so they use text heuristics only.
-        bool leftIsBareCteRef = Regex.IsMatch(leftSql, @"^SELECT \* FROM [A-Za-z_][A-Za-z0-9_]*\s*$");
-        var inputCols = leftIsBareCteRef ? ResolveOperatorInputColumns(extend) : null;
+        // mv-apply on-subqueries reconstruct an explicit projection (`(SELECT u.value AS x)`) with NO
+        // top-level `*`, so the model's column view can diverge from the generated SQL there — those use
+        // text heuristics only. But any shape that carries a top-level `*` (`SELECT * FROM t`,
+        // `SELECT *, expr AS y FROM (subquery)`) propagates ALL input columns opaquely, so a model-reported
+        // column is genuinely present and an EXCLUDE/REPLACE on it is valid. This covers extend chains that
+        // redefine a column arriving via `*` (e.g. `… | extend y=x+1 | extend x=y*10`), which the text
+        // scans can't see through.
+        bool useModel = Regex.IsMatch(leftSql, @"^SELECT \* FROM [A-Za-z_][A-Za-z0-9_]*\s*$")
+                        || HasTopLevelStar(leftSql);
+        var inputCols = useModel ? ResolveOperatorInputColumns(extend) : null;
+        bool IsRedef((string AppendExpr, string RawExpr, string Name, string QuotedName) e) =>
+            IsExistingOutputColumn(leftSql, e.Name, inputCols);
         var columnsToExclude = extras
-            .Where(e => HasTopLevelAlias(leftSql, e.Name) || HasRelationAliasColumn(leftSql, e.Name)
-                     || (inputCols?.Contains(e.Name) ?? false))
+            .Where(IsRedef)
             .Select(e => Expressions.ExpressionSqlBuilder.QuoteIdentifierIfReserved(e.Name))
             .Distinct()
             .ToArray();
 
-        var joined = string.Join(", ", extras.Select(e => e.Expr));
+        var joined = string.Join(", ", extras.Select(e => e.AppendExpr));
 
         // A scan-window function with a restart predicate (e.g. row_cumsum(v, g != prev(g))) emits a
         // __RESETGRP__(<pred>) marker; hoist each into a reset-group column in an inner SELECT and
         // partition the window by it (a window can't reference another window directly).
         if (HasResetGroupMarker(joined))
             return HoistResetGroups(leftSql, joined, columnsToExclude);
+
+        // Redefined columns replace in place (Kusto keeps a redefined column's original position);
+        // new columns append after the star. Prefer DuckDB's `* REPLACE (...)` so position is preserved.
+        // Dialects without replace-in-place fall back to EXCLUDE-the-old + append-the-new below (which
+        // moves the redefined column to the end — acceptable only as a last resort for those dialects).
+        var redefined = extras.Where(IsRedef)
+            .GroupBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.Last())            // last write wins, and dedup so REPLACE has no repeated target
+            .Select(e => (Col: e.QuotedName, Expr: e.RawExpr))
+            .ToList();
+        if (redefined.Count > 0 && Dialect.SelectStarReplace(redefined) is { } replaceList)
+        {
+            var fresh = extras.Where(e => !IsRedef(e)).Select(e => e.AppendExpr).ToList();
+            var tail = fresh.Count > 0 ? ", " + string.Join(", ", fresh) : "";
+            var from = ExtractFrom(leftSql);
+            return $"SELECT {replaceList}{tail} FROM {from}";
+        }
 
         if (columnsToExclude.Length > 0)
         {
@@ -406,6 +432,127 @@ internal class TabularHandlers : OperatorHandlerBase
             foreach (var col in m.Groups[1].Value.Split(','))
                 if (col.Trim().Trim('"').Equals(name, StringComparison.OrdinalIgnoreCase))
                     return true;
+        }
+        return false;
+    }
+
+    /// <summary>True if <paramref name="name"/> is already an output column of <paramref name="leftSql"/>
+    /// — i.e. visible to an enclosing FROM, so an extend redefining it must replace it in place rather than
+    /// append a duplicate. Covers a depth-0 <c>expr AS name</c>; a relation-alias column list <c>AS t(name,…)</c>;
+    /// a star-modifier target <c>* RENAME/REPLACE (… AS name)</c> (whose AS sits at paren depth 1, hidden from
+    /// HasTopLevelAlias); a bare identifier in an explicit top-level SELECT list; and — only when leftSql is a
+    /// bare CTE/table reference — a column the semantic model reports flowing in from the referenced relation.</summary>
+    private static bool IsExistingOutputColumn(string leftSql, string name, HashSet<string>? inputCols) =>
+        HasTopLevelAlias(leftSql, name)
+        || HasRelationAliasColumn(leftSql, name)
+        || HasStarModifierTarget(leftSql, name)
+        || HasTopLevelBareColumn(leftSql, name)
+        || (inputCols?.Contains(name) ?? false);
+
+    /// <summary>Detects a column produced by a top-level <c>* RENAME (… AS name)</c> or
+    /// <c>* REPLACE (… AS name)</c> modifier. The <c>AS name</c> inside the modifier's parens is at paren
+    /// depth 1, so HasTopLevelAlias misses it, yet the column IS in leftSql's output. Only a modifier whose
+    /// own open-paren is at the OUTER select level (depth 0) counts — a nested one is in a subquery.</summary>
+    private static bool HasStarModifierTarget(string sql, string name)
+    {
+        foreach (Match m in Regex.Matches(sql, @"\b(?:RENAME|REPLACE)\s*\(", RegexOptions.IgnoreCase))
+        {
+            int open = sql.IndexOf('(', m.Index);
+            if (open < 0) continue;
+            // The modifier's open-paren must be at the OUTER select level (depth 0 just before it).
+            int depth = 0; bool inStr = false; char q = ' ';
+            for (int i = 0; i < open; i++)
+            {
+                var c = sql[i];
+                if (inStr) { if (c == q) inStr = false; continue; }
+                if (c is '\'' or '"') { inStr = true; q = c; }
+                else if (c == '(') depth++;
+                else if (c == ')') depth--;
+            }
+            if (depth != 0) continue;
+            // Scan the modifier group (paren-balanced from `open`) for an `AS name` target. Nested parens in
+            // a REPLACE expression are tolerated — a target name is always the simple identifier after AS.
+            int d = 0; int end = open;
+            for (int i = open; i < sql.Length; i++)
+            {
+                if (sql[i] == '(') d++;
+                else if (sql[i] == ')') { d--; if (d == 0) { end = i; break; } }
+            }
+            var inner = sql.Substring(open + 1, end - open - 1);
+            foreach (Match a in Regex.Matches(inner, @"\bAS\s+""?(\w+)""?", RegexOptions.IgnoreCase))
+                if (a.Groups[1].Value.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+        }
+        return false;
+    }
+
+    /// <summary>Detects a bare column identifier in leftSql's top-level explicit SELECT list — e.g.
+    /// <c>SELECT a, b, c FROM …</c> — these are output columns carrying no <c>AS</c> alias and so are missed
+    /// by HasTopLevelAlias. A <c>*</c>-based list can't be enumerated from text, so such items are skipped.</summary>
+    /// <summary>True if leftSql's top-level SELECT list contains a <c>*</c> item (`SELECT *`,
+    /// `SELECT *, expr AS y`, `SELECT * EXCLUDE/REPLACE/RENAME (…)`) — meaning all input columns flow
+    /// through opaquely, so a semantic-model-reported column is genuinely present in the output.</summary>
+    private static bool HasTopLevelStar(string sql)
+    {
+        var list = TopLevelSelectList(sql);
+        if (list == null) return false;
+        foreach (var item in SplitTopLevel(list))
+        {
+            var t = item.Trim();
+            if (t == "*" || t.StartsWith("* ", StringComparison.Ordinal)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Returns leftSql's top-level SELECT-list substring (between `SELECT ` and the depth-0
+    /// ` FROM `), or null when sql is not a leading SELECT or has no top-level FROM.</summary>
+    private static string? TopLevelSelectList(string sql)
+    {
+        if (!sql.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase)) return null;
+        int depth = 0; bool inStr = false; char q = ' ';
+        for (int i = 7; i + 6 <= sql.Length; i++)
+        {
+            var c = sql[i];
+            if (inStr) { if (c == q) inStr = false; continue; }
+            if (c is '\'' or '"') { inStr = true; q = c; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (depth == 0 && string.Compare(sql, i, " FROM ", 0, 6, StringComparison.OrdinalIgnoreCase) == 0)
+                return sql.Substring(7, i - 7);
+        }
+        return null;
+    }
+
+    /// <summary>Splits a SELECT-list substring on depth-0 commas (ignoring parens and string literals).</summary>
+    private static IEnumerable<string> SplitTopLevel(string list)
+    {
+        int depth = 0; bool inStr = false; char q = ' '; int start = 0;
+        for (int i = 0; i <= list.Length; i++)
+        {
+            bool atEnd = i == list.Length;
+            char c = atEnd ? ',' : list[i];
+            if (!atEnd && inStr) { if (c == q) inStr = false; continue; }
+            if (!atEnd && (c is '\'' or '"')) { inStr = true; q = c; continue; }
+            if (!atEnd && c == '(') { depth++; continue; }
+            if (!atEnd && c == ')') { depth--; continue; }
+            if ((atEnd || c == ',') && depth == 0)
+            {
+                yield return list.Substring(start, i - start);
+                start = i + 1;
+            }
+        }
+    }
+
+    private static bool HasTopLevelBareColumn(string sql, string name)
+    {
+        var list = TopLevelSelectList(sql);
+        if (list == null) return false;
+        // A bare (optionally-quoted) identifier select item == name is an output column carrying no alias.
+        foreach (var item in SplitTopLevel(list))
+        {
+            var t = item.Trim();
+            if (Regex.IsMatch(t, @"^""?\w+""?$") && t.Trim('"').Equals(name, StringComparison.OrdinalIgnoreCase))
+                return true;
         }
         return false;
     }

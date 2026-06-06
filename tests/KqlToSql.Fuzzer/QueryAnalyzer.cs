@@ -19,6 +19,9 @@ public static partial class QueryAnalyzer
         "rand", "now", "ago", "new_guid", "newguid", "guid(", "datetime(now",
         "dcount", "dcountif", "hll", "hll_if", "hll_merge", "tdigest", "percentile",
         "sample", "take_any", "any(", "anyif", "current_", "rand(", "make_string(rand",
+        // top-hitters is approximate AND its tie-break among equal-weight hitters is arbitrary —
+        // engines legitimately disagree on which tied value fills the last slot.
+        "top-hitters",
     };
 
     // Operators the translator deliberately does not support (per KqlOperatorsChecklist.md).
@@ -30,10 +33,14 @@ public static partial class QueryAnalyzer
         "evaluate autocluster", "evaluate basket", "evaluate diffpatterns", "evaluate preview",
     };
 
-    // Operator type names (Kusto.Language.Syntax) whose presence as the final stage implies order.
+    // Operator type names (Kusto.Language.Syntax) whose presence as the final stage implies a guaranteed
+    // output row order. Notably absent: top-nested (a hierarchical aggregation — Kusto does NOT guarantee
+    // the flattened row order, only the per-level selection) and top-hitters (approximate; order among the
+    // returned hitters is arbitrary). Asserting order on those produced false, run-to-run-flaky
+    // MismatchOrder verdicts; they are compared as a multiset, which still catches wrong-row-set bugs.
     private static readonly HashSet<string> OrderingOperatorTypes = new(StringComparer.Ordinal)
     {
-        "SortOperator", "TopOperator", "TopNestedOperator", "TopHittersOperator", "SerializeOperator",
+        "SortOperator", "TopOperator", "SerializeOperator",
     };
 
     public static (ComparisonMode Mode, bool Nondeterministic, bool ExpectedUnsupported) Analyze(string kql)

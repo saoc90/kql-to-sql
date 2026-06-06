@@ -396,8 +396,10 @@ internal class ExpressionSqlBuilder
             return _dialect.JsonIndexByKey(baseExpr, indexExpr);
         }
 
-        // KQL uses 0-based indexing, DuckDB LIST uses 1-based.
-        return $"{baseExpr}[{indexExpr} + 1]";
+        // KQL uses 0-based indexing, DuckDB LIST uses 1-based. A negative Kusto index counts from the end
+        // (d[-1] = last); DuckDB lists already index negatively from the end, so pass negatives through
+        // unchanged and only shift non-negative indices by 1 (else d[-1] would become d[0] = NULL).
+        return $"{baseExpr}[CASE WHEN ({indexExpr}) < 0 THEN ({indexExpr}) ELSE ({indexExpr}) + 1 END]";
     }
 
     // True when the SQL expression evaluates to a JSON value (and so must be navigated with json_extract
@@ -715,7 +717,15 @@ internal class ExpressionSqlBuilder
             // todatetime()/datetime() use the dialect's lenient datetime parser (KQL parses many
             // textual formats, not just ISO-8601); other conversions are null-safe casts.
             if (string.Equals(sqlType, "TIMESTAMP", StringComparison.OrdinalIgnoreCase))
+            {
+                // Kusto todatetime(numeric) interprets the number as .NET ticks (100ns since 0001-01-01),
+                // the inverse of tolong(datetime). DuckDB can't cast a bare number to TIMESTAMP (→ NULL),
+                // so reconstruct it from ticks. Only fires for clearly-numeric arguments (literals/to*()),
+                // leaving string/column/unknown args on the lenient text parser.
+                if (InferScalarKind(argNode) == ScalarKind.Number)
+                    return $"(TIMESTAMP '0001-01-01 00:00:00' + (CAST(ROUND(({arg}) / 10.0) AS BIGINT) * INTERVAL '1 microsecond'))";
                 return _dialect.ParseDateTime(arg);
+            }
 
             // Numeric cast of a datetime/timespan yields its tick count (100ns): a datetime is ticks since
             // 0001-01-01, a timespan is its own tick count. (Kusto tolong(datetime)/tolong(timespan).)
@@ -2125,7 +2135,12 @@ internal class ExpressionSqlBuilder
             LiteralExpression lit when lit.Kind == SyntaxKind.StringLiteralExpression => ConvertStringLiteral(lit),
             LiteralExpression lit when lit.Kind == SyntaxKind.DateTimeLiteralExpression => ConvertDateTimeLiteral(lit),
             LiteralExpression lit when lit.Kind == SyntaxKind.TimespanLiteralExpression => ConvertTimespanLiteral(lit),
-            LiteralExpression lit when lit.Kind == SyntaxKind.BooleanLiteralExpression => lit.ToString().Trim().ToLowerInvariant() == "true" ? "TRUE" : "FALSE",
+            // true/false and bool(0)/bool(1) carry a parsed bool LiteralValue; bool(null) has a null value
+            // and must become SQL NULL (not FALSE) so null-bool datatable cells round-trip correctly.
+            LiteralExpression lit when lit.Kind == SyntaxKind.BooleanLiteralExpression =>
+                lit.LiteralValue is bool bv ? (bv ? "TRUE" : "FALSE")
+                : lit.ToString().Contains("null", StringComparison.OrdinalIgnoreCase) ? "CAST(NULL AS BOOLEAN)"
+                : lit.ToString().Trim().ToLowerInvariant() == "true" ? "TRUE" : "FALSE",
             LiteralExpression lit when lit.Kind == SyntaxKind.NullLiteralExpression => "NULL",
             LiteralExpression lit => ConvertNumericOrOtherLiteral(lit),
             CompoundStringLiteralExpression cs => ConvertCompoundString(cs),

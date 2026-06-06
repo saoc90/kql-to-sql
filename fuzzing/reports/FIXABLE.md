@@ -1,5 +1,68 @@
 # What's left fixable
 
+> ## STATUS — updated 2026-06-06 (after the "fix all fixable" pass)
+>
+> Full corpus = **1662 queries**. Current verdicts:
+>
+> | Outcome | Count |
+> |---|---|
+> | **Match** | **1319** |
+> | MismatchRows | 146 |
+> | MismatchColumns | 1 |
+> | MismatchOrder | 0 |
+> | **SqlExecError** | **0** |
+> | **TranslateError** | **0** |
+> | KustoError (malformed KQL — discard) | 127 |
+> | SkippedNondeterministic | 40 |
+> | SkippedEngineError | 29 |
+>
+> Match climbed **1123 → 1319** over the campaign (1300 → 1319 in this final pass). SqlExecError and
+> TranslateError have been held at **0** throughout. The headline analysis below (355 diffs) is **historical** —
+> most of those clusters are now fixed.
+>
+> ### Fixes landed this pass (all verified Match on the corpus; guardrails in `BugFixTests.cs`)
+> 1. **mv-expand single-column** replaces the source column in place (`* REPLACE`) — preserves column position.
+> 2. **extend redefining an existing column** replaces in place via `* REPLACE`, and detection now covers bare
+>    projected identifiers, `RENAME`/`REPLACE` targets, **and columns arriving through a top-level `*`** (via the
+>    semantic model) — kills duplicate-column output (`label`/`b_1`) and stale values in `extend` chains.
+> 3. **top-nested** aggregate columns use collision-proof internal aliases (`_tnagg{i}`) — fixes the DuckDB
+>    case-folding bug where `of sub by Sub=sum(v)` bound the ranking/output to the `sub` group key.
+> 4. **top-nested / top-hitters** are no longer treated as order-sensitive (Kusto doesn't guarantee their row
+>    order) → eliminated all flaky MismatchOrder; **top-hitters** marked nondeterministic (approximate + tie-arbitrary).
+> 5. **Comparator**: two JSON-text strings (e.g. `dynamic_to_json` on both engines) compare canonically —
+>    tolerates object key-order/whitespace (philosophy), still catches value/structure/array-order diffs.
+> 6. **todatetime(numeric)** interprets the number as .NET ticks (inverse of `tolong(datetime)`).
+> 7. **series_stats_dynamic** now includes the `len` field.
+> 8. **make_timespan** returns null for out-of-range components (hours 0–23, minutes/seconds 0–<60).
+> 9. **bool(null)** datatable cells emit SQL `NULL` (not `FALSE`); `bool(1)` now `TRUE`.
+> 10. **array_index_of** returns `-1` when the value is absent (not NULL).
+> 11. **dynamic array negative index** `d[-1]` returns the last element (native-LIST path passed negatives through).
+> 12. **split(s, delim, index)** returns a one-element array of the indexed part (or `[]`), honoring the index arg.
+>
+> ### Remaining 147 candidates — honest breakdown (mostly NOT translator-fixable)
+> | Category | ~Count | Verdict |
+> |---|---|---|
+> | datetime **100ns tick precision** (`.fffffff`, `/1tick`→Infinity, ns diff) | ~30 | **TOLERABLE** — DuckDB TIMESTAMP is µs; needs integer-tick datetime rep (architectural) |
+> | **DuckDB.NET nullable-list driver bug** (`<unreadable:IndexOutOfRange>`) | 8 | **NOT FIXABLE** — driver returns garbage for a list with NULL elements |
+> | **NaN IEEE comparison** semantics (`nan==nan`, `nan>1`, `min_of(nan,..)`) | ~7 | **TOLERABLE** (philosophy: NaN tolerated) — DuckDB orders NaN high / `nan==nan` true |
+> | **numeric overflow / saturation / strict string-parse / null-comparison** | ~17 | mostly TOLERABLE (int wrap, `toint("1.5e3")`, `null==0`) |
+> | **dynamic JSON scalar typing / navigation / element order** (`d.a.b.c[2]`→'30') | ~15 | hard — JSON scalars are stringly-typed in DuckDB |
+> | **make_list/make_bag** dynamic-element stringify + element order | ~15 | hard / order TOLERABLE |
+> | **format_datetime** `f`/`F`/`ddd`/`MMMM` specifiers | ~8 | fixable-but-fiddly; several also 7-digit-tick-limited |
+> | **make-series** multi-day bucketing / empty-range / mv-expand order | ~7 | complex |
+> | **series_\*** (`series_stats`, `series_fit_line`, `series_iir`) return shape | ~5 | complex (multi-column vs scalar) |
+> | **decimal vs real** typing (`gettype(todecimal(1))`='real') | ~2 | TOLERABLE — DuckDB types bare reals as DECIMAL; lose-lose |
+> | **null-aware negated filters** (`where not(x==1)`, `x !in (..)` include nulls) | ~3 | fixable but HIGH-RISK (rewrites all `!=`/`!in`) — deferred |
+> | union/leftanti **null-vs-empty-string** columns; misc | residual | TOLERABLE (Kusto strings are "" not null; soft NULL_VS_EMPTY) |
+>
+> The remaining genuinely-fixable-but-deferred work (format_datetime specifiers, null-aware negated filters,
+> series_* shape, make-series bucketing, dynamic JSON scalar typing) is fiddly and/or carries real regression
+> risk against the hard 0-SqlExecError / 0-TranslateError invariant; each is 1–8 corpus cases.
+
+---
+
+<details><summary>Historical analysis (pre-fix, 355 differences) — kept for reference</summary>
+
 ## 1. Headline
 
 Of the **355 remaining value-level differences**:
@@ -230,3 +293,4 @@ Mostly sub-microsecond precision, tie/ordering instability, and overflow-wrap-vs
 Parallel low-risk add-on: **harden `Comparator.cs`** (Dynamic-vs-String unwrap + NULL-tolerant list reader) to retire ~9–11 comparator-gap rows independently of translator work.
 
 Relevant files: `src/KqlToSql/Expressions/ExpressionSqlBuilder.cs`, `src/KqlToSql/Dialects/DuckDbDialect.cs`, `src/KqlToSql/Operators/TabularHandlers.cs`, `src/KqlToSql/Operators/AggregationHandlers.cs`, `src/KqlToSql/Operators/AdvancedHandlers.cs`, `src/KqlToSql/Operators/JoinHandlers.cs`, `src/KqlToSql/Operators/ParseHandlers.cs`, `tests/KqlToSql.Fuzzer/Comparator.cs`.
+</details>

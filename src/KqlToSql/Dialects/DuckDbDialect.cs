@@ -69,6 +69,11 @@ public class DuckDbDialect : ISqlDialect
                 $"LEN(REGEXP_EXTRACT_ALL(CAST({args[0]} AS VARCHAR), {args[1]}))",
             "countof" => $"(LENGTH({args[0]}) - LENGTH(REPLACE({args[0]}, {args[1]}, ''))) / LENGTH({args[1]})",
             "reverse" => $"REVERSE({args[0]})",
+            // split(source, delimiter, index): Kusto returns a single-element array holding the part at the
+            // 0-based index (or an empty array when out of range), not the whole split.
+            "split" when args.Length == 3 =>
+                $"(CASE WHEN ({args[2]}) >= 0 AND ({args[2]}) < LEN(STRING_SPLIT(CAST({args[0]} AS VARCHAR), {args[1]})) " +
+                $"THEN [STRING_SPLIT(CAST({args[0]} AS VARCHAR), {args[1]})[({args[2]}) + 1]] ELSE []::VARCHAR[] END)",
             "split" => $"STRING_SPLIT(CAST({args[0]} AS VARCHAR), {args[1]})",
             "floor" => $"FLOOR({args[0]})",
             "ceiling" => $"CEILING({args[0]})",
@@ -154,14 +159,22 @@ public class DuckDbDialect : ISqlDialect
                 $"{(args.Length > 3 ? args[3] : "0")}, {(args.Length > 4 ? args[4] : "0")}, 0)",
             "make_datetime" when args.Length == 2 => $"MAKE_TIMESTAMP({args[0]}, {args[1]}, 1, 0, 0, 0)",
             "make_datetime" when args.Length == 1 => $"CAST({args[0]} AS TIMESTAMP)",
+            // Kusto make_timespan returns null when a component is out of range — hours 0–23, minutes 0–59,
+            // seconds 0–<60 (the days field, where present, carries any overflow). Guard each form to match.
             "make_timespan" when args.Length == 3 =>
-                $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
+                MakeTimespanGuarded(
+                    $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute' + {args[2]} * INTERVAL '1 second')",
+                    $"{InRange(args[0], 24)} AND {InRange(args[1], 60)} AND {InRange(args[2], 60)}"),
             // make_timespan(hours, minutes)
             "make_timespan" when args.Length == 2 =>
-                $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute')",
+                MakeTimespanGuarded(
+                    $"({args[0]} * INTERVAL '1 hour' + {args[1]} * INTERVAL '1 minute')",
+                    $"{InRange(args[0], 24)} AND {InRange(args[1], 60)}"),
             // make_timespan(days, hours, minutes, seconds)
             "make_timespan" when args.Length == 4 =>
-                $"({args[0]} * INTERVAL '1 day' + {args[1]} * INTERVAL '1 hour' + {args[2]} * INTERVAL '1 minute' + {args[3]} * INTERVAL '1 second')",
+                MakeTimespanGuarded(
+                    $"({args[0]} * INTERVAL '1 day' + {args[1]} * INTERVAL '1 hour' + {args[2]} * INTERVAL '1 minute' + {args[3]} * INTERVAL '1 second')",
+                    $"({args[0]}) >= 0 AND {InRange(args[1], 24)} AND {InRange(args[2], 60)} AND {InRange(args[3], 60)}"),
             // TO_TIMESTAMP returns TIMESTAMP WITH TIME ZONE; KQL datetime is tz-agnostic and our
             // Timestamp columns are naive TIMESTAMP. Project to UTC wall-clock so comparisons don't
             // depend on the DuckDB session TimeZone (the ms/us/ns variants below are already naive).
@@ -291,7 +304,9 @@ public class DuckDbDialect : ISqlDialect
             "array_length" => IsJsonArg(args[0])
                 ? $"CASE WHEN json_type({args[0]}) = 'ARRAY' THEN LEN({CoerceArr(args[0])}) ELSE NULL END"
                 : $"LEN({args[0]})",
-            "array_index_of" => $"(LIST_POSITION({CoerceArr(args[0])}, {args[1]}) - 1)",
+            // Kusto array_index_of returns -1 when the value is absent; DuckDB's list_position returns NULL
+            // (→ NULL - 1). COALESCE the miss to 0 so it becomes the Kusto -1 sentinel.
+            "array_index_of" => $"(COALESCE(LIST_POSITION({CoerceArr(args[0])}, {args[1]}), 0) - 1)",
             "array_sort_asc" => WrapArr(IsJsonArg(args[0]), $"LIST_SORT({CoerceArr(args[0])})"),
             "array_sort_desc" => WrapArr(IsJsonArg(args[0]), $"LIST_REVERSE_SORT({CoerceArr(args[0])})"),
             "array_concat" => WrapArr(args.Any(IsJsonArg), $"LIST_CONCAT({string.Join(", ", args.Select(CoerceArr))})"),
@@ -601,6 +616,14 @@ public class DuckDbDialect : ISqlDialect
     {
         return $"* EXCLUDE ({string.Join(", ", columns)})";
     }
+
+    public string? SelectReplace(string starAlias, string col, string expr) =>
+        $"{starAlias}.* REPLACE ({expr} AS {col})";
+
+    public string? SelectStarReplace(IReadOnlyList<(string Col, string Expr)> replacements) =>
+        replacements.Count == 0
+            ? null
+            : $"* REPLACE ({string.Join(", ", replacements.Select(r => $"{r.Expr} AS {r.Col}"))})";
 
     public string SelectRename(string[] mappings)
     {
@@ -1091,6 +1114,13 @@ public class DuckDbDialect : ISqlDialect
         return conv;
     }
 
+    /// <summary>Half-open range check `0 &lt;= e &lt; max` for a make_timespan component (allows fractional).</summary>
+    private static string InRange(string e, int max) => $"({e}) >= 0 AND ({e}) < {max}";
+
+    /// <summary>Wraps a make_timespan value so an out-of-range component yields null (Kusto semantics).</summary>
+    private static string MakeTimespanGuarded(string value, string condition) =>
+        $"(CASE WHEN {condition} THEN {value} ELSE NULL END)";
+
     /// <summary>min/max/avg/stdev/variance/sum/count bag for series_stats[_dynamic].</summary>
     private static string SeriesStats(string s)
     {
@@ -1104,7 +1134,9 @@ public class DuckDbDialect : ISqlDialect
             $"'avg', LIST_AVG({clean}), " +
             $"'sum', LIST_SUM({clean}), " +
             $"'stdev', LIST_AGGREGATE({clean}, 'stddev_samp'), " +
-            $"'variance', LIST_AGGREGATE({clean}, 'var_samp')" +
+            $"'variance', LIST_AGGREGATE({clean}, 'var_samp'), " +
+            // Kusto's series_stats_dynamic bag includes 'len' = the series element count (incl. nulls).
+            $"'len', LEN({s})" +
             $")";
     }
 
