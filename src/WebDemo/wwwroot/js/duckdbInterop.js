@@ -1,4 +1,7 @@
-﻿import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29/+esm"
+﻿// Pinned to 1.32 (DuckDB core >= 1.2). Joins emit DuckDB's `R.* RENAME (col AS col1)` star
+// modifier to suffix duplicate columns; RENAME was only added in DuckDB 1.2, so the older
+// 1.29 (DuckDB 1.1.1) rejected it with `Parser Error: syntax error at or near "RENAME"`.
+import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32/+esm"
 
 let db;                              // singleton per tab
 let initPromise = null;              // guard against concurrent init

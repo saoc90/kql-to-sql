@@ -2,18 +2,38 @@
 // Lightweight implementation to mirror the DuckDB functions used in C# / Razor.
 // Uses CDN import; persisted to IndexedDB so data survives page reloads.
 
-import { PGlite } from 'https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js'
+// Pinned to 0.2.17. The import was previously unpinned, so it floated to the latest release
+// (0.5.x), whose `idb://` IndexedDB VFS changed and could no longer open the store created by
+// the older build — failing at startup with "PGlite failed to initialize properly".
+import { PGlite } from 'https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.2.17/dist/index.js'
+
+const IDB_DATA_DIR = 'idb://kql-to-sql';
 
 let pg; // singleton
 
 // Expose for debugging
 window.pg = null;
 
+// Create a PGlite instance and wait for the Postgres boot to actually complete, so init
+// failures surface here (where we can recover) rather than mid-query.
+async function createPg(dataDir) {
+    const inst = new PGlite(dataDir);
+    await inst.waitReady;
+    return inst;
+}
+
 async function init() {
     if (pg) return;
     console.log('🚀 Initializing PGlite (Postgres WASM)...');
-    // Persist to IndexedDB (creates db if missing)
-    pg = new PGlite('idb://kql-to-sql');
+    try {
+        // Persist to IndexedDB (creates db if missing)
+        pg = await createPg(IDB_DATA_DIR);
+    } catch (e) {
+        // A persisted store left behind by an incompatible PGlite build can fail to open. Fall
+        // back to an in-memory store so the demo still works (StormEvents is reloaded on demand).
+        console.warn('⚠️ PGlite IndexedDB store failed to open, falling back to in-memory:', e);
+        pg = await createPg('memory://');
+    }
     window.pg = pg;
     console.log('✅ PGlite ready');
     await ensureStormEventsLoaded();
