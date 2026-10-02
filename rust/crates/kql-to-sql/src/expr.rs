@@ -262,6 +262,10 @@ impl Ctx<'_> {
     // ------------------------------------------------------------------ operators
 
     fn binary(&mut self, op: BinaryOp, left: &Expr, right: &Expr, scope: &Scope, env: &Env) -> Result<TExpr> {
+        if matches!(left, Expr::Star) {
+            // `* has "x"`: any column
+            return crate::op_search::star_binary(self, op, right, scope, env);
+        }
         let l = self.expr(left, scope, env)?;
         let r = self.expr(right, scope, env)?;
         match op {
