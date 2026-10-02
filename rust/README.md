@@ -31,6 +31,7 @@ Translates [Kusto Query Language (KQL)](https://learn.microsoft.com/en-us/kusto/
 | [`kql-cli`](crates/kql-cli) | `kql2sql` command line. |
 | [`kql-wasm`](crates/kql-wasm) | WebAssembly bindings used by the web demo (`src/WebDemo`). |
 | [`kql-duckdb-ext`](crates/kql-duckdb-ext) | DuckDB loadable extension: `kql_to_sql(...)`, `kql_explain(...)`, `kql(...)` table function. |
+| [`kql-server`](crates/kql-server) | Kusto-compatible REST API (`/v1`, `/v2` query, mgmt, metadata) over DuckDB; loopback-only, optional bearer token. |
 | [`kql-oracle`](crates/kql-oracle) | Differential test harness (DuckDB and PGlite), StormEvents smoke test. |
 
 ## Library
