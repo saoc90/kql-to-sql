@@ -870,8 +870,10 @@ impl Ctx<'_> {
                     // Kusto bins datetimes from 0001-01-01 (tick 0)
                     None => "(-62135596800000000)".into(),
                 };
-                let us = format!("(CAST(floor(({} - {base}) / CAST({step} AS DOUBLE)) AS BIGINT) * {step} + {base})", d.epoch_us(&x.sql));
-                let us = us.replace("AS DOUBLE", if d.kind() == Dialect::Postgres { "AS double precision" } else { "AS DOUBLE" });
+                // exact integer floor division (doubles lose precision on microsecond counts)
+                let off = format!("({} - {base})", d.epoch_us(&x.sql));
+                let idiv = if d.kind() == Dialect::Postgres { "/" } else { "//" };
+                let us = format!("(({off} - ((({off} % {step}) + {step}) % {step})) {idiv} {step} * {step} + {base})");
                 Ok(TExpr::derived(d.ts_from_us(&us), DateTime, &parts))
             }
             (TimeSpan, TimeSpan) => {

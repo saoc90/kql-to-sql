@@ -31,7 +31,7 @@ impl KqlType {
     /// The .NET type name used by `getschema`'s `DataType` column.
     pub fn clr_name(self) -> &'static str {
         match self {
-            KqlType::Bool => "System.Boolean",
+            KqlType::Bool => "System.SByte",
             KqlType::Int => "System.Int32",
             KqlType::Long => "System.Int64",
             KqlType::Real => "System.Double",

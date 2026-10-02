@@ -766,7 +766,7 @@ impl Ctx<'_> {
                 let v = format!("trim({})", x.sql);
                 let ok = d.regex_match(&v, r"'^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$'");
                 format!(
-                    "CASE WHEN {ok} THEN {} WHEN lower({v}) = 'nan' THEN {} WHEN lower({v}) IN ('infinity', '+infinity') THEN {} WHEN lower({v}) IN ('-infinity', '-inf') THEN {} END",
+                    "CASE WHEN {ok} THEN {} WHEN {v} IN ('nan', 'NaN') THEN {} WHEN {v} IN ('inf', '+inf', 'Infinity', '+Infinity', 'infinity') THEN {} WHEN {v} IN ('-inf', '-Infinity', '-infinity') THEN {} END",
                     d.try_cast(&v, Real),
                     d.real_literal(f64::NAN),
                     d.real_literal(f64::INFINITY),
@@ -776,7 +776,7 @@ impl Ctx<'_> {
             (String, DateTime) => d.try_cast(&format!("trim({})", x.sql), DateTime),
             (String, TimeSpan) => self.parse_timespan_sql(&x.sql),
             (String, Bool) => {
-                let v = format!("lower(trim({}))", x.sql);
+                let v = format!("lower({})", x.sql);
                 let int = d.regex_match(&v, "'^[+-]?[0-9]+$'");
                 format!("CASE WHEN {v} = 'true' THEN true WHEN {v} = 'false' THEN false WHEN {int} THEN {} <> 0 END", d.try_cast(&v, Long))
             }
