@@ -28,6 +28,9 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, a: &[TExpr], _scope: &Scope) -> Op
                 return None;
             }
             if ctx.d.kind() != Dialect::DuckDb {
+                if let Some(r) = pg(ctx, name, a) {
+                    return Some(r);
+                }
                 return Some(err(format!("{name}() is not supported for PostgreSQL yet")));
             }
             duck(ctx, name, a)
@@ -791,6 +794,226 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
 }
 
 /// A recursive key-sorting rewrite of a JSON value (`depth` levels), for `dynamic_to_json`.
+// ---------------------------------------------------------------------- PostgreSQL versions
+
+/// `x` when it is a jsonb array, `[]` otherwise.
+fn pg_arr(x: &str) -> String {
+    format!("(CASE WHEN jsonb_typeof({x}) = 'array' THEN {x} ELSE '[]'::jsonb END)")
+}
+
+/// `x` when it is a jsonb object, `{}` otherwise.
+fn pg_obj(x: &str) -> String {
+    format!("(CASE WHEN jsonb_typeof({x}) = 'object' THEN {x} ELSE '{{}}'::jsonb END)")
+}
+
+/// `jsonb_array_elements` of `x` (non-arrays: no rows) as `al(__kql_v, __kql_i)`, `__kql_i` 1-based.
+fn pg_elems(x: &str, al: &str) -> String {
+    format!("jsonb_array_elements({}) WITH ORDINALITY AS {al}(__kql_v, __kql_i)", pg_arr(x))
+}
+
+/// Compact JSON text with object keys sorted (Kusto's `dynamic_to_json`), `depth` levels deep.
+fn pg_json_text(x: &str, depth: usize) -> String {
+    if depth == 0 {
+        return format!("CAST({x} AS text)");
+    }
+    let (k, e) = (format!("_k{depth}"), format!("_a{depth}"));
+    let v = pg_json_text(&format!("{k}.value"), depth - 1);
+    let el = pg_json_text(&format!("{e}.__kql_v"), depth - 1);
+    format!(
+        "(CASE jsonb_typeof({x}) WHEN 'object' THEN '{{' || COALESCE((SELECT string_agg(CAST(to_jsonb({k}.key) AS text) || ':' || {v}, ',' ORDER BY {k}.key COLLATE \"C\") FROM jsonb_each({x}) AS {k}), '') || '}}' \
+         WHEN 'array' THEN '[' || COALESCE((SELECT string_agg({el}, ',' ORDER BY {e}.__kql_i) FROM {}), '') || ']' ELSE CAST({x} AS text) END)",
+        pg_elems(x, &e)
+    )
+}
+
+/// PostgreSQL (jsonb) implementations of the dynamic helpers that DuckDB builds from lists.
+fn pg(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Option<Result<TExpr>> {
+    use KqlType::*;
+    let r = (|| -> Result<TExpr> {
+        let d = ctx.d;
+        let arr_len = |x: &str| format!("jsonb_array_length({})", pg_arr(x));
+        let agg = |v: &str, ord: &str| format!("COALESCE(jsonb_agg({v} ORDER BY {ord}), '[]'::jsonb)");
+        Ok(match name {
+            "bag_merge" => {
+                need(name, a, 2, 64)?;
+                // jsonb || lets the right operand win: concatenate in reverse so the first bag wins
+                let parts: Vec<std::string::String> = a.iter().rev().map(|t| pg_obj(&dyn_arg(ctx, t))).collect();
+                mk(format!("({})", parts.join(" || ")), Dynamic, a)
+            }
+            "bag_remove_keys" => {
+                need(name, a, 2, 2)?;
+                let (bag, keys) = (dyn_arg(ctx, &a[0]), dyn_arg(ctx, &a[1]));
+                mk(format!("CASE WHEN jsonb_typeof({bag}) = 'object' THEN {bag} - ARRAY(SELECT jsonb_array_elements_text({})) END", pg_arr(&keys)), Dynamic, a)
+            }
+            "bag_set_key" => {
+                need(name, a, 3, 3)?;
+                let (bag, key, val) = (dyn_arg(ctx, &a[0]), str_arg(ctx, &a[1]), dyn_arg(ctx, &a[2]));
+                mk(format!("CASE WHEN jsonb_typeof({bag}) = 'object' THEN {bag} || jsonb_build_object({key}, {val}) END"), Dynamic, a)
+            }
+            "bag_zip" => {
+                need(name, a, 2, 2)?;
+                let (ks, vs) = (dyn_arg(ctx, &a[0]), dyn_arg(ctx, &a[1]));
+                mk(
+                    format!(
+                        "CASE WHEN jsonb_typeof({ks}) = 'array' AND jsonb_typeof({vs}) = 'array' THEN (SELECT COALESCE(jsonb_object_agg(_z.__kql_v #>> '{{}}', {vs} -> CAST(_z.__kql_i - 1 AS integer)), '{{}}'::jsonb) FROM {} WHERE jsonb_typeof(_z.__kql_v) = 'string') END",
+                        pg_elems(&ks, "_z")
+                    ),
+                    Dynamic,
+                    a,
+                )
+            }
+            "dynamic_to_json" => {
+                need(name, a, 1, 1)?;
+                let x = &a[0];
+                if let Some(Const::Dynamic(v)) = &x.konst {
+                    let s = v.to_string();
+                    return Ok(TExpr::konst(quote_str(&s), String, Const::Str(s)));
+                }
+                if x.is_null_const() {
+                    return Ok(TExpr::konst("'null'", String, Const::Str("null".into())));
+                }
+                let dj = dyn_arg(ctx, x);
+                mk(format!("COALESCE({}, 'null')", pg_json_text(&dj, 4)), String, a)
+            }
+            "array_rotate_left" | "array_rotate_right" | "array_shift_left" | "array_shift_right" => {
+                let shift = name.starts_with("array_shift");
+                need(name, a, 2, if shift { 3 } else { 2 })?;
+                let arr = dyn_arg(ctx, &a[0]);
+                let n = long_arg(ctx, &a[1]);
+                let n = if name.ends_with("right") { format!("(-{n})") } else { n };
+                let len = arr_len(&arr);
+                let elem = if shift {
+                    let fill = a.get(2).map(|f| dyn_arg(ctx, f)).unwrap_or_else(|| "CAST(NULL AS jsonb)".into());
+                    format!("CASE WHEN _g.__kql_i + {n} >= 0 AND _g.__kql_i + {n} < {len} THEN {arr} -> CAST(_g.__kql_i + {n} AS integer) ELSE {fill} END")
+                } else {
+                    format!("{arr} -> CAST((((_g.__kql_i + {n}) % {len}) + {len}) % {len} AS integer)")
+                };
+                mk(
+                    format!("CASE WHEN jsonb_typeof({arr}) = 'array' THEN (SELECT {} FROM generate_series(0, {len} - 1) AS _g(__kql_i)) END", agg(&elem, "_g.__kql_i")),
+                    Dynamic,
+                    a,
+                )
+            }
+            "array_split" => {
+                need(name, a, 2, 2)?;
+                let arr = dyn_arg(ctx, &a[0]);
+                let idx = if a[1].ty == Dynamic {
+                    format!("ARRAY(SELECT {} FROM jsonb_array_elements_text({}) AS _t(x))", d.try_cast("_t.x", Long), pg_arr(&a[1].sql))
+                } else {
+                    format!("ARRAY[{}]", long_arg(ctx, &a[1]))
+                };
+                let len = arr_len(&arr);
+                let norm = format!("least(greatest(CASE WHEN _j.x < 0 THEN _j.x + {len} ELSE _j.x END, 0), {len})");
+                let bounds = format!(
+                    "SELECT CAST(0 AS bigint) AS k, CAST(0 AS bigint) AS b UNION ALL SELECT _j.o, {norm} FROM unnest({idx}) WITH ORDINALITY AS _j(x, o) UNION ALL SELECT 9223372036854775807, {len}"
+                );
+                let piece = format!("(SELECT {} FROM {} WHERE _e.__kql_i - 1 >= _b.lo AND _e.__kql_i - 1 < _b.hi)", agg("_e.__kql_v", "_e.__kql_i"), pg_elems(&arr, "_e"));
+                mk(
+                    format!(
+                        "CASE WHEN jsonb_typeof({arr}) = 'array' THEN (SELECT {} FROM (SELECT _c.k, _c.b AS lo, lead(_c.b) OVER (ORDER BY _c.k) AS hi FROM ({bounds}) AS _c) AS _b WHERE _b.hi IS NOT NULL) END",
+                        agg(&piece, "_b.k")
+                    ),
+                    Dynamic,
+                    a,
+                )
+            }
+            "array_iff" | "array_iif" => {
+                need(name, a, 3, 3)?;
+                let cond = dyn_arg(ctx, &a[0]);
+                let branch: Vec<std::string::String> = a[1..3]
+                    .iter()
+                    .map(|t| {
+                        if t.ty == Dynamic {
+                            // arrays are indexed, scalars broadcast
+                            format!("CASE WHEN jsonb_typeof({0}) = 'array' THEN {0} -> CAST(_c.__kql_i - 1 AS integer) ELSE {0} END", t.sql)
+                        } else {
+                            dyn_arg(ctx, t)
+                        }
+                    })
+                    .collect();
+                let truth = "CASE WHEN jsonb_typeof(_c.__kql_v) = 'boolean' THEN _c.__kql_v = 'true'::jsonb WHEN jsonb_typeof(_c.__kql_v) = 'number' THEN CAST(_c.__kql_v #>> '{}' AS double precision) <> 0 END";
+                let elem = format!("CASE WHEN {truth} THEN {} WHEN NOT {truth} THEN {} END", branch[0], branch[1]);
+                mk(format!("CASE WHEN jsonb_typeof({cond}) = 'array' THEN (SELECT {} FROM {}) END", agg(&elem, "_c.__kql_i"), pg_elems(&cond, "_c")), Dynamic, a)
+            }
+            "array_strcat" => {
+                need(name, a, 2, 2)?;
+                let (arr, delim) = (dyn_arg(ctx, &a[0]), str_arg(ctx, &a[1]));
+                mk(format!("COALESCE((SELECT string_agg(COALESCE(_e.__kql_v #>> '{{}}', ''), {delim} ORDER BY _e.__kql_i) FROM {}), '')", pg_elems(&arr, "_e")), String, a)
+            }
+            "jaccard_index" => {
+                need(name, a, 2, 2)?;
+                let (x, y) = (dyn_arg(ctx, &a[0]), dyn_arg(ctx, &a[1]));
+                let nan = d.real_literal(f64::NAN);
+                mk(
+                    format!(
+                        "(SELECT CASE WHEN count(*) = 0 THEN {nan} ELSE CAST(count(*) FILTER (WHERE _u.inx AND _u.iny) AS double precision) / count(*) END \
+                         FROM (SELECT _s.v, bool_or(_s.src = 1) AS inx, bool_or(_s.src = 2) AS iny FROM (SELECT _e.__kql_v AS v, 1 AS src FROM {} UNION ALL SELECT _f.__kql_v, 2 FROM {}) AS _s GROUP BY _s.v) AS _u)",
+                        pg_elems(&x, "_e"),
+                        pg_elems(&y, "_f")
+                    ),
+                    Real,
+                    a,
+                )
+            }
+            "repeat" => {
+                need(name, a, 2, 2)?;
+                if a[0].ty == Dynamic {
+                    return err("repeat(): the value must be a scalar");
+                }
+                let (v, n) = (dyn_arg(ctx, &a[0]), long_arg(ctx, &a[1]));
+                mk(format!("CASE WHEN {n} IS NOT NULL THEN (SELECT COALESCE(jsonb_agg({v}), '[]'::jsonb) FROM generate_series(1, {n}) AS _g(__kql_i)) END"), Dynamic, a)
+            }
+            "range" => {
+                need(name, a, 2, 3)?;
+                let (start, stop) = (&a[0], &a[1]);
+                let i = "_g.__kql_i";
+                // (number of elements - 1, element), capped like Kusto (1,048,576 elements)
+                let (zero, n, elem) = match start.ty {
+                    DateTime => {
+                        if a.get(2).is_some_and(|t| t.ty != TimeSpan) {
+                            return err("range(): a datetime range requires a timespan step");
+                        }
+                        let step = a.get(2).map(|t| t.sql.clone()).unwrap_or_else(|| "864000000000".into());
+                        let (f, t) = (d.epoch_us(&start.sql), d.epoch_us(&ctx.convert(stop.clone(), DateTime).sql));
+                        let st = format!("CAST(trunc(({step}) / 10) AS bigint)");
+                        let n = format!("least(CAST(floor(({t} - {f}) / {}) AS bigint), 1048575)", d.cast(&format!("NULLIF({st}, 0)"), Real));
+                        (format!("{st} = 0"), n, d.to_json(&ctx.datetime_to_string(&d.ts_from_us(&format!("({f} + {i} * {st})")))))
+                    }
+                    TimeSpan => {
+                        let step = a.get(2).map(|t| t.sql.clone()).unwrap_or_else(|| "1".into());
+                        let n = format!("least(CAST(floor(({} - {}) / {}) AS bigint), 1048575)", stop.sql, start.sql, d.cast(&format!("NULLIF({step}, 0)"), Real));
+                        (format!("{step} = 0"), n, d.to_json(&ctx.timespan_to_string(&format!("({} + {i} * {step})", start.sql))))
+                    }
+                    t if t.is_numeric() || t == Dynamic => {
+                        let step_ty = a.get(2).map(|s| s.ty).unwrap_or(Long);
+                        if start.ty.is_integer() && (stop.ty.is_integer() || stop.ty == Dynamic) && step_ty.is_integer() {
+                            let (f, t) = (long_arg(ctx, start), long_arg(ctx, stop));
+                            let s = a.get(2).map(|x| long_arg(ctx, x)).unwrap_or_else(|| "1".into());
+                            (format!("{s} = 0"), format!("least(({t} - {f}) / NULLIF({s}, 0), 1048575)"), format!("to_jsonb({f} + {i} * {s})"))
+                        } else {
+                            let real = |ctx: &Ctx, x: &TExpr| ctx.convert(x.clone(), Real).sql;
+                            let (f, t) = (real(ctx, start), real(ctx, stop));
+                            let s = a.get(2).map(|x| real(ctx, x)).unwrap_or_else(|| d.real_literal(1.0));
+                            (format!("{s} = 0"), format!("least(CAST(floor(({t} - {f}) / NULLIF({s}, 0)) AS bigint), 1048575)"), format!("to_jsonb({f} + {i} * {s})"))
+                        }
+                    }
+                    _ => return err("range(): unsupported argument types"),
+                };
+                mk(
+                    format!("CASE WHEN {zero} OR {n} < 0 THEN '[]'::jsonb ELSE (SELECT {} FROM generate_series(0, {n}) AS _g(__kql_i)) END", agg(&elem, i)),
+                    Dynamic,
+                    a,
+                )
+            }
+            _ => return err("__unsupported__"),
+        })
+    })();
+    match r {
+        Err(e) if e.to_string().contains("__unsupported__") => None,
+        r => Some(r),
+    }
+}
+
 fn canonical_json(ctx: &mut Ctx, x: &str, depth: usize) -> String {
     if depth == 0 {
         return x.to_string();

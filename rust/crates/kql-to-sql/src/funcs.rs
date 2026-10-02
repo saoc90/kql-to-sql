@@ -128,7 +128,11 @@ impl Ctx<'_> {
                 need(1, 1)?;
                 let x = &a[0];
                 if x.ty == Dynamic {
-                    let jt = d.json_type(&x.sql);
+                    let mut jt = d.json_type(&x.sql);
+                    if d.kind() == Dialect::Postgres {
+                        // jsonb has a single 'number' type: integral literals are Kusto longs
+                        jt = format!("(CASE WHEN {jt} = 'number' AND ({}) ~ '^-?[0-9]+$' THEN 'bigint' ELSE {jt} END)", d.json_to_text(&x.sql));
+                    }
                     let sql = format!(
                         "CASE WHEN {x} IS NULL THEN 'null' ELSE CASE {jt} WHEN 'object' THEN 'dictionary' WHEN 'array' THEN 'array' WHEN 'varchar' THEN 'string' WHEN 'string' THEN 'string' \
                          WHEN 'bigint' THEN 'long' WHEN 'ubigint' THEN 'long' WHEN 'number' THEN 'double' WHEN 'double' THEN 'double' WHEN 'boolean' THEN 'bool' WHEN 'null' THEN 'null' ELSE {jt} END END",
@@ -238,9 +242,10 @@ impl Ctx<'_> {
                 // a negative start counts from the end; before the beginning yields ''
                 let start = format!("(CASE WHEN {st} < 0 THEN length({x}) + {st} ELSE {st} END)");
                 let sql = if n == 3 {
-                    format!("CASE WHEN {start} < 0 THEN '' ELSE COALESCE(substr({x}, {start} + 1, greatest({}, 0)), '') END", d.cast(&a[2].sql, Long))
+                    let len = format!("greatest({}, 0)", d.cast(&a[2].sql, Long));
+                    format!("CASE WHEN {start} < 0 THEN '' ELSE COALESCE({}, '') END", d.substr(&x, &format!("{start} + 1"), Some(&len)))
                 } else {
-                    format!("CASE WHEN {start} < 0 THEN '' ELSE COALESCE(substr({x}, {start} + 1), '') END")
+                    format!("CASE WHEN {start} < 0 THEN '' ELSE COALESCE({}, '') END", d.substr(&x, &format!("{start} + 1"), None))
                 };
                 Ok(mk(sql, String))
             }
@@ -256,7 +261,7 @@ impl Ctx<'_> {
                     return Ok(mk(format!("CASE WHEN {look} = '' THEN NULL ELSE CAST({} AS BIGINT) - 1 END", d.strpos(&x, &look)), Long));
                 }
                 let start = d.cast(&a[2].sql, Long);
-                let sub = format!("substr({x}, {start} + 1)");
+                let sub = d.substr(&x, &format!("{start} + 1"), None);
                 Ok(mk(format!("CASE WHEN {p} = 0 THEN -1 ELSE CAST({p} AS BIGINT) - 1 + {start} END", p = d.strpos(&sub, &look)), Long))
             }
             "replace_string" | "replace" if name == "replace_string" => {
@@ -309,7 +314,8 @@ impl Ctx<'_> {
                 let delim = s(self, &a[1]);
                 let arr = match d.kind() {
                     Dialect::DuckDb => format!("to_json(string_split({x}, {delim}))"),
-                    Dialect::Postgres => format!("to_jsonb(string_to_array({x}, {delim}))"),
+                    // string_to_array('', d) is empty; Kusto yields [""]
+                    Dialect::Postgres => format!("CASE WHEN {x} = '' THEN CAST('[\"\"]' AS jsonb) ELSE to_jsonb(string_to_array({x}, {delim})) END"),
                 };
                 if n == 3 {
                     let el = d.json_get_index(&arr, &d.cast(&a[2].sql, Long));
@@ -355,7 +361,11 @@ impl Ctx<'_> {
                             idx.iter().map(|g| format!("regexp_extract(m, {re_sql}, {g})")).collect::<Vec<_>>().join(", ")
                         )
                     }
-                    Dialect::Postgres => format!("(SELECT jsonb_agg(m[1]) FROM regexp_matches({x}, {re_sql}, 'g') AS m)"),
+                    // a group that did not participate yields '' (as in RE2/DuckDB)
+                    Dialect::Postgres if groups <= 1 => format!("(SELECT jsonb_agg(COALESCE(m[1], '')) FROM regexp_matches({x}, {re_sql}, 'g') AS m)"),
+                    Dialect::Postgres => format!(
+                        "(SELECT jsonb_agg((SELECT jsonb_agg(COALESCE(g.s, '') ORDER BY g.o) FROM unnest(m) WITH ORDINALITY AS g(s, o))) FROM regexp_matches({x}, {re_sql}, 'g') AS m)"
+                    ),
                 };
                 Ok(mk(sql, Dynamic))
             }
@@ -439,9 +449,10 @@ impl Ctx<'_> {
                 let x = real(&a[0]);
                 let sql = match name {
                     "log" => format!("CASE WHEN {x} > 0 THEN ln({x}) WHEN {x} = 0 THEN {} END", d.real_literal(f64::NEG_INFINITY)),
-                    "log2" => format!("CASE WHEN {x} > 0 THEN log2({x}) WHEN {x} = 0 THEN {} END", d.real_literal(f64::NEG_INFINITY)),
+                    "log2" => format!("CASE WHEN {x} > 0 THEN {} WHEN {x} = 0 THEN {} END", d.log2(&x), d.real_literal(f64::NEG_INFINITY)),
                     "log10" => format!("CASE WHEN {x} > 0 THEN log10({x}) WHEN {x} = 0 THEN {} END", d.real_literal(f64::NEG_INFINITY)),
                     "sqrt" => format!("CASE WHEN {x} >= 0 THEN sqrt({x}) WHEN {x} < 0 THEN {} END", d.real_literal(f64::NAN)),
+                    "exp" => d.exp(&x),
                     "exp2" => format!("power(2, {x})"),
                     "exp10" => format!("power(10, {x})"),
                     "loggamma" => format!("lgamma({x})"),
@@ -452,7 +463,8 @@ impl Ctx<'_> {
             "pow" | "power" | "atan2" => {
                 need(2, 2)?;
                 let f = if name == "atan2" { "atan2" } else { "power" };
-                Ok(mk(format!("{f}({}, {})", real(&a[0]), real(&a[1])), Real))
+                let (x, y) = (real(&a[0]), real(&a[1]));
+                Ok(mk(if name == "atan2" { format!("{f}({x}, {y})") } else { d.power(&x, &y) }, Real))
             }
             "pi" => {
                 need(0, 0)?;
@@ -467,9 +479,9 @@ impl Ctx<'_> {
                 need(1, 1)?;
                 let x = real(&a[0]);
                 let sql = match name {
-                    "isnan" => format!("isnan({x})"),
-                    "isinf" => format!("isinf({x})"),
-                    _ => format!("isfinite({x})"),
+                    "isnan" => d.is_nan(&x),
+                    "isinf" => d.is_inf(&x),
+                    _ => d.is_finite(&x),
                 };
                 Ok(mk(sql, Bool))
             }
@@ -626,7 +638,8 @@ impl Ctx<'_> {
                 let sec = if n >= 6 { d.cast(&a[5].sql, Real) } else { "0".into() };
                 let sql = match d.kind() {
                     Dialect::DuckDb => format!("try(make_timestamp(CAST({} AS BIGINT), CAST({} AS BIGINT), CAST({} AS BIGINT), CAST({} AS BIGINT), CAST({} AS BIGINT), {sec}))", g(0, "1"), g(1, "1"), g(2, "1"), g(3, "0"), g(4, "0")),
-                    Dialect::Postgres => format!("make_timestamp(CAST({} AS int), CAST({} AS int), CAST({} AS int), CAST({} AS int), CAST({} AS int), {sec})", g(0, "1"), g(1, "1"), g(2, "1"), g(3, "0"), g(4, "0")),
+                    // make_timestamp raises on invalid parts; Kusto yields null
+                    Dialect::Postgres => d.try_cast(&format!("format('%s-%s-%s %s:%s:%s', to_char(CAST({} AS int), 'FM0000'), CAST({} AS int), CAST({} AS int), CAST({} AS int), CAST({} AS int), {sec})", g(0, "1"), g(1, "1"), g(2, "1"), g(3, "0"), g(4, "0")), DateTime),
                 };
                 Ok(mk(sql, DateTime))
             }
@@ -729,9 +742,39 @@ impl Ctx<'_> {
                         let checks: Vec<std::string::String> = a.iter().map(|t| format!("json_type({}) = 'ARRAY'", t.sql)).collect();
                         format!("CASE WHEN {} THEN to_json({concat}) END", checks.join(" AND "))
                     }
-                    Dialect::Postgres => a.iter().map(|t| t.sql.clone()).collect::<Vec<_>>().join(" || "),
+                    // non-array arguments contribute nothing (Kusto)
+                    Dialect::Postgres => format!("({})", a.iter().map(|t| format!("(CASE WHEN jsonb_typeof({0}) = 'array' THEN {0} ELSE '[]'::jsonb END)", t.sql)).collect::<Vec<_>>().join(" || ")),
                 };
                 Ok(mk(sql, Dynamic))
+            }
+            "array_slice" | "array_reverse" | "array_index_of" | "set_has_element" | "array_sum" | "array_sort_asc" | "array_sort_desc" | "zip"
+            | "strcat_array" | "set_union" | "set_intersect" | "set_difference"
+                if d.kind() == Dialect::Postgres =>
+            {
+                let (lo, hi, ty) = match name {
+                    "array_slice" => (3, 3, Dynamic),
+                    "array_reverse" => (1, 1, Dynamic),
+                    "array_index_of" => (2, 2, Long),
+                    "set_has_element" => (2, 2, Bool),
+                    "array_sum" => (1, 1, Real),
+                    "array_sort_asc" | "array_sort_desc" => (1, 2, Dynamic),
+                    "zip" => (2, 64, Dynamic),
+                    "strcat_array" => (2, 2, String),
+                    _ => (2, 64, Dynamic),
+                };
+                need(lo, hi)?;
+                let args: Vec<std::string::String> = a
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| match (name, i) {
+                        ("array_index_of" | "set_has_element", 1) => self.to_dynamic(t.clone()).sql,
+                        ("strcat_array", 1) => s(self, t),
+                        ("array_slice", _) if i > 0 => d.cast(&t.sql, Long),
+                        _ => t.sql.clone(),
+                    })
+                    .collect();
+                let sql = crate::dialect::pg_array_fn(name, &args).expect("handled array function");
+                Ok(mk(sql, ty))
             }
             "array_slice" => {
                 need(3, 3)?;
@@ -871,6 +914,8 @@ impl Ctx<'_> {
             (DateTime, TimeSpan) => {
                 let step = match size.konst {
                     Some(Const::TimeSpan(t)) if t >= 10 => (t / 10).to_string(),
+                    // PostgreSQL raises on integer division by zero (DuckDB yields NULL)
+                    _ if d.kind() == Dialect::Postgres => format!("NULLIF(CAST(trunc({} / 10) AS BIGINT), 0)", size.sql),
                     _ => format!("CAST(trunc({} / 10) AS BIGINT)", size.sql),
                 };
                 let idiv = if d.kind() == Dialect::Postgres { "/" } else { "//" };
@@ -888,7 +933,7 @@ impl Ctx<'_> {
             }
             (TimeSpan, TimeSpan) => {
                 let base = at.map(|a| a.sql.clone()).unwrap_or_else(|| "0".into());
-                Ok(TExpr::derived(format!("(CAST(floor(({} - {base}) / CAST({} AS DOUBLE)) AS BIGINT) * {} + {base})", x.sql, size.sql, size.sql), TimeSpan, &parts))
+                Ok(TExpr::derived(format!("(CAST(floor(({} - {base}) / {}) AS BIGINT) * {} + {base})", x.sql, d.cast(&size.sql, Real), size.sql), TimeSpan, &parts))
             }
             (a, b) if a.is_numeric() && b.is_numeric() => {
                 let ty = match widest(a, b) {

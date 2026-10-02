@@ -361,9 +361,12 @@ impl Ctx<'_> {
                     let as_ty = if t == Decimal && l.ty != Real && r.ty != Real && op != BinaryOp::Div { Decimal } else { Real };
                     let (ls, rs) = (self.d.cast(&l.sql, as_ty), self.d.cast(&r.sql, as_ty));
                     let sql = match op {
-                        BinaryOp::Div => format!("({} / {})", ls, rs),
-                        // Kusto's % is Euclidean for reals too: the result has the divisor's... absolute sign
-                        BinaryOp::Mod => format!("fmod(fmod({ls}, {rs}) + abs({rs}), abs({rs}))"),
+                        BinaryOp::Div => self.d.real_div(&ls, &rs),
+                        // Kusto's % is Euclidean for reals too (result in [0, |divisor|))
+                        BinaryOp::Mod => {
+                            let abs_r = format!("abs({rs})");
+                            self.d.fmod(&format!("({} + {abs_r})", self.d.fmod(&ls, &rs)), &abs_r)
+                        }
                         _ => format!("({} {sym} {})", ls, rs),
                     };
                     Ok(TExpr::derived(sql, if t == Decimal { Decimal } else { Real }, &parts))
@@ -464,7 +467,7 @@ impl Ctx<'_> {
             let mut guards = Vec::new();
             for t in [&l, &r] {
                 if nan_guard(t) {
-                    guards.push(format!("NOT isnan({})", t.sql));
+                    guards.push(format!("NOT {}", self.d.is_nan(&t.sql)));
                 }
             }
             if !guards.is_empty() {
@@ -723,6 +726,7 @@ impl Ctx<'_> {
         )
         .replace("CAST('inf' AS DOUBLE)", &self.d.real_literal(f64::INFINITY))
         .replace("CAST('-inf' AS DOUBLE)", &self.d.real_literal(f64::NEG_INFINITY))
+        .replacen(&format!("isnan({x})"), &self.d.is_nan(x), 1)
     }
 
     pub fn datetime_to_string(&self, x: &str) -> String {

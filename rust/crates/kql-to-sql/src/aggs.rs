@@ -214,7 +214,7 @@ pub(crate) fn arg_extreme(ctx: &Ctx, value: &str, by: &str, max: bool) -> String
             if max { "arg_max" } else { "arg_min" }
         ),
         Dialect::Postgres => format!(
-            "(array_agg({value} ORDER BY {by} {}) FILTER (WHERE {by} IS NOT NULL))[1]",
+            "(array_agg({value} ORDER BY {by} {} NULLS LAST))[1]",
             if max { "DESC" } else { "ASC" }
         ),
     }
@@ -444,9 +444,31 @@ fn make_list_sql(ctx: &Ctx, x: &TExpr, cond: Option<&str>, distinct: bool, with_
             format!("COALESCE(to_json({list}), CAST('[]' AS JSON))")
         }
         Dialect::Postgres => {
-            let dis = if distinct { "DISTINCT " } else { "" };
-            let ob = if distinct { String::new() } else { order_by };
-            format!("COALESCE(jsonb_agg({dis}{v}{ob}){filter}, CAST('[]' AS jsonb))")
+            let dynamic = x.ty == KqlType::Dynamic;
+            if !dynamic && !distinct && max_size.is_none() {
+                return format!("COALESCE(jsonb_agg({v}{order_by}){filter}, CAST('[]' AS jsonb))");
+            }
+            // collect in order, then post-process the array in a scalar subquery: flatten dynamic
+            // arrays, keep the first occurrence of each value, cut at the maximum size
+            let collected = format!("array_agg({v}{order_by}){filter}");
+            let flat = if dynamic {
+                format!(
+                    "SELECT _y.__kql_v, row_number() OVER (ORDER BY _m.__kql_i, _y.__kql_j) AS __kql_n FROM unnest({collected}) WITH ORDINALITY AS _m(__kql_x, __kql_i), \
+                     LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(_m.__kql_x) = 'array' THEN _m.__kql_x ELSE jsonb_build_array(_m.__kql_x) END) WITH ORDINALITY AS _y(__kql_v, __kql_j)"
+                )
+            } else {
+                format!("SELECT _m.__kql_v, _m.__kql_n FROM unnest({collected}) WITH ORDINALITY AS _m(__kql_v, __kql_n)")
+            };
+            let rows = if distinct {
+                format!("SELECT _f.__kql_v, min(_f.__kql_n) AS __kql_n FROM ({flat}) AS _f GROUP BY _f.__kql_v")
+            } else {
+                flat
+            };
+            let rows = match max_size {
+                Some(n) => format!("SELECT * FROM ({rows}) AS _l ORDER BY _l.__kql_n LIMIT {}", d.cast(&n.sql, KqlType::Long)),
+                None => rows,
+            };
+            format!("(SELECT COALESCE(jsonb_agg(_s.__kql_v ORDER BY _s.__kql_n), CAST('[]' AS jsonb)) FROM ({rows}) AS _s)")
         }
     }
 }

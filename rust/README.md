@@ -19,8 +19,8 @@ Translates [Kusto Query Language (KQL)](https://learn.microsoft.com/en-us/kusto/
 
 | Oracle (exact matches with Kusto, of 1,662) | C# translator | Rust, DuckDB | Rust, PostgreSQL |
 |---|---|---|---|
-| Match | 1,073 | 1,434 | 1,208 |
-| Invalid SQL | 50 | 0 | see `--engine pglite` |
+| Match | 1,073 | 1,435 | 1,404 |
+| Invalid SQL | 50 | 0 | 1 |
 
 ## Crates
 

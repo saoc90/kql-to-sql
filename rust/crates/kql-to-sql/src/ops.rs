@@ -496,7 +496,7 @@ fn range(ctx: &mut Ctx, name: &str, from: &Expr, to: &Expr, step: &Expr, env: &E
         KqlType::DateTime if s.ty == KqlType::TimeSpan => {
             let (fu, tu) = (d.epoch_us(&f.sql), d.epoch_us(&t.sql));
             let step_us = format!("CAST(trunc({} / 10) AS BIGINT)", s.sql);
-            let n = format!("CASE WHEN {step_us} = 0 THEN -1 ELSE CAST(floor(({tu} - {fu}) / CAST({step_us} AS DOUBLE)) AS BIGINT) END");
+            let n = format!("CASE WHEN {step_us} = 0 THEN -1 ELSE CAST(floor(({tu} - {fu}) / {}) AS BIGINT) END", d.cast(&step_us, KqlType::Real));
             let gs = d.generate_series("0", &n, "1", &alias, "i");
             (gs, d.ts_from_us(&format!("({fu} + {alias}.i * {step_us})")), KqlType::DateTime)
         }

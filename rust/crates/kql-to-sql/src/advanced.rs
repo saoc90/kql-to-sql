@@ -190,7 +190,10 @@ pub(crate) fn parse(ctx: &mut Ctx, rel: Rel, params: &[OpParam], expr: &Expr, pa
     }
     let flags = param_word(params, "flags").unwrap_or_default();
     let re = if flags.is_empty() { re } else { format!("(?{}){re}", flags.to_ascii_lowercase().replace('u', "U")) };
-    let re = crate::regex::translate(&re, ctx.d.kind());
+    let mut re = crate::regex::translate(&re, ctx.d.kind());
+    if ctx.d.kind() == crate::Dialect::Postgres {
+        re = crate::regex::pg_prefer_longest(&re);
+    }
     let re_sql = quote_str(&re);
     let matched = ctx.d.regex_match(&src.sql, &re_sql);
     let mut items = rel.identity_items();

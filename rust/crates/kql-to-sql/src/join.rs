@@ -71,9 +71,12 @@ fn join_keys(on: &[Expr], left: &[Column], right: &[Column]) -> Result<Vec<(Stri
     Ok(keys)
 }
 
-fn key_condition(keys: &[(String, String)], la: &str, ra: &str) -> String {
+fn key_condition(ctx: &Ctx, keys: &[(String, String)], lcols: &[Column], la: &str, ra: &str) -> String {
     keys.iter()
-        .map(|(l, r)| format!("{la}.{} IS NOT DISTINCT FROM {ra}.{}", quote_ident(l), quote_ident(r)))
+        .map(|(l, r)| {
+            let ty = lcols.iter().find(|c| c.name == *l).map_or(KqlType::Dynamic, |c| c.ty);
+            ctx.d.null_safe_eq(&format!("{la}.{}", quote_ident(l)), &format!("{ra}.{}", quote_ident(r)), ty)
+        })
         .collect::<Vec<_>>()
         .join(" AND ")
 }
@@ -113,7 +116,7 @@ pub(crate) fn join(ctx: &mut Ctx, left: Rel, params: &[OpParam], right: &Expr, o
     left.order.clear();
     right.order.clear();
     let (lcols, rcols) = (left.cols.clone(), right.cols.clone());
-    let cond = key_condition(&keys, "L", "R");
+    let cond = key_condition(ctx, &keys, &left.cols, "L", "R");
 
     let semi = |ctx: &mut Ctx, outer: Rel, inner: Rel, oa: &str, ia: &str, negate: bool| -> Rel {
         let cols = outer.cols.clone();
@@ -172,7 +175,7 @@ pub(crate) fn lookup(ctx: &mut Ctx, left: Rel, params: &[OpParam], right: &Expr,
     let right = ctx.tabular(right, env)?;
     let keys = join_keys(on, &left.cols, &right.cols)?;
     let (lcols, rcols) = (left.cols.clone(), right.cols.clone());
-    let cond = key_condition(&keys, "L", "R");
+    let cond = key_condition(ctx, &keys, &left.cols, "L", "R");
     let sql_kind = match kind.as_str() {
         "leftouter" => "LEFT JOIN",
         "inner" => "INNER JOIN",

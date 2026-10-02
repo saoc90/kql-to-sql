@@ -24,6 +24,22 @@ pub(crate) fn translate(re: &str, dialect: Dialect) -> String {
     }
 }
 
+/// PostgreSQL ARE: the whole match takes the greediness of the *first* quantifier, so a pattern
+/// like `^(.*?) (.*)` matches as little as possible and the trailing greedy group comes back
+/// empty. A top-level alternation is always greedy (longest overall match) while each group keeps
+/// its own preference, which is what RE2 yields for `parse` patterns; the extra branch `(?!)`
+/// never matches. Leading embedded options stay in front.
+pub(crate) fn pg_prefer_longest(re: &str) -> String {
+    let (opts, body) = match re.strip_prefix("(?") {
+        Some(rest) if rest.find(')').is_some_and(|i| i > 0 && rest[..i].bytes().all(|b| b.is_ascii_alphabetic())) => {
+            let i = rest.find(')').unwrap() + 3;
+            (&re[..i], &re[i..])
+        }
+        _ => ("", re),
+    };
+    format!("{opts}(?:{body})|(?!)")
+}
+
 /// Adapts a replacement string: Kusto uses `$1`/`\1` for groups; RE2/DuckDB uses `\1`.
 pub(crate) fn translate_replacement(rep: &str, _dialect: Dialect) -> String {
     let mut out = String::new();
