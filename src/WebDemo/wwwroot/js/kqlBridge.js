@@ -36,11 +36,29 @@ async function schemaFor(dialect) {
     return out;
 }
 
+// The translator reports `| render` properties in camelCase (visualization, xColumn, ...); the chart
+// renderer uses Kusto's property names (Visualization, XColumn, ...), as the C# bridge returned them.
+const RENDER_KEYS = {
+    visualization: 'Visualization', title: 'Title', xColumn: 'XColumn', series: 'Series', yColumns: 'YColumns',
+    anomalyColumns: 'AnomalyColumns', xTitle: 'XTitle', yTitle: 'YTitle', xAxis: 'XAxis', yAxis: 'YAxis',
+    legend: 'Legend', ySplit: 'YSplit', accumulate: 'Accumulate', kind: 'Kind',
+    ymin: 'Ymin', ymax: 'Ymax', xmin: 'Xmin', xmax: 'Xmax',
+};
+
+function toRenderInfo(render) {
+    if (!render) return null;
+    const out = {};
+    for (const [k, v] of Object.entries(render)) out[RENDER_KEYS[k] ?? k] = v;
+    return out;
+}
+
 /** Translates KQL to SQL: { success, sql, error, columns, render }. */
 export async function translateKqlToSql(kql, dialect) {
     if (!ready) throw new Error('KqlBridge not initialized');
     const schema = await schemaFor(dialect);
-    return JSON.parse(translate(kql, dialect, JSON.stringify(schema)));
+    const result = JSON.parse(translate(kql, dialect, JSON.stringify(schema)));
+    result.render = toRenderInfo(result.render);
+    return result;
 }
 
 /** Checks KQL syntax: { success, valid, errors: [{ message, start, length }] }. */
