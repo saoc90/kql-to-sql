@@ -225,7 +225,7 @@ impl Ctx<'_> {
             Literal::Real(v) => TExpr::konst(d.real_literal(*v), KqlType::Real, Const::Real(*v)),
             Literal::Decimal(t) => {
                 let v: f64 = t.parse().map_err(|_| crate::Error::new(format!("invalid decimal literal '{t}'")))?;
-                TExpr::konst(d.real_literal(v), KqlType::Decimal, Const::Real(v))
+                TExpr::konst(d.cast(&quote_str(t.trim()), KqlType::Decimal), KqlType::Decimal, Const::Real(v))
             }
             Literal::String(s) => TExpr::konst(quote_str(s), KqlType::String, Const::Str(s.clone())),
             Literal::DateTime(t) => {
@@ -355,7 +355,9 @@ impl Ctx<'_> {
                     // Kusto promotes int arithmetic to long
                     Ok(TExpr::derived(sql, Long, &parts))
                 } else {
-                    let (ls, rs) = (self.d.cast(&l.sql, Real), self.d.cast(&r.sql, Real));
+                    // decimal arithmetic stays exact unless a real is involved
+                    let as_ty = if t == Decimal && l.ty != Real && r.ty != Real && op != BinaryOp::Div { Decimal } else { Real };
+                    let (ls, rs) = (self.d.cast(&l.sql, as_ty), self.d.cast(&r.sql, as_ty));
                     let sql = match op {
                         BinaryOp::Div => format!("({} / {})", ls, rs),
                         // Kusto's % is Euclidean for reals too: the result has the divisor's... absolute sign
@@ -806,7 +808,11 @@ impl Ctx<'_> {
                 let ok = d.regex_match(&v, "'^[+-]?([0-9]+|0[xX][0-9a-fA-F]+)$'");
                 format!("CASE WHEN {ok} THEN {} END", d.try_cast(&v, b))
             }
-            (String, Real | Decimal) => {
+            (String, Decimal) => {
+                let real = self.convert(x.clone(), Real);
+                d.try_cast(&real.sql, Decimal)
+            }
+            (String, Real) => {
                 let v = format!("regexp_replace({}, '^\\s+|\\s+$', '', 'g')", x.sql);
                 let ok = d.regex_match(&v, r"'^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$'");
                 format!(
