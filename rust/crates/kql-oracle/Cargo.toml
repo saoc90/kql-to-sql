@@ -1,0 +1,19 @@
+[package]
+name = "kql-oracle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Differential test harness: runs the stored Kusto oracle corpus through the translator and DuckDB."
+
+[[bin]]
+name = "kql-oracle"
+path = "src/main.rs"
+
+[dependencies]
+kql-to-sql.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# `json` bundles DuckDB's JSON extension: the translator emits dynamic columns as JSON.
+duckdb = { workspace = true, features = ["json"] }
+unicode-normalization = "0.1"
