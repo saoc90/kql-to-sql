@@ -1,5 +1,11 @@
 # Agent Instructions
 
+## Commits and pull requests
+
+- Never mention AI assistants or tools (Claude, Claude Code, Anthropic, ...) in commit messages, PR titles, PR descriptions, or review comments.
+- Do not add `Co-Authored-By`, `Claude-Session`, "Generated with ..." or similar attribution lines.
+- Commit as the repository owner's configured git identity.
+
 ## Rust translator (rust/) — primary implementation
 
 - Read `rust/DESIGN.md` first: structured `Select`/`Rel` model (fit-or-wrap, never inspect SQL text),
