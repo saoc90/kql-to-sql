@@ -82,6 +82,7 @@ fn where_(ctx: &mut Ctx, rel: Rel, e: &Expr, env: &Env) -> Result<Rel> {
     let cond = {
         let mut scope = Scope::rows(&rel.cols);
         scope.order = &order;
+        scope.serialized = rel.is_serialized();
         ctx.expr(e, &scope, env)?
     };
     let mut rel = crate::window::finish(ctx, hoists, rel);
@@ -113,6 +114,7 @@ pub(crate) fn extend(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env, _s
         return extend(ctx, wrapped, items, env, _serialize);
     }
     let order = rel.order_sql();
+    let serialized = _serialize || rel.is_serialized();
     let mut out_items = rel.identity_items();
     let mut cols = rel.cols.clone();
     let mut defined: Vec<(String, String, KqlType)> = Vec::new();
@@ -122,6 +124,7 @@ pub(crate) fn extend(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env, _s
         let t = {
             let mut scope = Scope::rows(&rel.cols);
             scope.order = &order;
+            scope.serialized = serialized;
             scope.extra = &defined;
             ctx.expr(&ne.expr, &scope, env)?
         };
@@ -152,7 +155,9 @@ pub(crate) fn extend(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env, _s
         }
     }
     let rel = crate::window::finish(ctx, hoists, rel);
-    Ok(rel.project(ctx, out_items, cols))
+    let mut r = rel.project(ctx, out_items, cols);
+    r.serialized = serialized;
+    Ok(r)
 }
 
 /// Constants in projections are cast to their Kusto type so the column type is exact.
@@ -171,6 +176,7 @@ pub(crate) fn output_sql(ctx: &Ctx, t: &TExpr) -> String {
 fn project(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env) -> Result<Rel> {
     let rel = rel.passthrough(ctx);
     let order = rel.order_sql();
+    let serialized = rel.is_serialized();
     let mut out_items = Vec::new();
     let mut cols: Vec<Column> = Vec::new();
     let mut names = UniqueNames::default();
@@ -181,6 +187,7 @@ fn project(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env) -> Result<Re
         let t = {
             let mut scope = Scope::rows(&rel.cols);
             scope.order = &order;
+            scope.serialized = serialized;
             scope.extra = &defined;
             ctx.expr(&ne.expr, &scope, env)?
         };
@@ -303,6 +310,7 @@ pub(crate) fn sort(ctx: &mut Ctx, rel: Rel, keys: &[ast::OrderKey], env: &Env) -
         }
         physical.push(format!("{} {} NULLS {}", t.sql, if desc { "DESC" } else { "ASC" }, if nulls_first { "FIRST" } else { "LAST" }));
     }
+    rel.serialized = true;
     if specs.len() == keys.len() {
         rel.order = specs;
         rel.sel.order_by.clear();
@@ -336,7 +344,9 @@ fn count(ctx: &mut Ctx, rel: Rel, name: &str) -> Result<Rel> {
     rel.sel.order_by.clear();
     rel.order.clear();
     let item = Item { sql: "COUNT(*)".into(), alias: name.into() };
-    Ok(rel.project(ctx, vec![item], vec![Column { name: name.into(), ty: KqlType::Long }]))
+    let mut r = rel.project(ctx, vec![item], vec![Column { name: name.into(), ty: KqlType::Long }]);
+    r.serialized = false;
+    Ok(r)
 }
 
 fn distinct(ctx: &mut Ctx, rel: Rel, exprs: &[Expr], env: &Env) -> Result<Rel> {
@@ -361,6 +371,7 @@ fn distinct(ctx: &mut Ctx, rel: Rel, exprs: &[Expr], env: &Env) -> Result<Rel> {
     };
     let mut r = rel.project(ctx, items, cols);
     r.sel.distinct = true;
+    r.serialized = false;
     Ok(r)
 }
 

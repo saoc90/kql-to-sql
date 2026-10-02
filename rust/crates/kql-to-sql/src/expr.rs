@@ -114,15 +114,17 @@ pub(crate) struct Scope<'s> {
     pub order: &'s [String],
     /// Extra columns visible to the expression (e.g. `scan` state) as (name, sql, type).
     pub extra: &'s [(String, String, KqlType)],
+    /// The rows are serialized, so window functions (row_number, prev, ...) are allowed.
+    pub serialized: bool,
 }
 
 impl<'s> Scope<'s> {
     pub fn rows(cols: &'s [Column]) -> Scope<'s> {
-        Scope { cols, qual: None, join: None, aggregates: false, order: &[], extra: &[] }
+        Scope { cols, qual: None, join: None, aggregates: false, order: &[], extra: &[], serialized: false }
     }
 
     pub fn empty() -> Scope<'static> {
-        Scope { cols: &[], qual: None, join: None, aggregates: false, order: &[], extra: &[] }
+        Scope { cols: &[], qual: None, join: None, aggregates: false, order: &[], extra: &[], serialized: false }
     }
 
     pub fn find(&self, name: &str) -> Option<&'s Column> {

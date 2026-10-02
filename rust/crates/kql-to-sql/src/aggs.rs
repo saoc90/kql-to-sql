@@ -76,6 +76,7 @@ pub(crate) fn summarize(ctx: &mut Ctx, rel: Rel, aggs: &[NamedExpr], by: &[Named
     }
     let group: Vec<String> = (1..=nkeys).map(|i| i.to_string()).collect();
     let mut r = rel.project(ctx, items, cols);
+    r.serialized = false;
     r.sel.group_by = group;
     if nkeys == 0 {
         r.sel.group_by.clear();
@@ -226,7 +227,7 @@ pub(crate) fn any_value(_ctx: &Ctx, x: &str) -> String {
 /// Compiles an aggregate function call. Arguments are compiled in the (non-aggregate) row scope.
 pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: &Env) -> Result<TExpr> {
     let lname = name.to_ascii_lowercase();
-    let row_scope = Scope { cols: scope.cols, qual: scope.qual, join: None, aggregates: false, order: scope.order, extra: scope.extra };
+    let row_scope = Scope { cols: scope.cols, qual: scope.qual, join: None, aggregates: false, order: scope.order, extra: scope.extra, serialized: scope.serialized };
     let mut a = Vec::new();
     for arg in args {
         if matches!(arg.expr, Expr::Star) {

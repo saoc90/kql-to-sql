@@ -56,6 +56,9 @@ impl Ctx<'_> {
             }
             _ => {}
         }
+        if matches!(lname.as_str(), "row_number" | "prev" | "next" | "row_cumsum" | "row_rank_dense" | "row_rank_min" | "row_window_session") && !scope.serialized {
+            return err(format!("{name}(): the input is not serialized; use 'serialize' or 'sort' before calling window functions"));
+        }
         let mut a = Vec::with_capacity(args.len());
         for arg in args {
             a.push(self.expr(&arg.expr, scope, env)?);

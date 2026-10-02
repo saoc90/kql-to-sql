@@ -18,6 +18,8 @@ pub(crate) struct Rel {
     /// Logical row order as SQL ORDER BY items over output columns. It is emitted only where it
     /// matters (LIMIT, window functions, the final result), never inside plain subqueries.
     pub order: Vec<OrderSpec>,
+    /// Rows are serialized (after sort/top/serialize/range): window functions are allowed.
+    pub serialized: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,14 +42,19 @@ impl OrderSpec {
 
 impl Rel {
     pub fn from_select(sel: Select, cols: Vec<Column>) -> Rel {
-        Rel { sel, cols, order: Vec::new() }
+        Rel { sel, cols, order: Vec::new(), serialized: false }
     }
 
     /// Wraps the current select as a subquery: `SELECT * FROM (<sel>) AS _q`.
     /// Wraps the select keeping its ORDER BY (for physically ordered relations).
     pub fn wrap_keep_order(self, ctx: &mut Ctx) -> Rel {
         let alias = ctx.alias();
-        Rel { sel: Select::star_from(From::Query(Box::new(Query::Select(Box::new(self.sel))), alias)), cols: self.cols, order: self.order }
+        Rel { sel: Select::star_from(From::Query(Box::new(Query::Select(Box::new(self.sel))), alias)), cols: self.cols, order: self.order, serialized: self.serialized }
+    }
+
+    /// True if window functions may be used over these rows.
+    pub fn is_serialized(&self) -> bool {
+        self.serialized || !self.order.is_empty()
     }
 
     pub fn wrap(mut self, ctx: &mut Ctx) -> Rel {
@@ -57,7 +64,7 @@ impl Rel {
             self.sel.order_by.clear();
         }
         let alias = ctx.alias();
-        Rel { sel: Select::star_from(From::Query(Box::new(Query::Select(Box::new(self.sel))), alias)), cols: self.cols, order: self.order }
+        Rel { sel: Select::star_from(From::Query(Box::new(Query::Select(Box::new(self.sel))), alias)), cols: self.cols, order: self.order, serialized: self.serialized }
     }
 
     /// Ensures the select outputs exactly its FROM's columns, so new clauses can reference them.
