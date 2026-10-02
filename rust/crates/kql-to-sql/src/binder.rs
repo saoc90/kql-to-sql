@@ -162,6 +162,9 @@ pub(crate) struct Ctx<'a> {
     /// Names bound by the `as` operator (visible to the rest of the query).
     pub as_names: Vec<(String, TableRef)>,
     cte_names: HashSet<String>,
+    /// Hidden window columns collected while compiling an operator's row expressions
+    /// (`None` outside such operators); see `window::begin`.
+    pub window_hoists: Option<Vec<crate::window::Hoist>>,
     next_alias: usize,
     depth: usize,
 }
@@ -170,7 +173,7 @@ const MAX_DEPTH: usize = 64;
 
 impl<'a> Ctx<'a> {
     pub fn new(d: &'static dyn SqlDialect, catalog: &'a Catalog) -> Ctx<'a> {
-        Ctx { d, catalog, ctes: Vec::new(), as_names: Vec::new(), cte_names: HashSet::new(), next_alias: 0, depth: 0 }
+        Ctx { d, catalog, ctes: Vec::new(), as_names: Vec::new(), cte_names: HashSet::new(), window_hoists: None, next_alias: 0, depth: 0 }
     }
 
     pub fn alias(&mut self) -> String {
@@ -317,6 +320,10 @@ impl<'a> Ctx<'a> {
             Expr::Name(n) => self.table_ref(n, env),
             Expr::Pipe { input, op } => {
                 let rel = self.tabular(input, env)?;
+                if let Operator::Evaluate { params, name, args } = &**op {
+                    // plugins whose output schema depends on constant input data inspect it
+                    return crate::op_evaluate::evaluate_with_input(self, rel, input, params, name, args, env);
+                }
                 self.apply_operator(rel, op, env)
             }
             Expr::Source(op) => self.source_operator(op, env),
