@@ -7,11 +7,15 @@
 //! kql-oracle one --kql "<KQL>"
 //! kql-oracle one --id <Id | source/Id>
 //! ```
+//!
+//! Every command takes `--engine duckdb|pglite` (default duckdb). `pglite` translates with
+//! `Dialect::Postgres` and executes in PGlite (PostgreSQL 16 / WASM) via `pglite/runner.mjs`.
 
 mod smoke;
 mod analyzer;
 mod compare;
 mod duck;
+mod pg;
 mod rows;
 mod value;
 
@@ -85,6 +89,41 @@ struct OutRecord<'a> {
     c_sharp_outcome: &'a str,
 }
 
+/// The SQL engine the translated queries run on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Engine {
+    #[default]
+    DuckDb,
+    PgLite,
+}
+
+impl Engine {
+    pub fn parse(s: &str) -> Result<Engine, String> {
+        match s.to_ascii_lowercase().as_str() {
+            "duckdb" | "duck" => Ok(Engine::DuckDb),
+            "pglite" | "pg" | "postgres" => Ok(Engine::PgLite),
+            other => Err(format!("unknown engine {other} (expected duckdb or pglite)")),
+        }
+    }
+
+    pub fn dialect(self) -> kql_to_sql::Dialect {
+        match self {
+            Engine::DuckDb => kql_to_sql::Dialect::DuckDb,
+            Engine::PgLite => kql_to_sql::Dialect::Postgres,
+        }
+    }
+
+    pub fn is_engine_domain_error(self, err: &str) -> bool {
+        match self {
+            Engine::DuckDb => compare::is_engine_domain_error(err),
+            Engine::PgLite => pg::is_engine_domain_error(err),
+        }
+    }
+}
+
+/// Executes translated SQL: `(sql, declared column classes) -> result`.
+type Executor<'a> = dyn Fn(&str, &[Class]) -> Result<DuckResult, String> + 'a;
+
 /// Everything we learned running one record.
 struct RunResult {
     sql: Option<String>,
@@ -95,16 +134,16 @@ struct RunResult {
 // ---- running ---------------------------------------------------------------------------------
 
 /// Translates `kql`, catching translator panics.
-fn translate(kql: &str) -> Result<kql_to_sql::Translation, String> {
+fn translate(kql: &str, dialect: kql_to_sql::Dialect) -> Result<kql_to_sql::Translation, String> {
     let catalog = kql_to_sql::Catalog::default();
-    match panic::catch_unwind(AssertUnwindSafe(|| kql_to_sql::translate(kql, &catalog, kql_to_sql::Dialect::DuckDb))) {
+    match panic::catch_unwind(AssertUnwindSafe(|| kql_to_sql::translate(kql, &catalog, dialect))) {
         Ok(Ok(t)) => Ok(t),
         Ok(Err(e)) => Err(e.message),
         Err(payload) => Err(format!("panic: {}", panic_message(&payload))),
     }
 }
 
-/// Executes, catching panics from value conversion.
+/// Executes in DuckDB, catching panics from value conversion.
 fn execute(sql: &str, declared: &[Class]) -> Result<DuckResult, String> {
     panic::catch_unwind(AssertUnwindSafe(|| duck::execute(sql, declared)))
         .unwrap_or_else(|p| Err(format!("panic during execution: {}", panic_message(&p))))
@@ -129,8 +168,33 @@ fn kusto_sample(summary: &ResultSummary) -> Result<KustoSample, String> {
     Ok(KustoSample { columns, row_count: summary.row_count, rows })
 }
 
+/// Runs every statement in one PGlite batch and returns an executor that serves the results
+/// (keyed by SQL text), converting cells with the declared classes at lookup time.
+fn pglite_executor(sqls: Vec<String>, setup: &pg::Setup) -> Result<impl Fn(&str, &[Class]) -> Result<DuckResult, String>, String> {
+    let mut unique: Vec<String> = sqls;
+    unique.sort();
+    unique.dedup();
+    let stmts: Vec<(String, String)> = unique.iter().enumerate().map(|(i, s)| (i.to_string(), s.clone())).collect();
+    let mut raw = pg::run_batch(&stmts, setup)?;
+    let by_sql: BTreeMap<String, pg::PgRaw> =
+        stmts.into_iter().filter_map(|(id, sql)| raw.remove(&id).map(|r| (sql, r))).collect();
+    Ok(move |sql: &str, declared: &[Class]| -> Result<DuckResult, String> {
+        let r = by_sql.get(sql).ok_or_else(|| "statement missing from the PGlite batch output".to_string())?;
+        panic::catch_unwind(AssertUnwindSafe(|| pg::to_result(r, declared)))
+            .unwrap_or_else(|p| Err(format!("panic during conversion: {}", panic_message(&p))))
+    })
+}
+
+/// The SQL `run_record` would execute for `rec` (None when it stops before execution).
+fn planned_sql(rec: &Record, engine: Engine) -> Option<String> {
+    if rec.outcome == "SkippedNondeterministic" && !rec.kusto_rejected() {
+        return None;
+    }
+    translate(&rec.kql, engine.dialect()).ok().map(|t| t.sql)
+}
+
 /// Mirrors the C# `Comparator.Compare` decision order.
-fn run_record(rec: &Record, use_record_sql: bool) -> RunResult {
+fn run_record(rec: &Record, use_record_sql: bool, engine: Engine, exec: &Executor) -> RunResult {
     let analysis = analyzer::analyze(&rec.kql);
     let rejected = rec.kusto_rejected();
     let done = |sql, outcome, detail: Option<String>| RunResult { sql, verdict: Verdict::new(outcome, detail), duck: None };
@@ -143,7 +207,7 @@ fn run_record(rec: &Record, use_record_sql: bool) -> RunResult {
         // Harness self-check: replay the C# translator's SQL (no declared schema).
         rec.sql.clone().map(|sql| kql_to_sql::Translation { sql, columns: Vec::new(), render: None }).ok_or_else(|| "record has no Sql".to_string())
     } else {
-        translate(&rec.kql)
+        translate(&rec.kql, engine.dialect())
     };
     let translation = match translated {
         Ok(t) => t,
@@ -153,10 +217,10 @@ fn run_record(rec: &Record, use_record_sql: bool) -> RunResult {
     let sql = Some(translation.sql.clone());
     let declared: Vec<Class> = translation.columns.iter().map(|c| Class::from_kql(c.ty)).collect();
 
-    let duck = match execute(&translation.sql, &declared) {
+    let duck = match exec(&translation.sql, &declared) {
         Ok(d) => d,
         Err(e) if rejected => return done(sql, Outcome::KustoRejectedOurError, Some(e)),
-        Err(e) if compare::is_engine_domain_error(&e) => return done(sql, Outcome::SkippedEngineError, Some(e)),
+        Err(e) if engine.is_engine_domain_error(&e) => return done(sql, Outcome::SkippedEngineError, Some(e)),
         Err(e) => return done(sql, Outcome::SqlExecError, Some(e)),
     };
     let with_duck = |outcome, detail: Option<String>, duck| RunResult { sql: sql.clone(), verdict: Verdict::new(outcome, detail), duck };
@@ -236,6 +300,7 @@ struct RunArgs {
     compare_csharp: bool,
     record_sql: bool,
     out: Option<PathBuf>,
+    engine: Engine,
     /// Fail (exit 1) if fewer records match Kusto.
     min_match: Option<usize>,
     /// Fail (exit 1) if more records produce invalid SQL.
@@ -243,13 +308,16 @@ struct RunArgs {
 }
 
 const USAGE: &str = "usage:
-  kql-oracle run [--in <file-or-dir>]... [--filter <substr of Id/Family/source>] [--verbose]
-                 [--failures-only] [--compare-csharp] [--record-sql] [--out <file.jsonl>]
+  kql-oracle run [--engine duckdb|pglite] [--in <file-or-dir>]... [--filter <substr of Id/Family/source>]
+                 [--verbose] [--failures-only] [--compare-csharp] [--record-sql] [--out <file.jsonl>]
                  [--min-match <n>] [--max-sql-errors <n>]   (CI gates: exit 1 when violated)
-  kql-oracle smoke [--queries <file.jsonl>] [--csv <StormEvents.csv.gz>] [--verbose]
-  kql-oracle sql \"<SQL>\"
-  kql-oracle one --kql \"<KQL>\"
-  kql-oracle one --id <Id | source/Id> [--in <file-or-dir>]...
+  kql-oracle one [--engine duckdb|pglite] --kql \"<KQL>\"
+  kql-oracle one [--engine duckdb|pglite] --id <Id | source/Id> [--in <file-or-dir>]...
+  kql-oracle smoke [--engine duckdb|pglite] [--queries <jsonl>] [--csv <StormEvents.csv[.gz]>] [--verbose]
+  kql-oracle sql \"<SQL>\"            (DuckDB only)
+
+  --engine         duckdb (default) or pglite: translate with the Postgres dialect and run in
+                   PGlite (PostgreSQL 16 / WASM, needs Node and `npm install` in crates/kql-oracle/pglite)
 
   --verbose        print details (KQL, our SQL, error/diff) for every non-Match
   --failures-only  print details only for regressions (C# Match, ours not)
@@ -302,11 +370,15 @@ fn parse_run_args(args: &[String]) -> Result<RunArgs, String> {
             "--failures-only" => out.failures_only = true,
             "--compare-csharp" => out.compare_csharp = true,
             "--record-sql" => out.record_sql = true,
+            "--engine" => out.engine = Engine::parse(&value()?)?,
             other => return Err(format!("unknown argument {other}\n{USAGE}")),
         }
     }
     if out.inputs.is_empty() {
         out.inputs.push(default_corpus());
+    }
+    if out.record_sql && out.engine != Engine::DuckDb {
+        return Err("--record-sql replays the C# DuckDB SQL; it only works with --engine duckdb".into());
     }
     Ok(out)
 }
@@ -335,8 +407,19 @@ fn cmd_run(args: RunArgs) -> Result<(), String> {
     let mut cross: BTreeMap<(String, Outcome), usize> = BTreeMap::new();
     let (mut regressions, mut improvements, mut csharp_matches, mut kept) = (0, 0, 0, 0);
 
+    let started = std::time::Instant::now();
+    let pg_exec;
+    let exec: &Executor = match args.engine {
+        Engine::DuckDb => &execute,
+        Engine::PgLite => {
+            let sqls: Vec<String> = records.iter().filter_map(|r| planned_sql(r, args.engine)).collect();
+            pg_exec = pglite_executor(sqls, &pg::Setup::default())?;
+            &pg_exec
+        }
+    };
+
     for rec in &records {
-        let res = run_record(rec, args.record_sql);
+        let res = run_record(rec, args.record_sql, args.engine, exec);
         let outcome = res.verdict.outcome;
         *totals.entry(outcome).or_default() += 1;
         *by_family.entry(rec.family.clone()).or_default().entry(outcome).or_default() += 1;
@@ -374,6 +457,7 @@ fn cmd_run(args: RunArgs) -> Result<(), String> {
         w.flush().map_err(|e| e.to_string())?;
     }
 
+    println!("\nengine: {:?}, {:.1}s", args.engine, started.elapsed().as_secs_f64());
     print_summary(records.len(), &totals, &by_family);
     let agree: usize = totals.iter().filter(|(o, _)| o.is_good()).map(|(_, n)| n).sum();
     println!("\nagree with Kusto (Match + KustoRejected-OurError): {agree}/{}", records.len());
@@ -469,10 +553,12 @@ fn cmd_one(args: &[String]) -> Result<(), String> {
     let mut kql = None;
     let mut id = None;
     let mut inputs = Vec::new();
+    let mut engine = Engine::default();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || it.next().cloned().ok_or_else(|| format!("{a} needs a value\n{USAGE}"));
         match a.as_str() {
+            "--engine" => engine = Engine::parse(&value()?)?,
             "--kql" => kql = Some(value()?),
             "--id" => id = Some(value()?),
             "--in" => inputs.push(PathBuf::from(value()?)),
@@ -488,8 +574,16 @@ fn cmd_one(args: &[String]) -> Result<(), String> {
         if hits.is_empty() {
             return Err(format!("no record with id {id}"));
         }
+        let pg_exec;
+        let exec: &Executor = match engine {
+            Engine::DuckDb => &execute,
+            Engine::PgLite => {
+                pg_exec = pglite_executor(hits.iter().filter_map(|r| planned_sql(r, engine)).collect(), &pg::Setup::default())?;
+                &pg_exec
+            }
+        };
         for rec in hits {
-            let res = run_record(rec, false);
+            let res = run_record(rec, false, engine, exec);
             print_detail(rec, &res);
             if let Some(d) = &res.duck {
                 if !matches!(res.verdict.outcome, Outcome::MismatchRows | Outcome::MismatchOrder | Outcome::MismatchColumns) {
@@ -501,12 +595,16 @@ fn cmd_one(args: &[String]) -> Result<(), String> {
     }
 
     let kql = kql.ok_or_else(|| USAGE.to_string())?;
-    let t = translate(&kql).map_err(|e| format!("translate error: {e}"))?;
+    let t = translate(&kql, engine.dialect()).map_err(|e| format!("translate error: {e}"))?;
     println!("SQL:\n{}\n", t.sql);
     let declared: Vec<String> = t.columns.iter().map(|c| format!("{}:{}", c.name, c.ty)).collect();
     println!("declared columns: [{}]", declared.join(", "));
     let classes: Vec<Class> = t.columns.iter().map(|c| Class::from_kql(c.ty)).collect();
-    let d = execute(&t.sql, &classes).map_err(|e| format!("execution error: {e}"))?;
+    let d = match engine {
+        Engine::DuckDb => execute(&t.sql, &classes),
+        Engine::PgLite => pglite_executor(vec![t.sql.clone()], &pg::Setup::default())?(&t.sql, &classes),
+    }
+    .map_err(|e| format!("execution error: {e}"))?;
     print_rows(&d);
     Ok(())
 }

@@ -1,0 +1,9 @@
+{
+  "name": "kql-oracle-pglite",
+  "private": true,
+  "type": "module",
+  "description": "PGlite (PostgreSQL 16 in WASM) runner for the kql-oracle differential harness.",
+  "dependencies": {
+    "@electric-sql/pglite": "0.2.17"
+  }
+}
