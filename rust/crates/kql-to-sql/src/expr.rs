@@ -753,6 +753,14 @@ impl Ctx<'_> {
                 let via_text = self.convert(text, b).sql;
                 let is_bool = format!("{} = {}", d.json_type(&x.sql), if d.kind() == crate::Dialect::DuckDb { "'boolean'" } else { "'boolean'" });
                 match b {
+                    // a JSON real converts to an integer by truncation (`tolong(dynamic(1.0))` is 1)
+                    b if b.is_integer() => format!(
+                        "CASE WHEN {is_bool} THEN CAST(CASE WHEN {0} = 'true' THEN 1 ELSE 0 END AS {1}) WHEN {2} IN ('double', 'number') THEN {3} ELSE {via_text} END",
+                        d.json_to_text(&x.sql),
+                        ty(b),
+                        d.json_type(&x.sql),
+                        d.try_cast(&format!("trunc({})", d.try_cast(&d.json_to_text(&x.sql), Real)), b)
+                    ),
                     b if b.is_numeric() => format!(
                         "CASE WHEN {is_bool} THEN CAST(CASE WHEN {} = 'true' THEN 1 ELSE 0 END AS {}) ELSE {via_text} END",
                         d.json_to_text(&x.sql),
