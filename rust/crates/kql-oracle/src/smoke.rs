@@ -76,7 +76,9 @@ pub fn cmd_smoke(args: &[String]) -> Result<(), String> {
         }
     }
     let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    conn.execute_batch("SET memory_limit = '3GB'; SET threads = 2;").map_err(|e| e.to_string())?;
     load_storm(&conn, Path::new(&csv))?;
+    let (mut slow, timeout) = (0, std::time::Duration::from_secs(20));
     let catalog = storm_catalog();
     let text = std::fs::read_to_string(&queries).map_err(|e| format!("{queries}: {e}"))?;
     let (mut ok, mut tr_err, mut ex_err) = (0, 0, 0);
@@ -94,7 +96,27 @@ pub fn cmd_smoke(args: &[String]) -> Result<(), String> {
                 }
             }
             Ok(t) => {
-                let r = conn.prepare(&t.sql).and_then(|mut s| s.query([]).map(|mut rows| while let Ok(Some(_)) = rows.next() {}));
+                // interrupt queries that run longer than `timeout`
+                let handle = conn.interrupt_handle();
+                let (tx, rx) = std::sync::mpsc::channel::<()>();
+                let watchdog = std::thread::spawn(move || {
+                    if rx.recv_timeout(timeout).is_err() {
+                        handle.interrupt();
+                        return true;
+                    }
+                    false
+                });
+                let r = conn.prepare(&t.sql).and_then(|mut s| {
+                    let mut rows = s.query([])?;
+                    while rows.next()?.is_some() {}
+                    Ok(())
+                });
+                let _ = tx.send(());
+                if watchdog.join().unwrap_or(false) {
+                    slow += 1;
+                    println!("SLOW (> {}s) {}\n  {kql}", timeout.as_secs(), v["file"]);
+                    continue;
+                }
                 match r {
                     Ok(()) => ok += 1,
                     Err(e) => {
@@ -109,7 +131,7 @@ pub fn cmd_smoke(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    println!("smoke: {} queries — ok {ok}, translate errors {tr_err}, invalid SQL {ex_err}", ok + tr_err + ex_err);
+    println!("smoke: {} queries — ok {ok}, translate errors {tr_err}, invalid SQL {ex_err}, timed out {slow}", ok + tr_err + ex_err + slow);
     if !tr_groups.is_empty() {
         println!("\ntranslate errors:");
         let mut g: Vec<_> = tr_groups.into_iter().collect();
