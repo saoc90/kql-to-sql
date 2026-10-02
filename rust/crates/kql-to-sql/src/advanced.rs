@@ -219,10 +219,55 @@ pub(crate) fn parse(ctx: &mut Ctx, rel: Rel, params: &[OpParam], expr: &Expr, pa
     Ok(rel.project(ctx, items, cols))
 }
 
-pub(crate) fn apply_advanced(_ctx: &mut Ctx, _rel: Rel, op: &Operator, _env: &Env) -> Result<Rel> {
-    err(format!("the '{}' operator is not supported yet", op.keyword()))
+pub(crate) fn apply_advanced(ctx: &mut Ctx, rel: Rel, op: &Operator, env: &Env) -> Result<Rel> {
+    use crate::{op_evaluate, op_search, op_series, op_subquery};
+    match op {
+        Operator::MakeSeries { params, aggs, on, from, to, step, by } => {
+            op_series::make_series(ctx, rel, params, aggs, on, from.as_ref(), to.as_ref(), step, by, env)
+        }
+        Operator::Scan { order_by, partition_by, declare, steps } => op_series::scan(ctx, rel, order_by, partition_by, declare, steps, env),
+        Operator::Search { params, tables, predicate } => {
+            if !tables.is_empty() {
+                return err("search: 'in (tables)' is only valid when search starts the query");
+            }
+            op_search::search(ctx, Some(rel), params, tables, predicate, env)
+        }
+        Operator::ParseKv { expr, columns, params } => op_search::parse_kv(ctx, rel, expr, columns, params, env),
+        Operator::MvApply { params, items, limit, context_id, body } => {
+            op_subquery::mv_apply(ctx, rel, params, items, limit.as_ref(), context_id.as_deref(), body, env)
+        }
+        Operator::Partition { params, by, body } => op_subquery::partition(ctx, rel, params, by, body, env),
+        Operator::TopNested(levels) => op_subquery::top_nested(ctx, rel, levels, env),
+        Operator::TopHitters { count, of, by } => op_subquery::top_hitters(ctx, rel, count, of, by.as_ref(), env),
+        Operator::SampleDistinct { count, of } => op_subquery::sample_distinct(ctx, rel, count, of, env),
+        Operator::Reduce { by, params } => op_subquery::reduce(ctx, rel, by, params, env),
+        Operator::Fork(branches) => op_subquery::fork(ctx, rel, branches, env),
+        Operator::Facet { by, with } => op_subquery::facet(ctx, rel, by, with.as_deref(), env),
+        Operator::Evaluate { params, name, args } => op_evaluate::evaluate(ctx, Some(rel), params, name, args, env),
+        Operator::Invoke { name, args } => {
+            // `T | invoke f(args)` calls f with T as its first (tabular) argument
+            let t = ctx.add_cte("invoke_input", rel, false);
+            let tmp = format!("__kql_invoke_{}", ctx.ctes.len());
+            let env2 = env.with(&tmp, crate::binder::Binding::Tabular(t));
+            let mut all = vec![ast::Arg::positional(Expr::Name(tmp))];
+            all.extend(args.iter().cloned());
+            ctx.tabular(&Expr::Call { name: name.clone(), args: all }, &env2)
+        }
+        Operator::Consume => {
+            let mut r = rel.passthrough(ctx);
+            r.sel.filters.push("false".into());
+            Ok(r)
+        }
+        other => err(format!("the '{}' operator is not supported yet", other.keyword())),
+    }
 }
 
-pub(crate) fn source_advanced(_ctx: &mut Ctx, op: &Operator, _env: &Env) -> Result<Rel> {
-    err(format!("the '{}' operator is not supported yet", op.keyword()))
+pub(crate) fn source_advanced(ctx: &mut Ctx, op: &Operator, env: &Env) -> Result<Rel> {
+    use crate::{op_evaluate, op_search};
+    match op {
+        Operator::Search { params, tables, predicate } => op_search::search(ctx, None, params, tables, predicate, env),
+        Operator::Evaluate { params, name, args } => op_evaluate::evaluate(ctx, None, params, name, args, env),
+        Operator::ExternalData { columns, uris, props } => op_evaluate::externaldata(ctx, columns, uris, props, env),
+        other => err(format!("the '{}' operator is not supported yet", other.keyword())),
+    }
 }

@@ -473,17 +473,6 @@ impl Ctx<'_> {
         let flags = if case_sensitive { "" } else { "(?i)" };
         let pg = self.d.kind() == crate::Dialect::Postgres;
         let (bl, br) = if pg { ("(^|[^[:alnum:]])", "([^[:alnum:]]|$)") } else { (BOUND_L, BOUND_R) };
-        let wrap = |core: String| -> String {
-            let mut re = String::new();
-            if term_start {
-                re.push_str(bl);
-            }
-            re.push_str(&core);
-            if term_end {
-                re.push_str(br);
-            }
-            re
-        };
         if let Some(lit) = needle.str_const() {
             if lit.is_empty() {
                 return "true".into();

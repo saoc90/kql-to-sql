@@ -15,12 +15,18 @@ pub mod datetime;
 mod dialect;
 mod expr;
 mod funcs;
+mod funcs_extra;
 mod join;
 mod names;
+mod op_evaluate;
+mod op_search;
+mod op_series;
+mod op_subquery;
 mod ops;
 mod regex;
 pub mod sql;
 mod types;
+mod window;
 
 pub use types::{common_type, widest};
 

@@ -813,6 +813,12 @@ impl Ctx<'_> {
                 Ok(t)
             }
             _ => {
+                if let Some(r) = crate::window::call(self, name, &a, scope) {
+                    return r;
+                }
+                if let Some(r) = crate::funcs_extra::call(self, name, &a, scope) {
+                    return r;
+                }
                 if crate::catalog_data::lookup(name, crate::catalog_data::FnKind::Scalar).is_some() {
                     err(format!("function '{name}' is not supported yet"))
                 } else {
