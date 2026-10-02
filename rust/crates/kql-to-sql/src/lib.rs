@@ -8,6 +8,7 @@ use std::fmt;
 mod advanced;
 mod aggs;
 mod binder;
+mod commands;
 #[allow(dead_code)]
 mod catalog_data;
 mod datefmt;
@@ -29,6 +30,7 @@ pub mod sql;
 mod types;
 mod window;
 
+pub use commands::{is_command, translate_command, CommandTranslation};
 pub use types::{common_type, widest};
 
 /// Kusto scalar types.
