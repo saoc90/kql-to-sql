@@ -9,7 +9,7 @@
 //! ```
 //!
 //! Every command takes `--engine duckdb|pglite` (default duckdb). `pglite` translates with
-//! `Dialect::Postgres` and executes in PGlite (PostgreSQL 16 / WASM) via `pglite/runner.mjs`.
+//! `Dialect::Postgres` and executes in PGlite (PostgreSQL as WASI, in-process via `pglite-oxide`).
 
 mod smoke;
 mod analyzer;
@@ -317,7 +317,7 @@ const USAGE: &str = "usage:
   kql-oracle sql \"<SQL>\"            (DuckDB only)
 
   --engine         duckdb (default) or pglite: translate with the Postgres dialect and run in
-                   PGlite (PostgreSQL 16 / WASM, needs Node and `npm install` in crates/kql-oracle/pglite)
+                   PGlite (PostgreSQL as WASI, in-process; no Node needed)
 
   --verbose        print details (KQL, our SQL, error/diff) for every non-Match
   --failures-only  print details only for regressions (C# Match, ours not)

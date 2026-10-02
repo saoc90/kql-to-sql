@@ -17,3 +17,6 @@ serde_json.workspace = true
 # `json` bundles DuckDB's JSON extension: the translator emits dynamic columns as JSON.
 duckdb = { workspace = true, features = ["json"] }
 unicode-normalization = "0.1"
+# PGlite (PostgreSQL as WASI) hosted in-process, for `--engine pglite`.
+pglite-oxide = "0.5.1"
+flate2 = "1"

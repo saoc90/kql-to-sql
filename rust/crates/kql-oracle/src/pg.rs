@@ -1,16 +1,17 @@
-//! PGlite engine: runs translated (Postgres-dialect) SQL in PGlite — PostgreSQL 16 compiled to
-//! WASM — through the Node.js runner `pglite/runner.mjs`, and converts its lossless text cells
+//! PGlite engine: runs translated (Postgres-dialect) SQL in PGlite — PostgreSQL compiled to
+//! WASI, hosted in-process by `pglite-oxide` (no Node.js) — and converts its lossless text cells
 //! into [`Value`]s using the translator's declared Kusto column types.
 //!
-//! Statements are executed in one batch (one Node process) because starting PGlite costs ~2 s.
+//! Statements are executed in one batch on one instance because starting PGlite costs ~1 s.
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::io::Read;
+use std::path::PathBuf;
+use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use pglite_oxide::{Pglite, QueryOptions, RowMode, TypeParser};
+use serde::Deserialize;
 use serde_json::Value as Json;
 
 use crate::compare::DuckResult;
@@ -52,13 +53,7 @@ pub struct PgColumn {
     pub type_oid: u32,
 }
 
-#[derive(Serialize)]
-struct BatchLine<'a> {
-    id: &'a str,
-    sql: &'a str,
-}
-
-/// Extra per-instance initialization for the runner.
+/// Extra per-instance initialization.
 #[derive(Default)]
 pub struct Setup {
     /// SQL run once before the batch (CREATE TABLE ...).
@@ -67,64 +62,105 @@ pub struct Setup {
     pub copies: Vec<(String, PathBuf)>,
 }
 
-fn pglite_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("pglite")
+/// Results are fetched through a cursor in chunks, so a huge result (e.g. a full StormEvents
+/// projection) never has to fit into one protocol message.
+const CHUNK: usize = 2000;
+
+/// One PGlite instance with the session settings and setup applied.
+struct Instance {
+    db: Pglite,
+    text: QueryOptions,
 }
 
-/// `$KQL_ORACLE_NODE`, else Node 22 at /opt/node22 when present, else `node` from PATH.
-fn node_binary() -> String {
-    if let Ok(n) = std::env::var("KQL_ORACLE_NODE") {
-        return n;
-    }
-    let opt = Path::new("/opt/node22/bin/node");
-    if opt.exists() {
-        opt.display().to_string()
-    } else {
-        "node".into()
-    }
-}
-
-/// Runs every `(id, sql)` statement in PGlite and returns the results keyed by id.
-pub fn run_batch(stmts: &[(String, String)], setup: &Setup) -> Result<HashMap<String, PgRaw>, String> {
-    let dir = pglite_dir();
-    let runner = dir.join("runner.mjs");
-    if !dir.join("node_modules/@electric-sql/pglite").exists() {
-        return Err(format!("PGlite is not installed: run `npm install` in {}", dir.display()));
-    }
-    let tmp = std::env::temp_dir().join(format!("kql-oracle-pglite-{}", std::process::id()));
-    fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    let batch = tmp.join("batch.jsonl");
-    let out = tmp.join("out.jsonl");
-    {
-        let mut w = std::io::BufWriter::new(fs::File::create(&batch).map_err(|e| e.to_string())?);
-        for (id, sql) in stmts {
-            let line = serde_json::to_string(&BatchLine { id, sql }).map_err(|e| e.to_string())?;
-            writeln!(w, "{line}").map_err(|e| e.to_string())?;
+impl Instance {
+    fn open(setup: &Setup, blobs: &[(String, Vec<u8>)]) -> Result<Instance, String> {
+        let mut db = Pglite::temporary().map_err(|e| format!("cannot start PGlite: {e}"))?;
+        db.exec("SET TIME ZONE 'UTC'; SET intervalstyle = 'postgres'; SET extra_float_digits = 1;", None)
+            .map_err(|e| e.to_string())?;
+        if let Some(sql) = &setup.sql {
+            db.exec(sql, None).map_err(|e| format!("setup: {e}"))?;
         }
-        w.flush().map_err(|e| e.to_string())?;
+        for (table, blob) in blobs {
+            let opts = QueryOptions { blob: Some(blob.clone()), ..QueryOptions::default() };
+            db.exec(&format!("COPY {table} FROM '/dev/blob' WITH (FORMAT csv, HEADER true)"), Some(&opts))
+                .map_err(|e| format!("COPY {table}: {e}"))?;
+        }
+        // Every cell stays PostgreSQL's own text output, so nothing is lossy (int8 beyond 2^53,
+        // NaN/Infinity, numeric, microsecond timestamps, intervals, jsonb); NULL stays null.
+        let mut text = QueryOptions { row_mode: Some(RowMode::Array), ..QueryOptions::default() };
+        let as_text: TypeParser = Arc::new(|s: &str, _| Json::String(s.to_string()));
+        for oid in 16..10000 {
+            text.parsers.insert(oid, as_text.clone());
+        }
+        Ok(Instance { db, text })
     }
-    let mut cmd = Command::new(node_binary());
-    cmd.arg(&runner).arg(&batch).arg(&out);
-    if let Some(sql) = &setup.sql {
-        let p = tmp.join("setup.sql");
-        fs::write(&p, sql).map_err(|e| e.to_string())?;
-        cmd.arg("--setup").arg(p);
+
+    /// Runs one statement inside BEGIN ... ROLLBACK so side effects do not leak into the next.
+    fn run(&mut self, id: &str, sql: &str) -> PgRaw {
+        let r = self.db.exec("BEGIN", None).map_err(|e| e.to_string()).and_then(|_| self.fetch(sql));
+        let _ = self.db.exec("ROLLBACK", None);
+        match r {
+            Ok((columns, rows)) => PgRaw { id: id.into(), columns, rows, error: None },
+            Err(e) => PgRaw { id: id.into(), columns: vec![], rows: vec![], error: Some(e) },
+        }
     }
+
+    fn fetch(&mut self, sql: &str) -> Result<(Vec<PgColumn>, Vec<Vec<Option<String>>>), String> {
+        self.db.exec(&format!("DECLARE kql_oracle_cursor NO SCROLL CURSOR FOR {sql}"), None).map_err(|e| e.to_string())?;
+        let mut columns = None;
+        let mut rows = Vec::new();
+        loop {
+            let res = self
+                .db
+                .query(&format!("FETCH FORWARD {CHUNK} FROM kql_oracle_cursor"), &[], Some(&self.text))
+                .map_err(|e| e.to_string())?;
+            columns.get_or_insert_with(|| {
+                res.fields.iter().map(|f| PgColumn { name: f.name.clone(), type_oid: f.data_type_id as u32 }).collect()
+            });
+            let n = res.rows.len();
+            for row in res.rows {
+                let Json::Array(cells) = row else { return Err("PGlite returned a non-array row".into()) };
+                rows.push(cells.into_iter().map(|c| c.as_str().map(str::to_string)).collect());
+            }
+            if n < CHUNK {
+                break;
+            }
+        }
+        Ok((columns.unwrap_or_default(), rows))
+    }
+}
+
+/// Runs every `(id, sql)` statement in one in-process PGlite instance (PGlite's WASI build
+/// through `pglite-oxide`, no JavaScript runtime) and returns the results keyed by id.
+pub fn run_batch(stmts: &[(String, String)], setup: &Setup) -> Result<HashMap<String, PgRaw>, String> {
+    let mut blobs = Vec::new();
     for (table, csv) in &setup.copies {
-        let abs = fs::canonicalize(csv).map_err(|e| format!("{}: {e}", csv.display()))?;
-        cmd.arg("--copy").arg(table).arg(abs);
+        let bytes = fs::read(csv).map_err(|e| format!("{}: {e}", csv.display()))?;
+        let bytes = if csv.extension().is_some_and(|e| e == "gz") {
+            let mut out = Vec::new();
+            flate2::read::GzDecoder::new(&bytes[..]).read_to_end(&mut out).map_err(|e| format!("{}: {e}", csv.display()))?;
+            out
+        } else {
+            bytes
+        };
+        blobs.push((table.clone(), bytes));
     }
-    let status = cmd.current_dir(&dir).status().map_err(|e| format!("cannot start node ({}): {e}", node_binary()))?;
-    if !status.success() {
-        return Err(format!("PGlite runner failed: {status}"));
-    }
-    let text = fs::read_to_string(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-    let _ = fs::remove_dir_all(&tmp);
+    let started = std::time::Instant::now();
+    let mut inst = Instance::open(setup, &blobs)?;
     let mut map = HashMap::new();
-    for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        let raw: PgRaw = serde_json::from_str(line).map_err(|e| format!("runner output: {e}"))?;
-        map.insert(raw.id.clone(), raw);
+    for (i, (id, sql)) in stmts.iter().enumerate() {
+        let raw = inst.run(id, sql);
+        // an error can (rarely) leave the instance unusable; replace it
+        if raw.error.is_some() && inst.db.exec("SELECT 1", None).is_err() {
+            inst = Instance::open(setup, &blobs)?;
+        }
+        map.insert(id.clone(), raw);
+        if (i + 1) % 250 == 0 {
+            eprintln!("pglite: {}/{}", i + 1, stmts.len());
+        }
     }
+    let _ = inst.db.close();
+    eprintln!("pglite: {} statements in {:.1}s", stmts.len(), started.elapsed().as_secs_f64());
     Ok(map)
 }
 

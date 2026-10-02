@@ -57,10 +57,10 @@ cargo build -p kql-oracle --release
 ```
 
 Every command takes `--engine pglite` to score the **Postgres dialect** instead: the SQL runs in
-PGlite (PostgreSQL 16 / WASM) through `crates/kql-oracle/pglite/runner.mjs` (one Node process per
-batch, one instance, each statement in `BEGIN … ROLLBACK` via a chunked cursor; cells come back
-as PG text and are converted with the declared column types). One-time setup:
-`npm install --prefix crates/kql-oracle/pglite` (Node >= 18; `$KQL_ORACLE_NODE` overrides the binary).
+PGlite (PostgreSQL 17 compiled to WASI), hosted in-process by the `pglite-oxide` crate: no
+Node.js or other JavaScript runtime is needed. One instance per batch, each statement in
+`BEGIN … ROLLBACK` via a chunked cursor; cells come back as PG text and are converted with the
+declared column types.
 
 `run` prints outcome counts and the comparison with the C# implementation's recorded verdicts.
 A change must not reduce `Match`, and must not add `SqlExecError` (invalid SQL).

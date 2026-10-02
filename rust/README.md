@@ -73,8 +73,7 @@ cargo run -p kql-cli -- --dialect postgres --schema schema.json < query.kql
 ```sh
 cargo test --workspace --release
 cargo run -p kql-oracle --release -- run                    # Kusto oracle on DuckDB
-npm install --prefix crates/kql-oracle/pglite                # once
-cargo run -p kql-oracle --release -- run --engine pglite    # Kusto oracle on PostgreSQL
+cargo run -p kql-oracle --release -- run --engine pglite    # Kusto oracle on PostgreSQL (in-process PGlite, no Node)
 cargo run -p kql-oracle --release -- one --kql "<KQL>"       # SQL + result for one query
 cargo run -p kql-oracle --release -- smoke                  # C# suite's StormEvents queries on real data
 ```
