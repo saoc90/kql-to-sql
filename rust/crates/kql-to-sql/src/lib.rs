@@ -24,6 +24,7 @@ mod op_series;
 mod op_subquery;
 mod ops;
 mod regex;
+mod series_funcs;
 pub mod sql;
 mod types;
 mod window;
