@@ -53,7 +53,14 @@ cargo build -p kql-oracle --release
 ./target/release/kql-oracle one --kql "<KQL>"      # SQL + DuckDB result
 ./target/release/kql-oracle one --id <source/Id>   # replay one corpus record with its Kusto result
 ./target/release/kql-oracle sql "<SQL>"            # probe DuckDB directly
+./target/release/kql-oracle smoke                  # StormEvents queries from the C# tests, real data
 ```
+
+Every command takes `--engine pglite` to score the **Postgres dialect** instead: the SQL runs in
+PGlite (PostgreSQL 16 / WASM) through `crates/kql-oracle/pglite/runner.mjs` (one Node process per
+batch, one instance, each statement in `BEGIN … ROLLBACK` via a chunked cursor; cells come back
+as PG text and are converted with the declared column types). One-time setup:
+`npm install --prefix crates/kql-oracle/pglite` (Node >= 18; `$KQL_ORACLE_NODE` overrides the binary).
 
 `run` prints outcome counts and the comparison with the C# implementation's recorded verdicts.
 A change must not reduce `Match`, and must not add `SqlExecError` (invalid SQL).
