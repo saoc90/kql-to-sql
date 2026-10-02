@@ -76,13 +76,15 @@ pub(crate) fn source(ctx: &mut Ctx, op: &Operator, env: &Env) -> Result<Rel> {
 // ---------------------------------------------------------------------- basic operators
 
 fn where_(ctx: &mut Ctx, rel: Rel, e: &Expr, env: &Env) -> Result<Rel> {
-    let mut rel = rel.passthrough(ctx);
+    let rel = rel.passthrough(ctx);
     let order = rel.order_sql();
+    let hoists = crate::window::begin(ctx);
     let cond = {
         let mut scope = Scope::rows(&rel.cols);
         scope.order = &order;
         ctx.expr(e, &scope, env)?
     };
+    let mut rel = crate::window::finish(ctx, hoists, rel);
     if cond.agg {
         return err("aggregate functions are not allowed in 'where'");
     }
@@ -115,6 +117,7 @@ pub(crate) fn extend(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env, _s
     let mut cols = rel.cols.clone();
     let mut defined: Vec<(String, String, KqlType)> = Vec::new();
     let mut defaults = DefaultNames::default();
+    let hoists = crate::window::begin(ctx);
     for ne in items {
         let t = {
             let mut scope = Scope::rows(&rel.cols);
@@ -148,6 +151,7 @@ pub(crate) fn extend(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env, _s
             }
         }
     }
+    let rel = crate::window::finish(ctx, hoists, rel);
     Ok(rel.project(ctx, out_items, cols))
 }
 
@@ -169,6 +173,7 @@ fn project(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env) -> Result<Re
     let mut names = UniqueNames::default();
     let mut defaults = DefaultNames::default();
     let mut defined: Vec<(String, String, KqlType)> = Vec::new();
+    let hoists = crate::window::begin(ctx);
     for ne in items {
         let t = {
             let mut scope = Scope::rows(&rel.cols);
@@ -197,6 +202,7 @@ fn project(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env) -> Result<Re
         cols.push(Column { name: name.clone(), ty: t.ty });
         out_items.push(Item { sql, alias: name });
     }
+    let rel = crate::window::finish(ctx, hoists, rel);
     Ok(rel.project(ctx, out_items, cols))
 }
 

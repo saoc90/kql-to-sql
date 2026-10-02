@@ -795,44 +795,6 @@ impl Ctx<'_> {
                 };
                 Ok(mk(sql, Dynamic))
             }
-            // ---------------------------------------------------------- window functions
-            "row_number" => {
-                need(0, 2)?;
-                let over = over_clause(scope);
-                let start = if n >= 1 { d.cast(&a[0].sql, Long) } else { "1".into() };
-                if n == 2 {
-                    return err("row_number() with a restart condition is not supported yet");
-                }
-                let mut t = mk(format!("(ROW_NUMBER() OVER ({over}) + {start} - 1)"), Long);
-                t.window = true;
-                Ok(t)
-            }
-            "prev" | "next" => {
-                need(1, 3)?;
-                let f = if name == "prev" { "LAG" } else { "LEAD" };
-                let off = if n >= 2 { d.cast(&a[1].sql, Long) } else { "1".into() };
-                let x = &a[0];
-                if n == 3 && a[2].konst.is_none() {
-                    return err(format!("{name}(): the default value must be a constant"));
-                }
-                let def = if n == 3 { self.convert(a[2].clone(), x.ty).sql } else if x.ty == String { "''".into() } else { "NULL".into() };
-                let mut t = mk(format!("{f}({}, CAST({off} AS INTEGER), {def}) OVER ({})", x.sql, over_clause(scope)), x.ty);
-                t.window = true;
-                Ok(t)
-            }
-            "row_cumsum" => {
-                need(1, 2)?;
-                if n == 2 {
-                    return err("row_cumsum() with a restart condition is not supported yet");
-                }
-                let x = &a[0];
-                let over = over_clause(scope);
-                let frame = if over.is_empty() { "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW".to_string() } else { format!("{over} ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW") };
-                let ty = if x.ty == Int { Long } else { x.ty };
-                let mut t = mk(d.cast(&format!("SUM({}) OVER ({frame})", x.sql), ty), ty);
-                t.window = true;
-                Ok(t)
-            }
             _ => {
                 if let Some(r) = crate::window::call(self, name, &a, scope) {
                     return r;
@@ -984,14 +946,6 @@ impl Ctx<'_> {
                 )
             }
         }
-    }
-}
-
-fn over_clause(scope: &Scope) -> String {
-    if scope.order.is_empty() {
-        String::new()
-    } else {
-        format!("ORDER BY {}", scope.order.join(", "))
     }
 }
 
