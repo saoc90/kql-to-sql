@@ -1,43 +1,56 @@
-// KQL-to-SQL WASM bridge via .NET [JSExport]
-// Bootstraps the Mono WASM runtime and exposes translation functions.
+// KQL-to-SQL bridge backed by the Rust translator compiled to WebAssembly (crates/kql-wasm).
+// The translator is type-directed, so every call passes the current table schemas of the
+// selected backend (read from information_schema by the backend interop module).
 
-let exports = null;
+import init, { translate, validate } from '../kql-wasm/kql_wasm.js';
+
+let ready = false;
 let initPromise = null;
 
 export async function initialize() {
-    if (exports) return;
+    if (ready) return;
     if (initPromise) return initPromise;
-
     initPromise = (async () => {
         try {
-            // dotnet.js is produced by `dotnet publish` and placed in _framework/
-            const { dotnet } = await import('../_framework/dotnet.js');
-            const runtime = await dotnet.create();
-            exports = await runtime.getAssemblyExports('KqlWasmBridge');
-            console.log('[KqlBridge] .NET WASM runtime ready');
+            await init();
+            ready = true;
+            console.log('[KqlBridge] Rust WASM translator ready');
         } catch (err) {
-            console.error('[KqlBridge] Failed to initialize .NET WASM:', err);
+            console.error('[KqlBridge] Failed to initialize the WASM translator:', err);
+            initPromise = null;
             throw err;
         }
     })();
-
     return initPromise;
 }
 
-export function translateKqlToSql(kql, dialect) {
-    if (!exports) throw new Error('KqlBridge not initialized');
-    const raw = exports.KqlWasmBridge.KqlBridge.TranslateKqlToSql(kql, dialect);
-    return JSON.parse(raw);
+// { Table: [{ name, type }] } where type is the engine's SQL type (preferred) or a Kusto type.
+async function schemaFor(dialect) {
+    const interop = dialect === 'pglite' ? globalThis.PGliteInterop : globalThis.DuckDbInterop;
+    if (!interop?.getDatabaseSchema) return {};
+    const schema = await interop.getDatabaseSchema();
+    const out = {};
+    for (const t of schema?.database?.tables ?? []) {
+        out[t.name] = t.columns.map(c => ({ name: c.name, type: c.sqlType || c.type }));
+    }
+    return out;
 }
 
+/** Translates KQL to SQL: { success, sql, error, columns, render }. */
+export async function translateKqlToSql(kql, dialect) {
+    if (!ready) throw new Error('KqlBridge not initialized');
+    const schema = await schemaFor(dialect);
+    return JSON.parse(translate(kql, dialect, JSON.stringify(schema)));
+}
+
+/** Checks KQL syntax: { success, valid, errors: [{ message, start, length }] }. */
 export function validateKql(kql) {
-    if (!exports) throw new Error('KqlBridge not initialized');
-    const raw = exports.KqlWasmBridge.KqlBridge.ValidateKql(kql);
-    return JSON.parse(raw);
+    if (!ready) throw new Error('KqlBridge not initialized');
+    return JSON.parse(validate(kql));
 }
 
 export function isReady() {
-    return exports !== null;
+    return ready;
 }
 
 // Expose on globalThis for non-module scripts

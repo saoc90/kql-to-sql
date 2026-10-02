@@ -191,6 +191,7 @@ impl std::error::Error for Error {}
 /// Every table the query references must be described in `catalog`, because translation is
 /// type-directed (integer vs. real division, datetime arithmetic, dynamic access, ...).
 pub fn translate(kql: &str, catalog: &Catalog, dialect: Dialect) -> Result<Translation> {
+    let _quoting = sql::quoting_for(dialect);
     let query = kql_parser::parse_query(kql)?;
     let d = dialect::get(dialect);
     let mut ctx = binder::Ctx::new(d, catalog);

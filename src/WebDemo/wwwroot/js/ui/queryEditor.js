@@ -141,7 +141,7 @@ async function convertToSql() {
     }
 
     hideAllAlerts();
-    const result = globalThis.KqlBridge.translateKqlToSql(kql, selectedBackend);
+    const result = await globalThis.KqlBridge.translateKqlToSql(kql, selectedBackend);
 
     if (result.success) {
         convertedSql = result.sql;
@@ -251,7 +251,7 @@ async function run(cursorOnly) {
                 showAlert('error-alert', 'KQL bridge is not ready yet. Please wait.', 'warning');
                 return;
             }
-            const result = globalThis.KqlBridge.translateKqlToSql(query, selectedBackend);
+            const result = await globalThis.KqlBridge.translateKqlToSql(query, selectedBackend);
             if (!result.success) {
                 showAlert('error-alert', `KQL to SQL conversion failed: ${result.error}`, 'danger');
                 return;

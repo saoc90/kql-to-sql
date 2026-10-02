@@ -1,0 +1,68 @@
+name: Rust
+
+on:
+  push:
+    branches: [ main, rust-rewrite ]
+    paths: [ 'rust/**', 'fuzzing/verdicts3/**', 'src/WebDemo/wwwroot/StormEvents.csv.gz', '.github/workflows/rust.yml' ]
+  pull_request:
+    paths: [ 'rust/**', 'fuzzing/verdicts3/**', '.github/workflows/rust.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: rust
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Unit and integration tests
+        run: cargo test --workspace --release
+
+      # The oracle replays ~1,660 queries whose results were recorded on a real Kusto engine
+      # (fuzzing/verdicts3) and compares them with what the translated SQL returns.
+      # The gates fail the build on any regression.
+      - name: Kusto oracle (DuckDB)
+        run: cargo run -p kql-oracle --release -- run --min-match 1420 --max-sql-errors 1
+
+      - name: Kusto oracle (PostgreSQL via PGlite)
+        run: |
+          npm ci --prefix crates/kql-oracle/pglite || npm install --prefix crates/kql-oracle/pglite
+          cargo run -p kql-oracle --release -- run --engine pglite --min-match 1200
+
+      - name: StormEvents smoke test
+        run: cargo run -p kql-oracle --release -- smoke
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Install wasm-bindgen CLI
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          cargo install wasm-bindgen-cli --version "$version" --locked
+      - name: Build
+        run: scripts/build-wasm.sh "$RUNNER_TEMP/kql-wasm"

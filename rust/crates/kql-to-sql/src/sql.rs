@@ -140,9 +140,35 @@ const RESERVED: &[&str] = &[
     "time", "timestamp", "date", "position", "count", "sample", "lambda", "asof", "positional", "by", "key",
 ];
 
-/// Quotes an identifier unless it is a plain lowercase-safe name.
+thread_local! {
+    /// Set while translating for PostgreSQL, which folds unquoted identifiers to lower case:
+    /// names with upper-case letters must then be quoted to keep their case.
+    static PRESERVE_CASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Sets identifier quoting for `dialect` until the guard is dropped.
+pub(crate) fn quoting_for(dialect: crate::Dialect) -> impl Drop {
+    struct Guard(bool);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            PRESERVE_CASE.with(|c| c.set(self.0));
+        }
+    }
+    let prev = PRESERVE_CASE.with(|c| c.replace(dialect == crate::Dialect::Postgres));
+    Guard(prev)
+}
+
+/// Quotes an identifier the way the translator does for `dialect`.
+pub fn quote_ident_for(name: &str, dialect: crate::Dialect) -> String {
+    let _g = quoting_for(dialect);
+    quote_ident(name)
+}
+
+/// Quotes an identifier unless it is a plain name (for PostgreSQL also: lower case).
 pub fn quote_ident(name: &str) -> String {
+    let preserve_case = PRESERVE_CASE.with(|c| c.get());
     let simple = !name.is_empty()
+        && !(preserve_case && name.chars().any(|c| c.is_ascii_uppercase()))
         && name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && !RESERVED.contains(&name.to_ascii_lowercase().as_str());

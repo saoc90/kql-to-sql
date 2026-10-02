@@ -436,7 +436,9 @@ fn datatable(ctx: &mut Ctx, columns: &[ast::ColumnDecl], values: &[Expr], env: &
             }
             let t = ctx.expr(v, &Scope::empty(), env)?;
             let t = coerce_value(ctx, t, c.ty)?;
-            row.push(ctx.d.cast(&t.sql, c.ty));
+            // one explicit cast pins the VALUES column type (no double casts for typed literals)
+            let already = t.ty == c.ty && t.sql.starts_with("CAST(") && t.sql.ends_with(&format!(" AS {})", ctx.d.sql_type(c.ty)));
+            row.push(if already { t.sql } else { ctx.d.cast(&t.sql, c.ty) });
         }
         rows.push(row);
     }

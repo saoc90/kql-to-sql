@@ -19,26 +19,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      # 1. Rust toolchain for the browser build of the translator (rust/crates/kql-wasm)
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
+          targets: wasm32-unknown-unknown
 
-      # 0. Install the wasm-tools workload so the publish relinks/optimizes the native runtime
-      #    (halves dotnet.native.wasm: ~2.9 MB -> ~1.5 MB). The relinked runtime uses WASM SIMD,
-      #    which needs a modern browser (iOS Safari 16.4+, recent Chrome/Firefox) — fine for current
-      #    targets. (The earlier "Engine loading…" hang was NOT this — it was a never-committed
-      #    chartRenderer.js asset that 404'd and broke the JS module chain.)
-      - name: Install wasm-tools workload
-        run: dotnet workload install wasm-tools
+      - name: Install wasm-bindgen CLI (must match the wasm-bindgen version in rust/Cargo.lock)
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' rust/Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          cargo install wasm-bindgen-cli --version "$version" --locked
 
-      # 1. Publish the WASM bridge (produces _framework/ with dotnet.js + WASM)
-      - name: Publish KqlWasmBridge
-        run: dotnet publish src/KqlWasmBridge/KqlWasmBridge.csproj -c Release -o build-wasm
-
-      # 2. Copy _framework into the static site
-      - name: Copy _framework into WebDemo
-        run: cp -r build-wasm/wwwroot/_framework src/WebDemo/wwwroot/_framework
+      # 2. Build the WASM translator into the static site (src/WebDemo/wwwroot/kql-wasm/)
+      - name: Build kql-wasm
+        run: rust/scripts/build-wasm.sh
 
       # 3. Fix base href for GitHub Pages
       - name: Fix base href for GitHub Pages

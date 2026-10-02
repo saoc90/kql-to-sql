@@ -156,7 +156,9 @@ fn row_number(ctx: &mut Ctx, a: &[TExpr], scope: &Scope) -> Result<TExpr> {
         Some(r) => restart_group(ctx, r, scope)?,
         None => None,
     };
-    Ok(win(format!("(ROW_NUMBER() OVER ({}) + {start} - 1)", over(scope, group.as_deref())), KqlType::Long, &parts))
+    let rn = format!("ROW_NUMBER() OVER ({})", over(scope, group.as_deref()));
+    let sql = if start == "1" { rn } else { format!("({rn} + {start} - 1)") };
+    Ok(win(sql, KqlType::Long, &parts))
 }
 
 fn prev_next(ctx: &mut Ctx, name: &str, a: &[TExpr], scope: &Scope) -> Result<TExpr> {

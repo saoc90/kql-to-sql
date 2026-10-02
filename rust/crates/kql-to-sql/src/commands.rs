@@ -39,6 +39,7 @@ fn skip_comments(mut t: &str) -> &str {
 
 /// Translates a management command.
 pub fn translate_command(text: &str, catalog: &Catalog, dialect: Dialect) -> Result<CommandTranslation> {
+    let _quoting = crate::sql::quoting_for(dialect);
     let tokens = tokenize(text).map_err(Error::from)?;
     let mut c = Cmd { src: text, toks: tokens, pos: 0, catalog, dialect };
     c.command()

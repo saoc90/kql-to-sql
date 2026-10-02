@@ -68,7 +68,7 @@ pub fn load_storm(conn: &Connection, csv: &Path) -> Result<(), String> {
 /// `CREATE TABLE` for StormEvents in PostgreSQL, with identifiers quoted exactly the way the
 /// translator refers to them (unquoted names fold to lower case on both sides).
 pub fn pg_storm_ddl() -> String {
-    use kql_to_sql::sql::quote_ident;
+    let quote_ident = |n: &str| kql_to_sql::sql::quote_ident_for(n, kql_to_sql::Dialect::Postgres);
     let cat = storm_catalog();
     let (name, cols) = cat.table("StormEvents").unwrap();
     let defs: Vec<String> = cols
@@ -158,7 +158,7 @@ pub fn cmd_smoke(args: &[String]) -> Result<(), String> {
                 .collect();
             let setup = pg::Setup {
                 sql: Some(pg_storm_ddl()),
-                copies: vec![(kql_to_sql::sql::quote_ident("StormEvents"), csv.clone().into())],
+                copies: vec![(kql_to_sql::sql::quote_ident_for("StormEvents", kql_to_sql::Dialect::Postgres), csv.clone().into())],
             };
             let mut raw = pg::run_batch(&stmts, &setup)?;
             (0..items.len())
