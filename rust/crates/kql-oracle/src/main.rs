@@ -141,7 +141,7 @@ fn run_record(rec: &Record, use_record_sql: bool) -> RunResult {
 
     let translated = if use_record_sql {
         // Harness self-check: replay the C# translator's SQL (no declared schema).
-        rec.sql.clone().map(|sql| kql_to_sql::Translation { sql, columns: Vec::new() }).ok_or_else(|| "record has no Sql".to_string())
+        rec.sql.clone().map(|sql| kql_to_sql::Translation { sql, columns: Vec::new(), render: None }).ok_or_else(|| "record has no Sql".to_string())
     } else {
         translate(&rec.kql)
     };
@@ -383,7 +383,7 @@ fn cmd_run(args: RunArgs) -> Result<(), String> {
     println!(
         "\nvs C#: kept {kept}/{csharp_matches} C# matches, regressions {regressions}, improvements {improvements}"
     );
-    let count = |o: Outcome| totals.iter().filter(|(x, _)| *x == o).map(|(_, n)| *n).sum::<usize>();
+    let count = |o: Outcome| totals.iter().filter(|(x, _)| **x == o).map(|(_, n)| *n).sum::<usize>();
     let (matches, sql_errors) = (count(Outcome::Match), count(Outcome::SqlExecError));
     if let Some(min) = args.min_match {
         if matches < min {

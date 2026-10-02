@@ -6,7 +6,7 @@
 //! than a full-fidelity syntax tree.
 
 pub mod ast;
-mod lexer;
+pub mod lexer;
 mod parser;
 
 use std::fmt;
