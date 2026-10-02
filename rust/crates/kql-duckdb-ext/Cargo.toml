@@ -1,0 +1,28 @@
+# This crate is deliberately NOT a member of the main `rust/` workspace (see `exclude` there):
+# it needs `duckdb` with the `loadable-extension` feature, which replaces libduckdb-sys's linked
+# C API with function pointers that the host DuckDB fills in at LOAD time. Cargo unifies features
+# across a workspace, so sharing one with `kql-oracle` (which needs `bundled`) would break one of
+# the two. It therefore has its own (empty) workspace and its own Cargo.lock.
+[workspace]
+
+[package]
+name = "kql-duckdb-ext"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/saoc90/kql-to-sql"
+publish = false
+description = "DuckDB loadable extension `kql`: KQL -> SQL translation and execution inside DuckDB."
+
+[lib]
+name = "kql"
+crate-type = ["cdylib"]
+
+[dependencies]
+kql-to-sql = { path = "../kql-to-sql" }
+duckdb = { version = "=1.10506.0", default-features = false, features = ["vtab-loadable", "loadable-extension", "vscalar"] }
+duckdb-loadable-macros = "=1.10506.0"
+
+[profile.release]
+lto = true
+strip = true

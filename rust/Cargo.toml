@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+# Built separately (own workspace + Cargo.lock): duckdb's `loadable-extension` feature conflicts
+# with the `bundled` duckdb used by kql-oracle under Cargo's feature unification.
+exclude = ["crates/kql-duckdb-ext"]
 
 [workspace.package]
 version = "0.1.0"

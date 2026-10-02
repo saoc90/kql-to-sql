@@ -1868,6 +1868,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kql-duckdb-ext-test"
+version = "0.1.0"
+dependencies = [
+ "duckdb",
+]
+
+[[package]]
 name = "kql-oracle"
 version = "0.1.0"
 dependencies = [
