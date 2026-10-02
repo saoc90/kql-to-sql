@@ -1,5 +1,29 @@
 # Agent Instructions
 
+## Commits and pull requests
+
+- Never mention AI assistants or tools (Claude, Claude Code, Anthropic, ...) in commit messages, PR titles, PR descriptions, or review comments.
+- Do not add `Co-Authored-By`, `Claude-Session`, "Generated with ..." or similar attribution lines.
+- Commit as the repository owner's configured git identity.
+
+## Rust translator (rust/) — primary implementation
+
+- Read `rust/DESIGN.md` first: structured `Select`/`Rel` model (fit-or-wrap, never inspect SQL text),
+  typed `TExpr` with atomic SQL, value representation (timespan = ticks, dynamic = JSON, strings never NULL),
+  and engine-specific SQL only through `dialect::SqlDialect` / `match ctx.d.kind()`.
+- The test that matters is the Kusto oracle: `cd rust && cargo run -p kql-oracle --release -- run`
+  (and `--engine pglite` for PostgreSQL). A change must not reduce `Match` or add `SqlExecError`;
+  CI enforces this with `--min-match` / `--max-sql-errors`. Use `one --kql "<KQL>"` / `one --id <Id>` to
+  triage and `sql "<SQL>"` to probe DuckDB behaviour.
+- Kusto semantics come from the oracle and Kusto.Language (github.com/microsoft/Kusto-Query-Language),
+  not from guesses: check recorded Kusto results before changing behaviour.
+- New operators/functions get a hook in the per-family modules (`op_*.rs`, `funcs_extra.rs`, `window.rs`,
+  `series_funcs.rs`) rather than growing `funcs.rs`/`ops.rs`.
+
+---
+
+## Legacy C# implementation (src/, tests/)
+
 - Track operator coverage using `KqlOperatorsChecklist.md` when adding features.
 - For each supported operator, derive unit tests from the official Kusto documentation examples and run them against the StormEvents dataset.
 - The project uses the C# Kusto AST parser which is already included; use it for parsing KQL before translation.

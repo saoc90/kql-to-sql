@@ -227,36 +227,20 @@ export async function getDatabaseSchema() {
     try {
         const c = await db.connect();
         
-        // Get list of all tables
-        const tablesResult = await c.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'");
-        const tables = tablesResult.toArray();
-        
-        const schemaTables = [];
-        
-        // For each table, get its columns
-        for (const table of tables) {
-            const tableName = table.table_name;
-            const columnsResult = await c.query(`
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_schema = 'main' AND table_name = '${tableName}'
-                ORDER BY ordinal_position
-            `);
-            const columns = columnsResult.toArray();
-            
-            // Map DuckDB types to Kusto types
-            const schemaColumns = columns.map(col => ({
-                name: col.column_name,
-                type: mapDuckDbTypeToKustoType(col.data_type)
-            }));
-            
-            schemaTables.push({
-                name: tableName,
-                entityType: "Table",
-                columns: schemaColumns
+        // All columns of all tables in one query (no string-built SQL)
+        const colsResult = await c.query(
+            "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'main' ORDER BY table_name, ordinal_position");
+        const byTable = new Map();
+        for (const row of colsResult.toArray()) {
+            if (!byTable.has(row.table_name)) byTable.set(row.table_name, []);
+            byTable.get(row.table_name).push({
+                name: row.column_name,
+                type: mapDuckDbTypeToKustoType(row.data_type),
+                sqlType: row.data_type
             });
         }
-        
+        const schemaTables = [...byTable].map(([name, columns]) => ({ name, entityType: "Table", columns }));
+
         c.close();
         
         // Create the schema object in the format expected by Monaco Kusto
@@ -406,7 +390,21 @@ async function doInit() {
 
             await db.registerFileBuffer('StormEvents.csv', decompressedData);
             const conn = await db.connect();
-            await conn.query("CREATE OR REPLACE TABLE StormEvents AS SELECT * FROM read_csv_auto('StormEvents.csv'); ");
+            // Kusto's StormEvents schema (StormSummary is dynamic -> JSON). JSON needs DuckDB's
+            // json extension, which DuckDB-WASM fetches on demand; without it, keep the column as text.
+            const columns = (summaryType) => `{
+                'StartTime': 'TIMESTAMP', 'EndTime': 'TIMESTAMP', 'EpisodeId': 'INTEGER', 'EventId': 'INTEGER',
+                'State': 'VARCHAR', 'EventType': 'VARCHAR', 'InjuriesDirect': 'INTEGER', 'InjuriesIndirect': 'INTEGER',
+                'DeathsDirect': 'INTEGER', 'DeathsIndirect': 'INTEGER', 'DamageProperty': 'INTEGER', 'DamageCrops': 'INTEGER',
+                'Source': 'VARCHAR', 'BeginLocation': 'VARCHAR', 'EndLocation': 'VARCHAR', 'BeginLat': 'DOUBLE', 'BeginLon': 'DOUBLE',
+                'EndLat': 'DOUBLE', 'EndLon': 'DOUBLE', 'EpisodeNarrative': 'VARCHAR', 'EventNarrative': 'VARCHAR', 'StormSummary': '${summaryType}'}`;
+            try {
+                await conn.query("LOAD json");
+                await conn.query(`CREATE OR REPLACE TABLE StormEvents AS SELECT * FROM read_csv('StormEvents.csv', header = true, columns = ${columns('JSON')})`);
+            } catch (jsonErr) {
+                console.warn('⚠️ JSON extension unavailable; StormSummary is loaded as text:', jsonErr.message);
+                await conn.query(`CREATE OR REPLACE TABLE StormEvents AS SELECT * FROM read_csv('StormEvents.csv', header = true, columns = ${columns('VARCHAR')})`);
+            }
             await conn.close();
             console.log('✅ StormEvents sample data loaded successfully');
         } catch (error) {

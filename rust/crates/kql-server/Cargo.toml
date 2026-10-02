@@ -1,0 +1,31 @@
+[package]
+name = "kql-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Kusto-compatible HTTP API (v1/v2 REST) over DuckDB, using the kql-to-sql translator."
+
+[[bin]]
+name = "kql-server"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+kql-to-sql.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# `json` bundles DuckDB's JSON extension: the translator emits dynamic columns as JSON.
+# Same feature set as kql-oracle, so the bundled DuckDB build is shared.
+duckdb = { workspace = true, features = ["json"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tower-http = { version = "0.6", features = ["cors"] }
+clap = { version = "4", features = ["derive", "env"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

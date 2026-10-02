@@ -1,0 +1,15 @@
+[package]
+name = "kql-duckdb-ext-test"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Load test for the `kql` DuckDB extension (crates/kql-duckdb-ext): LOADs the built file into the bundled DuckDB."
+
+# The extension itself lives outside this workspace (crates/kql-duckdb-ext, see its Cargo.toml);
+# this crate only hosts its integration test, run by `crates/kql-duckdb-ext/build.sh --test`.
+
+[dependencies]
+
+[dev-dependencies]
+duckdb = { workspace = true, features = ["json"] }

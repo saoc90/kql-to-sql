@@ -22,8 +22,15 @@ async function createPg(dataDir) {
     return inst;
 }
 
-async function init() {
-    if (pg) return;
+let initPromise = null;
+
+// Initializes once, even when called concurrently (schema lookup and the first query race).
+function init() {
+    if (!initPromise) initPromise = initOnce().catch(e => { initPromise = null; throw e; });
+    return initPromise;
+}
+
+async function initOnce() {
     console.log('🚀 Initializing PGlite (Postgres WASM)...');
     try {
         // Persist to IndexedDB (creates db if missing)
@@ -34,9 +41,9 @@ async function init() {
         console.warn('⚠️ PGlite IndexedDB store failed to open, falling back to in-memory:', e);
         pg = await createPg('memory://');
     }
+    await ensureStormEventsLoaded();
     window.pg = pg;
     console.log('✅ PGlite ready');
-    await ensureStormEventsLoaded();
 }
 
 // Simple type mapping to Kusto types
@@ -83,43 +90,10 @@ async function decompressGzip(compressedStream) {
 }
 
 // Simple CSV header splitter that respects quotes
-function splitCsvHeader(line) {
-    const cols = [];
-    let cur = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') {
-            // toggle unless escaped
-            if (inQuotes && line[i + 1] === '"') { // escaped quote
-                cur += '"';
-                i++; // skip next
-            } else {
-                inQuotes = !inQuotes;
-            }
-        } else if (ch === ',' && !inQuotes) {
-            cols.push(cur);
-            cur = '';
-        } else {
-            cur += ch;
-        }
-    }
-    cols.push(cur);
-    return cols.map(c => c.trim());
-}
-
-function sanitizeIdentifier(name) {
-    return name
-        .replace(/"/g, '')
-        .replace(/[^A-Za-z0-9_]/g, '_')
-        .replace(/^([0-9])/, '_$1')
-        .toLowerCase();
-}
-
 async function ensureStormEventsLoaded() {
     try {
         console.log('🔍 Checking for StormEvents table (PGlite)...');
-        const existsRes = await pg.query("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename='stormevents';");
+        const existsRes = await pg.query("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename='StormEvents';");
         if (existsRes.rows.length > 0) {
             console.log('✅ StormEvents already present in PGlite');
             return;
@@ -140,29 +114,22 @@ async function ensureStormEventsLoaded() {
         });
         const decompressed = await decompressGzip(compressedStream);
         const text = new TextDecoder('utf-8').decode(decompressed);
-        const firstNewline = text.indexOf('\n');
-        if (firstNewline === -1) {
-            console.warn('⚠️ StormEvents file appears to have no newline, aborting');
-            return;
-        }
-        const headerLine = text.substring(0, firstNewline).replace(/\r$/, '');
-        const headers = splitCsvHeader(headerLine);
-        if (!headers.length) {
-            console.warn('⚠️ Could not parse headers for StormEvents');
-            return;
-        }
-        const sanitized = headers.map(sanitizeIdentifier);
-        // Build create table with text columns so queries still work (user can cast later)
-        const colsDef = sanitized.map(c => `"${c}" text`).join(', ');
-        const createSql = `CREATE TABLE stormevents (${colsDef});`;
-        console.log('🛠️ Creating StormEvents table (all columns as text)');
-        await pg.exec(createSql);
+        // Kusto's StormEvents schema; names are quoted so PostgreSQL keeps their case
+        // (the translator quotes mixed-case identifiers for PostgreSQL).
+        const columns = [
+            ['StartTime', 'timestamp'], ['EndTime', 'timestamp'], ['EpisodeId', 'integer'], ['EventId', 'integer'],
+            ['State', 'text'], ['EventType', 'text'], ['InjuriesDirect', 'integer'], ['InjuriesIndirect', 'integer'],
+            ['DeathsDirect', 'integer'], ['DeathsIndirect', 'integer'], ['DamageProperty', 'integer'], ['DamageCrops', 'integer'],
+            ['Source', 'text'], ['BeginLocation', 'text'], ['EndLocation', 'text'], ['BeginLat', 'double precision'],
+            ['BeginLon', 'double precision'], ['EndLat', 'double precision'], ['EndLon', 'double precision'],
+            ['EpisodeNarrative', 'text'], ['EventNarrative', 'text'], ['StormSummary', 'jsonb']];
+        await pg.exec(`CREATE TABLE "StormEvents" (${columns.map(([n, t]) => `"${n}" ${t}`).join(', ')});`);
 
         // Use COPY with blob
         const blob = new Blob([decompressed], { type: 'text/csv' });
         console.log('📤 Copying CSV into StormEvents via /dev/blob ...');
-        await pg.query("COPY stormevents FROM '/dev/blob' WITH (FORMAT csv, HEADER true);", [], { blob });
-        const count = await pg.query('SELECT COUNT(*) AS cnt FROM stormevents;');
+        await pg.query(`COPY "StormEvents" FROM '/dev/blob' WITH (FORMAT csv, HEADER true);`, [], { blob });
+        const count = await pg.query('SELECT COUNT(*) AS cnt FROM "StormEvents";');
         console.log(`✅ Loaded StormEvents into PGlite (${count.rows[0].cnt} rows)`);
     } catch (e) {
         console.error('❌ Failed to load StormEvents into PGlite:', e);
@@ -181,7 +148,7 @@ function classifyPgOid(oid) {
 }
 
 export async function queryJson(sql) {
-    if (!pg) await init();
+    await init();
     try {
         // Use rowMode:'array' to preserve duplicate column values from joins.
         // Keep date/timestamp/timestamptz as their raw Postgres text (identity parsers): the default
@@ -223,7 +190,7 @@ export async function queryJson(sql) {
 }
 
 export async function getAvailableTables() {
-    if (!pg) await init();
+    await init();
     try {
         const res = await pg.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;");
         return JSON.stringify(res.rows.map(r => r.tablename));
@@ -234,16 +201,17 @@ export async function getAvailableTables() {
 }
 
 export async function getDatabaseSchema() {
-    if (!pg) await init();
+    await init();
     try {
-        const tablesRes = await pg.query("SELECT tablename FROM pg_tables WHERE schemaname='public'");
-        const schemaTables = [];
-        for (const row of tablesRes.rows) {
-            const tn = row.tablename;
-            const colsRes = await pg.query(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='${tn}' ORDER BY ordinal_position;`);
-            const cols = colsRes.rows.map(c => ({ name: c.column_name, type: mapPgTypeToKusto(c.data_type) }));
-            schemaTables.push({ name: tn, entityType: 'Table', columns: cols });
+        // All columns of all tables in one query (no string-built SQL)
+        const colsRes = await pg.query(
+            "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position");
+        const byTable = new Map();
+        for (const c of colsRes.rows) {
+            if (!byTable.has(c.table_name)) byTable.set(c.table_name, []);
+            byTable.get(c.table_name).push({ name: c.column_name, type: mapPgTypeToKusto(c.data_type), sqlType: c.data_type });
         }
+        const schemaTables = [...byTable].map(([name, columns]) => ({ name, entityType: 'Table', columns }));
         const schema = {
             clusterType: 'Engine',
             cluster: { connectionString: 'PGlite://idb', databases: [{ database: { name: 'public', majorVersion: 1, minorVersion: 0, tables: schemaTables } }] },

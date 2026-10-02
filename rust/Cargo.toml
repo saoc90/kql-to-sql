@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+# Built separately (own workspace + Cargo.lock): duckdb's `loadable-extension` feature conflicts
+# with the `bundled` duckdb used by kql-oracle under Cargo's feature unification.
+exclude = ["crates/kql-duckdb-ext"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/saoc90/kql-to-sql"
+
+[workspace.dependencies]
+kql-parser = { path = "crates/kql-parser" }
+kql-to-sql = { path = "crates/kql-to-sql" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+duckdb = { version = "1.10506.0", features = ["bundled"] }
+
+[profile.dev.package."*"]
+opt-level = 2
