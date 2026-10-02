@@ -227,8 +227,9 @@ pub(crate) fn union(ctx: &mut Ctx, input: Option<Rel>, params: &[OpParam], table
                 }
             }
             _ => {
+                // stored tables are labeled with their name, anything else positionally
                 let label = match t {
-                    Expr::Name(n) => n.clone(),
+                    Expr::Name(n) if env.get(n).is_none() && ctx.catalog.table(n).is_some() => n.clone(),
                     _ => format!("union_arg{}", parts.len()),
                 };
                 let r = ctx.tabular(t, env)?;

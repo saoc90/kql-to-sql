@@ -225,12 +225,13 @@ impl Ctx<'_> {
     }
 
     fn name_ref(&mut self, n: &str, scope: &Scope, env: &Env) -> Result<TExpr> {
-        // columns defined earlier in the same operator shadow input columns
-        if let Some((_, sql, ty)) = scope.extra.iter().rev().find(|(name, _, _)| name == n) {
-            return Ok(TExpr::new(sql.clone(), *ty));
-        }
+        // input columns first (`extend a = c, c = a` reads the original a), then columns
+        // defined earlier in the same operator
         if let Some(c) = scope.find(n) {
             return Ok(TExpr::new(col_ref(scope.qual, &c.name), c.ty));
+        }
+        if let Some((_, sql, ty)) = scope.extra.iter().rev().find(|(name, _, _)| name == n) {
+            return Ok(TExpr::new(sql.clone(), *ty));
         }
         match env.get(n) {
             Some(Binding::Scalar(t)) => return Ok(t.clone()),
@@ -318,16 +319,16 @@ impl Ctx<'_> {
                 let t = widest(a, b);
                 if t.is_integer() {
                     let (ls, rs) = (as_bigint(&l), as_bigint(&r));
+                    let idiv = if self.d.kind() == crate::Dialect::DuckDb { "//" } else { "/" };
                     let sql = match op {
                         // Kusto: integer division truncates toward zero; division by zero is null.
-                        BinaryOp::Div => format!("CAST(trunc(CAST({ls} AS DOUBLE) / NULLIF({rs}, 0)) AS BIGINT)"),
+                        BinaryOp::Div => format!("({ls} {idiv} NULLIF({rs}, 0))"),
                         // Kusto: the result of % has the sign of the divisor... (Euclidean, verified against Kusto)
                         BinaryOp::Mod => format!("((({ls} % NULLIF({rs}, 0)) + abs({rs})) % NULLIF(abs({rs}), 0))"),
                         _ => format!("({ls} {sym} {rs})"),
                     };
-                    let sql = if self.d.kind() == crate::Dialect::Postgres { sql.replace("AS DOUBLE", "AS double precision") } else { sql };
-                    let t = if t == Int && l.ty == Int && r.ty == Int { Int } else { Long };
-                    Ok(TExpr::derived(sql, t, &parts))
+                    // Kusto promotes int arithmetic to long
+                    Ok(TExpr::derived(sql, Long, &parts))
                 } else {
                     let (ls, rs) = (self.d.cast(&l.sql, Real), self.d.cast(&r.sql, Real));
                     let sql = match op {
@@ -415,7 +416,25 @@ impl Ctx<'_> {
             _ if l.is_null_const() || r.is_null_const() => (l, r),
             _ => return err(format!("cannot compare {} with {}", l.ty, r.ty)),
         };
-        Ok(TExpr::derived(format!("({} {sym} {})", l.sql, r.sql), Bool, &[&l, &r]))
+        if op == BinaryOp::Ne {
+            // Kusto's != is true when exactly one side is null
+            return Ok(TExpr::derived(format!("({} IS DISTINCT FROM {})", l.sql, r.sql), Bool, &[&l, &r]));
+        }
+        let mut sql = format!("({} {sym} {})", l.sql, r.sql);
+        // NaN compares false with everything in Kusto; DuckDB orders NaN above all numbers.
+        let nan_guard = |t: &TExpr| t.ty == Real && !matches!(t.konst, Some(Const::Real(v)) if !v.is_nan()) && !matches!(t.konst, Some(Const::Long(_)));
+        if l.ty == Real || r.ty == Real {
+            let mut guards = Vec::new();
+            for t in [&l, &r] {
+                if nan_guard(t) {
+                    guards.push(format!("NOT isnan({})", t.sql));
+                }
+            }
+            if !guards.is_empty() {
+                sql = format!("({sql} AND {})", guards.join(" AND "));
+            }
+        }
+        Ok(TExpr::derived(sql, Bool, &[&l, &r]))
     }
 
     fn string_op(&mut self, op: StringOp, l: TExpr, r: TExpr) -> Result<TExpr> {
@@ -469,7 +488,17 @@ impl Ctx<'_> {
             if lit.is_empty() {
                 return "true".into();
             }
-            let re = wrap(crate::regex::escape(lit));
+            // a boundary is only required next to an alphanumeric edge of the needle
+            let first_alnum = lit.chars().next().is_some_and(char::is_alphanumeric);
+            let last_alnum = lit.chars().last().is_some_and(char::is_alphanumeric);
+            let mut re = String::new();
+            if term_start && first_alnum {
+                re.push_str(bl);
+            }
+            re.push_str(&crate::regex::escape(lit));
+            if term_end && last_alnum {
+                re.push_str(br);
+            }
             if pg {
                 let op = if case_sensitive { "~" } else { "~*" };
                 return format!("({s} {op} {})", quote_str(&re));
@@ -644,7 +673,7 @@ impl Ctx<'_> {
         let sql = match x.ty {
             KqlType::String => return x,
             _ if x.is_null_const() => "''".to_string(),
-            KqlType::Bool => format!("COALESCE(CASE WHEN {0} THEN 'true' WHEN NOT {0} THEN 'false' END, '')", x.sql),
+            KqlType::Bool => format!("COALESCE(CASE WHEN {0} THEN 'True' WHEN NOT {0} THEN 'False' END, '')", x.sql),
             KqlType::Int | KqlType::Long => format!("COALESCE(CAST({} AS {}), '')", x.sql, d.sql_type(KqlType::String)),
             KqlType::Real | KqlType::Decimal => format!("COALESCE({}, '')", self.real_to_string(&x.sql)),
             KqlType::DateTime => format!("COALESCE({}, '')", self.datetime_to_string(&x.sql)),
@@ -660,8 +689,8 @@ impl Ctx<'_> {
         let vs = self.d.sql_type(KqlType::String);
         let bi = self.d.sql_type(KqlType::Long);
         format!(
-            "CASE WHEN isnan({x}) THEN 'NaN' WHEN {x} = CAST('inf' AS DOUBLE) THEN '∞' WHEN {x} = CAST('-inf' AS DOUBLE) THEN '-∞' \
-             WHEN {x} = trunc({x}) AND abs({x}) < 1e15 THEN CAST(CAST({x} AS {bi}) AS {vs}) ELSE CAST({x} AS {vs}) END"
+            "CASE WHEN isnan({x}) THEN 'NaN' WHEN {x} = CAST('inf' AS DOUBLE) THEN 'inf' WHEN {x} = CAST('-inf' AS DOUBLE) THEN '-inf' \
+             WHEN {x} = trunc({x}) AND abs({x}) < 1e15 THEN CAST(CAST({x} AS {bi}) AS {vs}) || '.0' ELSE CAST({x} AS {vs}) END"
         )
         .replace("CAST('inf' AS DOUBLE)", &self.d.real_literal(f64::INFINITY))
         .replace("CAST('-inf' AS DOUBLE)", &self.d.real_literal(f64::NEG_INFINITY))
@@ -700,50 +729,96 @@ impl Ctx<'_> {
 
     /// Converts to `t` with Kusto semantics (null on failure).
     pub fn convert(&self, x: TExpr, t: KqlType) -> TExpr {
+        use KqlType::*;
         let d = self.d;
         if x.ty == t {
             return x;
         }
         if x.is_null_const() {
-            return if t == KqlType::String {
-                TExpr::konst("''", KqlType::String, Const::Str(String::new()))
+            return if t == String {
+                TExpr::konst("''", String, Const::Str(std::string::String::new()))
             } else {
                 TExpr::konst(format!("CAST(NULL AS {})", d.sql_type(t)), t, Const::Null)
             };
         }
-        let src = if x.ty == KqlType::Dynamic { d.json_to_text(&x.sql) } else { x.sql.clone() };
+        let ty = |t: KqlType| d.sql_type(t);
         let sql = match (x.ty, t) {
-            (_, KqlType::String) => return self.to_string(x),
-            (_, KqlType::Dynamic) => d.to_json(&x.sql),
-            (KqlType::Bool, t) if t.is_numeric() => format!("CAST(CAST({} AS INTEGER) AS {})", x.sql, d.sql_type(t)),
+            (_, String) => return self.to_string(x),
+            (_, Dynamic) => return self.to_dynamic(x),
+            (Bool, b) if b.is_numeric() => format!("CAST(CASE WHEN {0} THEN 1 WHEN NOT {0} THEN 0 END AS {1})", x.sql, ty(b)),
+            (a, Bool) if a.is_numeric() => format!("({} <> 0)", x.sql),
             (a, b) if a.is_numeric() && b.is_numeric() => {
                 if b.is_integer() && !a.is_integer() {
-                    format!("CAST(trunc({}) AS {})", x.sql, d.sql_type(b))
+                    format!("CAST(trunc({}) AS {})", x.sql, ty(b))
                 } else {
                     d.cast(&x.sql, b)
                 }
             }
-            (KqlType::String | KqlType::Dynamic, b) if b.is_integer() => {
-                // "1.5" -> 1, "0x1F"? (not supported), "true" -> null
-                format!("CAST(trunc({}) AS {})", d.try_cast(&src, KqlType::Real), d.sql_type(b))
+            (Dynamic, b) => {
+                // JSON booleans convert to 1/0 (numbers) or true/false; everything else via its text
+                let text = TExpr::derived(d.json_to_text(&x.sql), String, &[&x]);
+                let via_text = self.convert(text, b).sql;
+                let is_bool = format!("{} = {}", d.json_type(&x.sql), if d.kind() == crate::Dialect::DuckDb { "'boolean'" } else { "'boolean'" });
+                match b {
+                    b if b.is_numeric() => format!(
+                        "CASE WHEN {is_bool} THEN CAST(CASE WHEN {} = 'true' THEN 1 ELSE 0 END AS {}) ELSE {via_text} END",
+                        d.json_to_text(&x.sql),
+                        ty(b)
+                    ),
+                    _ => via_text,
+                }
             }
-            (KqlType::String | KqlType::Dynamic, KqlType::DateTime) => d.try_cast(&src, KqlType::DateTime),
-            (KqlType::String | KqlType::Dynamic, KqlType::TimeSpan) => self.parse_timespan_sql(&src),
-            (KqlType::String | KqlType::Dynamic, KqlType::Bool) => {
-                format!("CASE lower({src}) WHEN 'true' THEN true WHEN 'false' THEN false WHEN '1' THEN true WHEN '0' THEN false END")
+            (String, b) if b.is_integer() => {
+                let v = format!("trim({})", x.sql);
+                let ok = d.regex_match(&v, "'^[+-]?([0-9]+|0[xX][0-9a-fA-F]+)$'");
+                format!("CASE WHEN {ok} THEN {} END", d.try_cast(&v, b))
             }
-            (KqlType::String | KqlType::Dynamic, b) => d.try_cast(&src, b),
-            (KqlType::TimeSpan, b) if b.is_numeric() => d.cast(&x.sql, b),
-            (KqlType::DateTime, b) if b.is_integer() => format!("({} * 10 + 621355968000000000)", d.epoch_us(&x.sql)),
-            (a, KqlType::TimeSpan) if a.is_numeric() => format!("CAST({} AS BIGINT)", x.sql),
-            (KqlType::Bool, KqlType::Bool) => x.sql.clone(),
-            _ => format!("CAST(NULL AS {})", d.sql_type(t)),
+            (String, Real | Decimal) => {
+                let v = format!("trim({})", x.sql);
+                let ok = d.regex_match(&v, r"'^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$'");
+                format!(
+                    "CASE WHEN {ok} THEN {} WHEN lower({v}) = 'nan' THEN {} WHEN lower({v}) IN ('infinity', '+infinity') THEN {} WHEN lower({v}) IN ('-infinity', '-inf') THEN {} END",
+                    d.try_cast(&v, Real),
+                    d.real_literal(f64::NAN),
+                    d.real_literal(f64::INFINITY),
+                    d.real_literal(f64::NEG_INFINITY)
+                )
+            }
+            (String, DateTime) => d.try_cast(&format!("trim({})", x.sql), DateTime),
+            (String, TimeSpan) => self.parse_timespan_sql(&x.sql),
+            (String, Bool) => {
+                let v = format!("lower(trim({}))", x.sql);
+                let int = d.regex_match(&v, "'^[+-]?[0-9]+$'");
+                format!("CASE WHEN {v} = 'true' THEN true WHEN {v} = 'false' THEN false WHEN {int} THEN {} <> 0 END", d.try_cast(&v, Long))
+            }
+            (String, b) => d.try_cast(&x.sql, b),
+            (TimeSpan, b) if b.is_numeric() => d.cast(&x.sql, b),
+            (DateTime, b) if b.is_numeric() => d.cast(&format!("({} * 10 + 621355968000000000)", d.epoch_us(&x.sql)), b),
+            (a, DateTime) if a.is_numeric() => d.ts_from_us(&format!("CAST(({} - 621355968000000000) / 10 AS BIGINT)", d.cast(&x.sql, Long))),
+            (a, TimeSpan) if a.is_numeric() => d.cast(&x.sql, Long),
+            (Guid, _) | (_, Guid) => format!("CAST(NULL AS {})", ty(t)),
+            _ => format!("CAST(NULL AS {})", ty(t)),
         };
         TExpr::derived(sql, t, &[&x])
     }
 
     /// Parses timespan text (`1.02:03:04.5`, `00:10:00`) into ticks; NULL if invalid.
     pub fn parse_timespan_sql(&self, s: &str) -> String {
+        let d = self.d;
+        let lit_re = r"^\s*(-?[0-9]+(?:\.[0-9]+)?)\s*(d|h|m|s|ms|microsecond|tick|day|days|hour|hours|minute|minutes|second|seconds|milliseconds?|microseconds?|ticks)\s*$";
+        let num = d.try_cast(&d.regex_extract(s, &quote_str(lit_re), 1), KqlType::Real);
+        let unit = d.regex_extract(s, &quote_str(lit_re), 2);
+        let literal = format!(
+            "CAST(round({num} * CASE {unit} WHEN 'd' THEN 864000000000 WHEN 'day' THEN 864000000000 WHEN 'days' THEN 864000000000 \
+             WHEN 'h' THEN 36000000000 WHEN 'hour' THEN 36000000000 WHEN 'hours' THEN 36000000000 WHEN 'm' THEN 600000000 WHEN 'minute' THEN 600000000 WHEN 'minutes' THEN 600000000 \
+             WHEN 's' THEN 10000000 WHEN 'second' THEN 10000000 WHEN 'seconds' THEN 10000000 WHEN 'ms' THEN 10000 WHEN 'millisecond' THEN 10000 WHEN 'milliseconds' THEN 10000 \
+             WHEN 'microsecond' THEN 10 WHEN 'microseconds' THEN 10 ELSE 1 END) AS BIGINT)"
+        );
+        let clock = self.parse_clock_timespan_sql(s);
+        format!("CASE WHEN {} THEN {literal} ELSE {clock} END", d.regex_match(s, &quote_str(lit_re)))
+    }
+
+    fn parse_clock_timespan_sql(&self, s: &str) -> String {
         let d = self.d;
         let re = r"^\s*(-)?(?:(\d+)\.)?(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,7}))?)?\s*$";
         let g = |n: u32| d.regex_extract(s, &quote_str(re), n);

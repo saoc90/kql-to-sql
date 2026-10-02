@@ -255,6 +255,7 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("run") => parse_run_args(&args[1..]).and_then(cmd_run),
         Some("one") => cmd_one(&args[1..]),
+        Some("sql") => cmd_sql(&args[1..]),
         _ => Err(USAGE.to_string()),
     };
     match result {
@@ -264,6 +265,17 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `kql-oracle sql "<SQL>"`: runs raw SQL in DuckDB and prints the rows (engine probing).
+fn cmd_sql(args: &[String]) -> Result<(), String> {
+    let sql = args.first().ok_or("usage: kql-oracle sql \"<SQL>\"")?;
+    let r = duck::execute(sql, &[])?;
+    println!("{}", r.columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>().join(" | "));
+    for row in &r.rows {
+        println!("{}", row.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(" | "));
+    }
+    Ok(())
 }
 
 fn parse_run_args(args: &[String]) -> Result<RunArgs, String> {

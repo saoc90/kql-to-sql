@@ -15,6 +15,8 @@ pub(crate) fn is_aggregate(name: &str) -> bool {
 
 pub(crate) fn summarize(ctx: &mut Ctx, rel: Rel, aggs: &[NamedExpr], by: &[NamedExpr], env: &Env) -> Result<Rel> {
     let mut rel = rel.passthrough(ctx);
+    // the input order still matters to order-sensitive aggregates (make_list, ...)
+    let input_order = rel.order_sql();
     rel.sel.order_by.clear();
     rel.order.clear();
     let input_cols = rel.cols.clone();
@@ -55,6 +57,7 @@ pub(crate) fn summarize(ctx: &mut Ctx, rel: Rel, aggs: &[NamedExpr], by: &[Named
         let t = {
             let mut scope = Scope::rows(&input_cols);
             scope.aggregates = true;
+            scope.order = &input_order;
             ctx.expr(&ne.expr, &scope, env)?
         };
         if !t.agg && t.konst.is_none() {
@@ -185,7 +188,11 @@ pub(crate) fn percentile_sql(ctx: &Ctx, x: &str, p: f64) -> String {
 
 pub(crate) fn arg_extreme(ctx: &Ctx, value: &str, by: &str, max: bool) -> String {
     match ctx.d.kind() {
-        Dialect::DuckDb => format!("{}({value}, {by})", if max { "arg_max" } else { "arg_min" }),
+        // when every `by` is null, Kusto still returns a row's values
+        Dialect::DuckDb => format!(
+            "CASE WHEN COUNT({by}) = 0 THEN first({value}) ELSE {}({value}, {by}) END",
+            if max { "arg_max" } else { "arg_min" }
+        ),
         Dialect::Postgres => format!(
             "(array_agg({value} ORDER BY {by} {}) FILTER (WHERE {by} IS NOT NULL))[1]",
             if max { "DESC" } else { "ASC" }
@@ -235,7 +242,7 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: 
     let (sql, ty) = match lname.as_str() {
         "count" => {
             need(0, 1)?;
-            if n == 1 {
+            if n == 1 && a[0].ty == KqlType::Bool {
                 (format!("COUNT(*) FILTER (WHERE {})", pred(ctx, &a[0])), KqlType::Long)
             } else {
                 ("COUNT(*)".to_string(), KqlType::Long)
@@ -278,18 +285,11 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: 
         "make_list" | "makelist" | "make_list_if" | "makelist_if" | "make_set" | "makeset" | "make_set_if" | "makeset_if" | "make_list_with_nulls" => {
             let distinct = lname.contains("set");
             let is_if = lname.ends_with("_if");
+            let with_nulls = lname == "make_list_with_nulls";
             let x = &a[0];
-            let v = if x.ty == KqlType::Dynamic { x.sql.clone() } else { ctx.to_dynamic(x.clone()).sql };
-            let v = if is_if { format!("CASE WHEN {} THEN {v} END", pred(ctx, &a[1])) } else { v };
-            if lname == "make_list_with_nulls" {
-                let s = match d.kind() {
-                    Dialect::DuckDb => format!("COALESCE(to_json(list({v})), CAST('[]' AS JSON))"),
-                    Dialect::Postgres => format!("COALESCE(jsonb_agg({v}), CAST('[]' AS jsonb))"),
-                };
-                (s, KqlType::Dynamic)
-            } else {
-                (d.json_agg(&v, distinct), KqlType::Dynamic)
-            }
+            let max_size = if is_if { a.get(2) } else { a.get(1) };
+            let cond = if is_if { Some(pred(ctx, &a[1])) } else { None };
+            (make_list_sql(ctx, x, cond.as_deref(), distinct, with_nulls, max_size, scope.order), KqlType::Dynamic)
         }
         "make_bag" | "make_bag_if" => {
             let x = &a[0];
@@ -364,4 +364,42 @@ fn bag_merge_agg(ctx: &Ctx, v: &str) -> String {
 #[allow(dead_code)]
 pub(crate) fn qi(n: &str) -> String {
     quote_ident(n)
+}
+
+/// `make_list`/`make_set` and variants. Dynamic arrays are flattened into the result (Kusto
+/// appends array elements), nulls are skipped unless `with_nulls`, the input order is kept.
+fn make_list_sql(ctx: &Ctx, x: &TExpr, cond: Option<&str>, distinct: bool, with_nulls: bool, max_size: Option<&TExpr>, order: &[String]) -> String {
+    let d = ctx.d;
+    let v = if x.ty == KqlType::Dynamic { x.sql.clone() } else { ctx.to_dynamic(x.clone()).sql };
+    let order_by = if order.is_empty() { String::new() } else { format!(" ORDER BY {}", order.join(", ")) };
+    let mut filters = Vec::new();
+    if !with_nulls {
+        filters.push(format!("{} IS NOT NULL", x.sql));
+    }
+    if let Some(c) = cond {
+        filters.push(c.to_string());
+    }
+    let filter = if filters.is_empty() { String::new() } else { format!(" FILTER (WHERE {})", filters.join(" AND ")) };
+    match d.kind() {
+        Dialect::DuckDb => {
+            let mut list = if x.ty == KqlType::Dynamic {
+                let elems = format!("CASE WHEN json_type({v}) = 'ARRAY' THEN CAST({v} AS JSON[]) ELSE [{v}] END");
+                format!("flatten(list({elems}{order_by}){filter})")
+            } else {
+                format!("list({v}{order_by}){filter}")
+            };
+            if distinct {
+                list = format!("list_filter({list}, (e, i) -> list_position({list}, e) = i)");
+            }
+            if let Some(n) = max_size {
+                list = format!("list_slice({list}, 1, {})", d.cast(&n.sql, KqlType::Long));
+            }
+            format!("COALESCE(to_json({list}), CAST('[]' AS JSON))")
+        }
+        Dialect::Postgres => {
+            let dis = if distinct { "DISTINCT " } else { "" };
+            let ob = if distinct { String::new() } else { order_by };
+            format!("COALESCE(jsonb_agg({dis}{v}{ob}){filter}, CAST('[]' AS jsonb))")
+        }
+    }
 }

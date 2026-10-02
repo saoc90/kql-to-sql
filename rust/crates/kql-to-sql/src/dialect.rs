@@ -269,11 +269,15 @@ impl SqlDialect for DuckDb {
     }
 
     fn json_each(&self, json: &str, alias: &str) -> JsonEach {
-        // json_each yields key (text for objects, index text for arrays), value (JSON), type, ...
+        // DuckDB's json_each returns array elements in reverse order, so expand with unnest,
+        // which keeps element order.
         JsonEach {
-            from_item: format!("json_each({json}) AS {alias}"),
-            index: format!("(CAST({alias}.\"key\" AS BIGINT))"),
-            key: format!("{alias}.\"key\""),
+            from_item: format!(
+                "(SELECT unnest(range(CAST(json_array_length({json}) AS BIGINT))) AS idx, CAST(NULL AS VARCHAR) AS key, unnest(CAST({json} AS JSON[])) AS value WHERE json_type({json}) = 'ARRAY' \
+                 UNION ALL SELECT NULL, unnest(json_keys({json})), unnest(list_transform(json_keys({json}), k -> json_extract({json}, '$.\"' || replace(k, '\"', '\\\"') || '\"'))) WHERE json_type({json}) = 'OBJECT') AS {alias}"
+            ),
+            index: format!("{alias}.idx"),
+            key: format!("{alias}.key"),
             value: format!("{alias}.value"),
         }
     }

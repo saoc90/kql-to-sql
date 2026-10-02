@@ -32,7 +32,7 @@ pub(crate) fn mv_expand(ctx: &mut Ctx, rel: Rel, params: &[OpParam], items: &[Mv
     let mut rel = rel;
     rel.order.clear();
     let rel = rel.passthrough(ctx);
-    let bag_as_array = param_word(params, "bagexpansion").is_some_and(|b| b.eq_ignore_ascii_case("array"));
+    let bag_as_array = param_word(params, "bagexpansion").or_else(|| param_word(params, "kind")).is_some_and(|b| b.eq_ignore_ascii_case("array"));
     let index_col = param_word(params, "with_itemindex");
     let t_alias = ctx.alias();
     let d = ctx.d;
@@ -74,10 +74,10 @@ pub(crate) fn mv_expand(ctx: &mut Ctx, rel: Rel, params: &[OpParam], items: &[Mv
         // values expand to themselves
         let arr = match d.kind() {
             crate::Dialect::DuckDb => format!(
-                "CASE WHEN json_type({src}) IN ('ARRAY', 'OBJECT') THEN {src} WHEN {src} IS NULL THEN CAST('[]' AS JSON) ELSE json_array({src}) END"
+                "CASE WHEN json_type({src}) IN ('ARRAY', 'OBJECT') THEN {src} ELSE json_array({src}) END"
             ),
             crate::Dialect::Postgres => format!(
-                "CASE WHEN jsonb_typeof({src}) IN ('array', 'object') THEN {src} WHEN {src} IS NULL THEN '[]'::jsonb ELSE jsonb_build_array({src}) END"
+                "CASE WHEN jsonb_typeof({src}) IN ('array', 'object') THEN {src} ELSE jsonb_build_array({src}) END"
             ),
         };
         let je = d.json_each(&arr, &e_alias);
@@ -91,7 +91,7 @@ pub(crate) fn mv_expand(ctx: &mut Ctx, rel: Rel, params: &[OpParam], items: &[Mv
         } else {
             d.json_object(&[(je.key.clone(), je.value.clone())])
         };
-        values.push(format!("CASE WHEN {is_obj} THEN {bag_item} ELSE {} END", je.value));
+        values.push(format!("CASE WHEN {is_obj} THEN {bag_item} WHEN {} = 'null' THEN NULL ELSE {} END", d.json_type(&je.value), je.value));
         index_sql = format!("CASE WHEN {is_obj} THEN NULL ELSE {} END", je.index);
         if let Some(l) = limit {
             let n = ctx.expr(l, &Scope::empty(), env)?;
