@@ -49,7 +49,12 @@ impl Rel {
     /// Wraps the select keeping its ORDER BY (for physically ordered relations).
     pub fn wrap_keep_order(self, ctx: &mut Ctx) -> Rel {
         let alias = ctx.alias();
-        Rel { sel: Select::star_from(From::Query(Box::new(Query::Select(Box::new(self.sel))), alias)), cols: self.cols, order: self.order, serialized: self.serialized }
+        Rel {
+            sel: Select::star_from(From::Query(Box::new(Query::Select(Box::new(self.sel))), alias)),
+            cols: self.cols,
+            order: self.order,
+            serialized: self.serialized,
+        }
     }
 
     /// True if window functions may be used over these rows.
@@ -64,7 +69,12 @@ impl Rel {
             self.sel.order_by.clear();
         }
         let alias = ctx.alias();
-        Rel { sel: Select::star_from(From::Query(Box::new(Query::Select(Box::new(self.sel))), alias)), cols: self.cols, order: self.order, serialized: self.serialized }
+        Rel {
+            sel: Select::star_from(From::Query(Box::new(Query::Select(Box::new(self.sel))), alias)),
+            cols: self.cols,
+            order: self.order,
+            serialized: self.serialized,
+        }
     }
 
     /// Ensures the select outputs exactly its FROM's columns, so new clauses can reference them.
@@ -182,7 +192,17 @@ const MAX_DEPTH: usize = 64;
 
 impl<'a> Ctx<'a> {
     pub fn new(d: &'static dyn SqlDialect, catalog: &'a Catalog) -> Ctx<'a> {
-        Ctx { d, catalog, ctes: Vec::new(), as_names: Vec::new(), render: None, cte_names: HashSet::new(), window_hoists: None, next_alias: 0, depth: 0 }
+        Ctx {
+            d,
+            catalog,
+            ctes: Vec::new(),
+            as_names: Vec::new(),
+            render: None,
+            cte_names: HashSet::new(),
+            window_hoists: None,
+            next_alias: 0,
+            depth: 0,
+        }
     }
 
     pub fn alias(&mut self) -> String {
@@ -242,7 +262,9 @@ impl<'a> Ctx<'a> {
             LetValue::Expr(e) => {
                 if self.is_tabular(e, env) {
                     let (inner, materialized) = match e {
-                        Expr::Call { name: f, args } if f.eq_ignore_ascii_case("materialize") && args.len() == 1 => (&args[0].expr, true),
+                        Expr::Call { name: f, args } if f.eq_ignore_ascii_case("materialize") && args.len() == 1 => {
+                            (&args[0].expr, true)
+                        }
                         _ => (e, false),
                     };
                     let rel = self.tabular(inner, env)?;
@@ -274,8 +296,7 @@ impl<'a> Ctx<'a> {
                 Some(Binding::Function(f)) => self.body_is_tabular(f),
                 _ => {
                     let l = name.to_ascii_lowercase();
-                    matches!(l.as_str(), "materialize" | "table" | "view")
-                        || (l == "materialize" && args.len() == 1)
+                    matches!(l.as_str(), "materialize" | "table" | "view") || (l == "materialize" && args.len() == 1)
                 }
             },
             _ => false,
@@ -286,7 +307,10 @@ impl<'a> Ctx<'a> {
         let mut env = f.env.clone();
         for p in &f.def.params {
             if let ParamType::Tabular { .. } = p.ty {
-                env.set(&p.name, Binding::Tabular(TableRef { from: String::new(), cols: Vec::new(), order: Vec::new() }));
+                env.set(
+                    &p.name,
+                    Binding::Tabular(TableRef { from: String::new(), cols: Vec::new(), order: Vec::new() }),
+                );
             } else {
                 env.set(&p.name, Binding::Scalar(TExpr::new("NULL", KqlType::Dynamic)));
             }
@@ -408,7 +432,13 @@ impl<'a> Ctx<'a> {
 
     // ------------------------------------------------------------------ user functions
 
-    pub fn call_user_function(&mut self, f: &UserFunction, args: &[ast::Arg], scope: &Scope, env: &Env) -> Result<FnResult> {
+    pub fn call_user_function(
+        &mut self,
+        f: &UserFunction,
+        args: &[ast::Arg],
+        scope: &Scope,
+        env: &Env,
+    ) -> Result<FnResult> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
             self.depth -= 1;
@@ -419,13 +449,22 @@ impl<'a> Ctx<'a> {
         r
     }
 
-    fn call_user_function_inner(&mut self, f: &UserFunction, args: &[ast::Arg], scope: &Scope, env: &Env) -> Result<FnResult> {
+    fn call_user_function_inner(
+        &mut self,
+        f: &UserFunction,
+        args: &[ast::Arg],
+        scope: &Scope,
+        env: &Env,
+    ) -> Result<FnResult> {
         let mut fenv = f.env.clone();
         if args.len() > f.def.params.len() {
             return err(format!("too many arguments: expected at most {}", f.def.params.len()));
         }
         for (i, p) in f.def.params.iter().enumerate() {
-            let arg = args.iter().find(|a| a.name.as_deref() == Some(p.name.as_str())).or_else(|| args.get(i).filter(|a| a.name.is_none()));
+            let arg = args
+                .iter()
+                .find(|a| a.name.as_deref() == Some(p.name.as_str()))
+                .or_else(|| args.get(i).filter(|a| a.name.is_none()));
             match (&p.ty, arg) {
                 (ParamType::Tabular { .. }, Some(a)) => {
                     let rel = self.tabular(&a.expr, env)?;
@@ -435,7 +474,9 @@ impl<'a> Ctx<'a> {
                 (ParamType::Scalar(ty), Some(a)) => {
                     let v = self.expr(&a.expr, scope, env)?;
                     let v = match KqlType::from_name(ty) {
-                        Some(t) if t != v.ty && !(t.is_numeric() && v.ty.is_numeric() && t == KqlType::Long) => self.convert(v, t),
+                        Some(t) if t != v.ty && !(t.is_numeric() && v.ty.is_numeric() && t == KqlType::Long) => {
+                            self.convert(v, t)
+                        }
                         _ => v,
                     };
                     fenv.set(&p.name, Binding::Scalar(v));

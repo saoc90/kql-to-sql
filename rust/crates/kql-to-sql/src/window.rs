@@ -123,7 +123,10 @@ fn win(sql: String, ty: KqlType, parts: &[&TExpr]) -> TExpr {
 
 fn arity(name: &str, n: usize, min: usize, max: usize) -> Result<()> {
     if n < min || n > max {
-        return err(format!("{name}(): expected {} arguments, got {n}", if min == max { min.to_string() } else { format!("{min}..{max}") }));
+        return err(format!(
+            "{name}(): expected {} arguments, got {n}",
+            if min == max { min.to_string() } else { format!("{min}..{max}") }
+        ));
     }
     Ok(())
 }
@@ -191,7 +194,11 @@ fn row_cumsum(ctx: &mut Ctx, a: &[TExpr], scope: &Scope) -> Result<TExpr> {
     arity("row_cumsum", a.len(), 1, 2)?;
     let parts: Vec<&TExpr> = a.iter().collect();
     let x = &a[0];
-    let x = if x.ty == KqlType::Dynamic { TExpr::derived(ctx.d.try_cast(&ctx.d.json_to_text(&x.sql), KqlType::Real), KqlType::Real, &[x]) } else { x.clone() };
+    let x = if x.ty == KqlType::Dynamic {
+        TExpr::derived(ctx.d.try_cast(&ctx.d.json_to_text(&x.sql), KqlType::Real), KqlType::Real, &[x])
+    } else {
+        x.clone()
+    };
     if !(x.ty.is_numeric() || x.ty == KqlType::TimeSpan) {
         return err(format!("row_cumsum(): expected a numeric argument, got {}", x.ty));
     }
@@ -224,14 +231,18 @@ fn row_rank(ctx: &mut Ctx, name: &str, a: &[TExpr], scope: &Scope) -> Result<TEx
     };
     let o = order_by(scope);
     // a new run starts at the first row, at a restart and where the value changes
-    let mut starts = vec![format!("ROW_NUMBER() OVER ({o}) = 1"), format!("{xs} IS DISTINCT FROM LAG({xs}) OVER ({o})")];
+    let mut starts =
+        vec![format!("ROW_NUMBER() OVER ({o}) = 1"), format!("{xs} IS DISTINCT FROM LAG({xs}) OVER ({o})")];
     if let Some(r) = &restart {
         starts.push(format!("COALESCE({r}, false)"));
     }
     let run_start = hoist(ctx, format!("CASE WHEN {} THEN 1 ELSE 0 END", starts.join(" OR ")))?;
     let run = hoist(ctx, format!("SUM({run_start}) OVER ({})", running(scope, None)))?;
     let group = match &restart {
-        Some(r) => Some(hoist(ctx, format!("SUM(CASE WHEN COALESCE({r}, false) THEN 1 ELSE 0 END) OVER ({})", running(scope, None)))?),
+        Some(r) => Some(hoist(
+            ctx,
+            format!("SUM(CASE WHEN COALESCE({r}, false) THEN 1 ELSE 0 END) OVER ({})", running(scope, None)),
+        )?),
         None => None,
     };
     let sql = if name == "row_rank_dense" {
@@ -267,9 +278,17 @@ fn row_window_session(ctx: &mut Ctx, a: &[TExpr], scope: &Scope) -> Result<TExpr
             if a[1].ty != KqlType::TimeSpan || a[2].ty != KqlType::TimeSpan {
                 return err("row_window_session(): the distances must be timespans for a datetime value");
             }
-            (format!("(CAST({} AS DOUBLE) * 10)", ctx.d.epoch_us(&x.sql)), ctx.d.cast(&a[1].sql, KqlType::Real), ctx.d.cast(&a[2].sql, KqlType::Real))
+            (
+                format!("(CAST({} AS DOUBLE) * 10)", ctx.d.epoch_us(&x.sql)),
+                ctx.d.cast(&a[1].sql, KqlType::Real),
+                ctx.d.cast(&a[2].sql, KqlType::Real),
+            )
         }
-        t if t.is_numeric() || t == KqlType::TimeSpan => (ctx.d.cast(&x.sql, KqlType::Real), ctx.d.cast(&a[1].sql, KqlType::Real), ctx.d.cast(&a[2].sql, KqlType::Real)),
+        t if t.is_numeric() || t == KqlType::TimeSpan => (
+            ctx.d.cast(&x.sql, KqlType::Real),
+            ctx.d.cast(&a[1].sql, KqlType::Real),
+            ctx.d.cast(&a[2].sql, KqlType::Real),
+        ),
         t => return err(format!("row_window_session(): unsupported value type {t}")),
     };
     let vt = TExpr::derived(v, KqlType::Real, &[x]);

@@ -18,9 +18,15 @@ pub struct Query {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
-    Let { name: String, value: LetValue },
+    Let {
+        name: String,
+        value: LetValue,
+    },
     /// `set name [= value];` query options. Ignored by the translator.
-    Set { name: String, value: Option<Expr> },
+    Set {
+        name: String,
+        value: Option<Expr>,
+    },
     Expr(Expr),
 }
 
@@ -49,7 +55,10 @@ pub struct Param {
 pub enum ParamType {
     Scalar(String),
     /// A tabular parameter: `T:(*)` (columns empty, open) or `T:(a:int, ...)`.
-    Tabular { columns: Vec<ColumnDecl>, open: bool },
+    Tabular {
+        columns: Vec<ColumnDecl>,
+        open: bool,
+    },
 }
 
 /// `name:type` in `datatable`, tabular parameters, `externaldata` etc.

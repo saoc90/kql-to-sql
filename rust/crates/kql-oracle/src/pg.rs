@@ -106,7 +106,9 @@ impl Instance {
     }
 
     fn fetch(&mut self, sql: &str) -> Result<(Vec<PgColumn>, Vec<Vec<Option<String>>>), String> {
-        self.db.exec(&format!("DECLARE kql_oracle_cursor NO SCROLL CURSOR FOR {sql}"), None).map_err(|e| e.to_string())?;
+        self.db
+            .exec(&format!("DECLARE kql_oracle_cursor NO SCROLL CURSOR FOR {sql}"), None)
+            .map_err(|e| e.to_string())?;
         let mut columns = None;
         let mut rows = Vec::new();
         loop {
@@ -138,7 +140,9 @@ pub fn run_batch(stmts: &[(String, String)], setup: &Setup) -> Result<HashMap<St
         let bytes = fs::read(csv).map_err(|e| format!("{}: {e}", csv.display()))?;
         let bytes = if csv.extension().is_some_and(|e| e == "gz") {
             let mut out = Vec::new();
-            flate2::read::GzDecoder::new(&bytes[..]).read_to_end(&mut out).map_err(|e| format!("{}: {e}", csv.display()))?;
+            flate2::read::GzDecoder::new(&bytes[..])
+                .read_to_end(&mut out)
+                .map_err(|e| format!("{}: {e}", csv.display()))?;
             out
         } else {
             bytes
@@ -452,7 +456,10 @@ mod tests {
         assert_eq!(convert(Some("1 day 02:00:00"), INTERVAL, Class::TimeSpan), Value::TimeSpan(TICKS_PER_DAY + 2 * H));
         // Ticks that were never converted to INTERVAL stay integers (the comparator accepts them).
         assert_eq!(convert(Some("10000000"), INT8, Class::TimeSpan), Value::Int(10_000_000));
-        assert_eq!(convert(Some("2007-01-02T00:00:00Z"), 25, Class::DateTime), Value::DateTime(parse_datetime("2007-01-02").unwrap()));
+        assert_eq!(
+            convert(Some("2007-01-02T00:00:00Z"), 25, Class::DateTime),
+            Value::DateTime(parse_datetime("2007-01-02").unwrap())
+        );
         assert_eq!(
             convert(Some("550E8400-E29B-41D4-A716-446655440000"), UUID, Class::Guid),
             Value::Guid("550e8400-e29b-41d4-a716-446655440000".into())
@@ -473,7 +480,10 @@ mod tests {
     fn result_conversion() {
         let raw = PgRaw {
             id: "x".into(),
-            columns: vec![PgColumn { name: "a".into(), type_oid: INT8 }, PgColumn { name: "b".into(), type_oid: INTERVAL }],
+            columns: vec![
+                PgColumn { name: "a".into(), type_oid: INT8 },
+                PgColumn { name: "b".into(), type_oid: INTERVAL },
+            ],
             rows: vec![vec![Some("1".into()), Some("00:00:01".into())], vec![None, None]],
             error: None,
         };

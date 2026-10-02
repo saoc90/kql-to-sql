@@ -3,7 +3,7 @@
 //! Both operators produce a self-contained subquery (`FROM (WITH ... SELECT ...) AS _qN`) so
 //! their helper CTEs stay local and never clash with the query's top-level CTEs.
 
-use kql_parser::ast::{Arg, Expr, MakeSeriesAgg, NamedExpr, OpParam, OrderKey, ScanStep, SortDir, NullsOrder};
+use kql_parser::ast::{Arg, Expr, MakeSeriesAgg, NamedExpr, NullsOrder, OpParam, OrderKey, ScanStep, SortDir};
 
 use crate::binder::{Ctx, Env, OrderSpec, Rel};
 use crate::expr::{Const, Scope, TExpr};
@@ -101,12 +101,18 @@ pub(crate) fn make_series(
         t => return err(format!("make-series: unsupported axis type {t}")),
     };
     match axis {
-        Axis::Time | Axis::Span if step_t.ty != KqlType::TimeSpan => return err("make-series: the step of a datetime/timespan axis must be a timespan"),
-        Axis::Int | Axis::Real if !step_t.ty.is_numeric() => return err("make-series: the step of a numeric axis must be numeric"),
+        Axis::Time | Axis::Span if step_t.ty != KqlType::TimeSpan => {
+            return err("make-series: the step of a datetime/timespan axis must be a timespan")
+        }
+        Axis::Int | Axis::Real if !step_t.ty.is_numeric() => {
+            return err("make-series: the step of a numeric axis must be numeric")
+        }
         _ => {}
     }
     match &step_t.konst {
-        Some(Const::Long(v)) | Some(Const::TimeSpan(v)) if *v <= 0 => return err("make-series: the step must be positive"),
+        Some(Const::Long(v)) | Some(Const::TimeSpan(v)) if *v <= 0 => {
+            return err("make-series: the step must be positive")
+        }
         Some(Const::Real(v)) if *v <= 0.0 => return err("make-series: the step must be positive"),
         _ => {}
     }
@@ -181,7 +187,8 @@ pub(crate) fn make_series(
                 if v.is_null_const() {
                     format!("CAST(NULL AS {})", d.sql_type(KqlType::Dynamic))
                 } else {
-                    let v = if v.ty != t.ty && v.ty.is_numeric() && t.ty.is_numeric() { ctx.convert(v, t.ty) } else { v };
+                    let v =
+                        if v.ty != t.ty && v.ty.is_numeric() && t.ty.is_numeric() { ctx.convert(v, t.ty) } else { v };
                     ctx.to_dynamic(v).sql
                 }
             }
@@ -244,7 +251,8 @@ pub(crate) fn make_series(
         Dialect::DuckDb => "unnest(range(0, __n))".to_string(),
         Dialect::Postgres => "generate_series(0, __n - 1)".to_string(),
     };
-    let grid_sql = format!("SELECT _g.*, {series} AS __b FROM (SELECT DISTINCT {distinct} FROM {src}) AS _g CROSS JOIN {p}");
+    let grid_sql =
+        format!("SELECT _g.*, {series} AS __b FROM (SELECT DISTINCT {distinct} FROM {src}) AS _g CROSS JOIN {p}");
 
     let list = |elem: &str| -> String {
         match d.kind() {
@@ -318,9 +326,11 @@ fn rewrite_refs(e: &Expr, steps: &[String], refs: &mut Vec<(usize, String)>) -> 
         }
         Expr::Binary { op, left, right } => Expr::Binary { op: *op, left: rw(left, refs), right: rw(right, refs) },
         Expr::Unary { op, expr } => Expr::Unary { op: *op, expr: rw(expr, refs) },
-        Expr::In { kind, expr, list } => {
-            Expr::In { kind: *kind, expr: rw(expr, refs), list: list.iter().map(|x| rewrite_refs(x, steps, refs)).collect() }
-        }
+        Expr::In { kind, expr, list } => Expr::In {
+            kind: *kind,
+            expr: rw(expr, refs),
+            list: list.iter().map(|x| rewrite_refs(x, steps, refs)).collect(),
+        },
         Expr::Between { expr, low, high, negated } => {
             Expr::Between { expr: rw(expr, refs), low: rw(low, refs), high: rw(high, refs), negated: *negated }
         }
@@ -372,7 +382,8 @@ pub(crate) fn scan(
         return err("scan: optional steps are not supported yet");
     }
     let in_cols = rel.cols.clone();
-    let null_of = |t: KqlType| if t == KqlType::String { "''".to_string() } else { format!("CAST(NULL AS {})", d.sql_type(t)) };
+    let null_of =
+        |t: KqlType| if t == KqlType::String { "''".to_string() } else { format!("CAST(NULL AS {})", d.sql_type(t)) };
 
     // ---- declared variables
     let mut vars: Vec<ScanVar> = Vec::new();
@@ -404,9 +415,15 @@ pub(crate) fn scan(
             Some(NullsOrder::Last) => false,
             None => !desc,
         };
-        order_sql.push(format!("{} {} NULLS {}", t.sql, if desc { "DESC" } else { "ASC" }, if nulls_first { "FIRST" } else { "LAST" }));
+        order_sql.push(format!(
+            "{} {} NULLS {}",
+            t.sql,
+            if desc { "DESC" } else { "ASC" },
+            if nulls_first { "FIRST" } else { "LAST" }
+        ));
     }
-    let logical_order: Vec<OrderSpec> = if order_by.is_empty() && partition_by.is_empty() { rel.order.clone() } else { Vec::new() };
+    let logical_order: Vec<OrderSpec> =
+        if order_by.is_empty() && partition_by.is_empty() { rel.order.clone() } else { Vec::new() };
     if order_by.is_empty() {
         order_sql = rel.order_sql();
     }
@@ -435,8 +452,11 @@ pub(crate) fn scan(
         }
     }
     // slot fields: declared variables, then referenced input columns
-    let mut fields: Vec<Field> =
-        vars.iter().enumerate().map(|(i, v)| Field { ty: v.ty, var: Some(i), col: String::new(), init: v.default.clone() }).collect();
+    let mut fields: Vec<Field> = vars
+        .iter()
+        .enumerate()
+        .map(|(i, v)| Field { ty: v.ty, var: Some(i), col: String::new(), init: v.default.clone() })
+        .collect();
     for (_, name) in &refs {
         if vars.iter().any(|v| v.name == *name) || fields.iter().any(|f| f.var.is_none() && f.col == *name) {
             continue;
@@ -508,14 +528,18 @@ pub(crate) fn scan(
 
     // ---- base: the input with row numbers (partitions are walked one after another)
     let over_order = if order_sql.is_empty() { String::new() } else { format!("ORDER BY {}", order_sql.join(", ")) };
-    let rn_order: Vec<String> = part_sql.iter().map(|p| format!("{p} ASC NULLS FIRST")).chain(order_sql.iter().cloned()).collect();
+    let rn_order: Vec<String> =
+        part_sql.iter().map(|p| format!("{p} ASC NULLS FIRST")).chain(order_sql.iter().cloned()).collect();
     let rn_over = if rn_order.is_empty() { String::new() } else { format!("ORDER BY {}", rn_order.join(", ")) };
     let first = if part_sql.is_empty() {
         "false".to_string()
     } else {
         format!("(row_number() OVER (PARTITION BY {} {over_order}) = 1)", part_sql.join(", "))
     };
-    let base_sql = format!("SELECT *, row_number() OVER ({rn_over}) AS __rn, {first} AS __first FROM ({}) AS {tag}_in", input_sql(rel));
+    let base_sql = format!(
+        "SELECT *, row_number() OVER ({rn_over}) AS __rn, {first} AS __first FROM ({}) AS {tag}_in",
+        input_sql(rel)
+    );
 
     // ---- recursive term, built as nested stages (one pair per step, last step first)
     let mut cur: Vec<String> = in_cols.iter().map(|c| c.name.clone()).collect();
@@ -530,13 +554,20 @@ pub(crate) fn scan(
         .map(|(i, c)| format!("'f{i}': {}", quote_ident(&c.name)))
         .chain(std::iter::once("'first': __first".to_string()))
         .collect();
-    let rows_cte = format!(", {rows} AS MATERIALIZED (SELECT list({{{}}} ORDER BY __rn) AS rows, count(*) AS n FROM {base})", row_fields.join(", "));
+    let rows_cte = format!(
+        ", {rows} AS MATERIALIZED (SELECT list({{{}}} ORDER BY __rn) AS rows, count(*) AS n FROM {base})",
+        row_fields.join(", ")
+    );
     let first_items: Vec<String> = in_cols
         .iter()
         .enumerate()
         .map(|(i, c)| format!("_l.rows[_r.__rn + 1].f{i} AS {}", quote_ident(&c.name)))
         .chain(std::iter::once("(_r.__rn + 1) AS __rn".to_string()))
-        .chain(state_cols.iter().map(|(n, _, init)| format!("CASE WHEN _l.rows[_r.__rn + 1].first THEN {init} ELSE _r.{n} END AS {n}")))
+        .chain(
+            state_cols
+                .iter()
+                .map(|(n, _, init)| format!("CASE WHEN _l.rows[_r.__rn + 1].first THEN {init} ELSE _r.{n} END AS {n}")),
+        )
         .collect();
     let next_from = format!("{rec} AS _r CROSS JOIN {rows} AS _l WHERE _r.__rn < _l.n");
     let mut stage = format!("SELECT {} FROM {next_from}", first_items.join(", "));
@@ -579,7 +610,10 @@ pub(crate) fn scan(
         let (c1, e1) = if k > 1 { eval(ctx, k - 1)? } else { ("false".to_string(), Vec::new()) };
         // stage A: evaluate both checks and the assignments
         let mut add = vec![
-            ("__c1".to_string(), if k > 1 { format!("({} AND {c1})", quote_ident(&act(k - 1))) } else { "false".into() }),
+            (
+                "__c1".to_string(),
+                if k > 1 { format!("({} AND {c1})", quote_ident(&act(k - 1))) } else { "false".into() },
+            ),
             ("__c2".to_string(), if k == 1 { c2.clone() } else { format!("({} AND {c2})", quote_ident(&act(k))) }),
         ];
         for (vi, v) in vars.iter().enumerate() {
@@ -597,12 +631,27 @@ pub(crate) fn scan(
                 None => quote_ident(&f.col),
             };
             for j in 1..k {
-                replace.push((slot(k, j, fi), format!("CASE WHEN __c1 THEN {} ELSE {} END", quote_ident(&slot(k - 1, j, fi)), quote_ident(&slot(k, j, fi)))));
-                replace.push((slot(k - 1, j, fi), format!("CASE WHEN __c1 THEN {} ELSE {} END", f.init, quote_ident(&slot(k - 1, j, fi)))));
+                replace.push((
+                    slot(k, j, fi),
+                    format!(
+                        "CASE WHEN __c1 THEN {} ELSE {} END",
+                        quote_ident(&slot(k - 1, j, fi)),
+                        quote_ident(&slot(k, j, fi))
+                    ),
+                ));
+                replace.push((
+                    slot(k - 1, j, fi),
+                    format!("CASE WHEN __c1 THEN {} ELSE {} END", f.init, quote_ident(&slot(k - 1, j, fi))),
+                ));
             }
             replace.push((
                 slot(k, k, fi),
-                format!("CASE WHEN __c1 THEN {} WHEN __c2 THEN {} ELSE {} END", rec_val("x1"), rec_val("x2"), quote_ident(&slot(k, k, fi))),
+                format!(
+                    "CASE WHEN __c1 THEN {} WHEN __c2 THEN {} ELSE {} END",
+                    rec_val("x1"),
+                    rec_val("x2"),
+                    quote_ident(&slot(k, k, fi))
+                ),
             ));
         }
         if k > 1 {
@@ -610,7 +659,10 @@ pub(crate) fn scan(
         }
         let mut add_b = vec![(m_col(k), "(__c1 OR __c2)".to_string())];
         for (vi, v) in vars.iter().enumerate() {
-            add_b.push((e_col(k, vi), format!("CASE WHEN __c1 THEN __x1_{vi} WHEN __c2 THEN __x2_{vi} ELSE {} END", null_of(v.ty))));
+            add_b.push((
+                e_col(k, vi),
+                format!("CASE WHEN __c1 THEN __x1_{vi} WHEN __c2 THEN __x2_{vi} ELSE {} END", null_of(v.ty)),
+            ));
         }
         // stage B keeps only the pipeline columns (temporaries dropped)
         stage = wrap(stage, &cur, &replace, &add_b);
@@ -636,16 +688,27 @@ pub(crate) fn scan(
         }
         items.push("_b.__rn AS __rn".into());
         items.push(format!("{} AS __o", nsteps - k));
-        parts.push(format!("SELECT {} FROM {rec} AS _r JOIN {base} AS _b ON _b.__rn = _r.__rn WHERE _r.{}", items.join(", "), m_col(k)));
+        parts.push(format!(
+            "SELECT {} FROM {rec} AS _r JOIN {base} AS _b ON _b.__rn = _r.__rn WHERE _r.{}",
+            items.join(", "),
+            m_col(k)
+        ));
     }
-    let body = if parts.len() == 1 { parts.pop().unwrap() } else { parts.iter().map(|p| format!("({p})")).collect::<Vec<_>>().join(" UNION ALL ") };
+    let body = if parts.len() == 1 {
+        parts.pop().unwrap()
+    } else {
+        parts.iter().map(|p| format!("({p})")).collect::<Vec<_>>().join(" UNION ALL ")
+    };
     let sql = format!("(WITH RECURSIVE {base} AS MATERIALIZED ({base_sql}){rows_cte}, {rec} AS (({anchor}) UNION ALL ({rec_term})) {body}) AS {tag}");
 
     let mut cols = in_cols.clone();
     for v in &vars {
         cols.push(Column::new(v.name.clone(), v.ty));
     }
-    let items = cols.iter().map(|c| crate::sql::Item { sql: format!("{tag}.{}", quote_ident(&c.name)), alias: c.name.clone() }).collect();
+    let items = cols
+        .iter()
+        .map(|c| crate::sql::Item { sql: format!("{tag}.{}", quote_ident(&c.name)), alias: c.name.clone() })
+        .collect();
     let mut sel = Select { items: Some(items), from: From::Raw(sql), ..Default::default() };
     if nsteps == 1 && !logical_order.is_empty() {
         let mut r = Rel::from_select(sel, cols);
@@ -673,7 +736,15 @@ mod tests {
         for d in [Dialect::DuckDb, Dialect::Postgres] {
             let t = ok(q, d);
             let cols: Vec<(&str, KqlType)> = t.columns.iter().map(|c| (c.name.as_str(), c.ty)).collect();
-            assert_eq!(cols, vec![("g", KqlType::String), ("s", KqlType::Dynamic), ("avg_v", KqlType::Dynamic), ("t", KqlType::Dynamic)]);
+            assert_eq!(
+                cols,
+                vec![
+                    ("g", KqlType::String),
+                    ("s", KqlType::Dynamic),
+                    ("avg_v", KqlType::Dynamic),
+                    ("t", KqlType::Dynamic)
+                ]
+            );
         }
         // inferred range
         ok("datatable(x:long, v:real)[1,2.0] | make-series max(v) on x step 2", Dialect::DuckDb);
@@ -692,6 +763,11 @@ mod tests {
                 assert_eq!(t.columns.last().unwrap().ty, KqlType::Long);
             }
         }
-        assert!(translate("datatable(t:long)[1] | scan with (step s: true => x = 1;)", &Catalog::new(), Dialect::DuckDb).is_err());
+        assert!(translate(
+            "datatable(t:long)[1] | scan with (step s: true => x = 1;)",
+            &Catalog::new(),
+            Dialect::DuckDb
+        )
+        .is_err());
     }
 }

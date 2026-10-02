@@ -16,10 +16,12 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, a: &[TExpr], _scope: &Scope) -> Op
     let r = match name {
         // portable
         "strcmp" => strcmp(ctx, a),
-        "binary_and" | "binary_or" | "binary_xor" | "binary_not" | "binary_shift_left" | "binary_shift_right" | "bitset_count_ones" => bits(ctx, name, a),
+        "binary_and" | "binary_or" | "binary_xor" | "binary_not" | "binary_shift_left" | "binary_shift_right"
+        | "bitset_count_ones" => bits(ctx, name, a),
         "translate" => translate(ctx, a),
         "isascii" | "isutf8" => isascii(ctx, name, a),
-        "ingestion_time" => need(name, a, 0, 0).map(|_| TExpr::new(format!("CAST(NULL AS {})", ctx.d.sql_type(KqlType::DateTime)), KqlType::DateTime)),
+        "ingestion_time" => need(name, a, 0, 0)
+            .map(|_| TExpr::new(format!("CAST(NULL AS {})", ctx.d.sql_type(KqlType::DateTime)), KqlType::DateTime)),
         "new_guid" => new_guid(ctx, a),
         "hash_sha1" => hash_sha1(ctx, a),
         // DuckDB
@@ -101,7 +103,10 @@ fn is_duck_function(name: &str) -> bool {
 fn need(name: &str, a: &[TExpr], min: usize, max: usize) -> Result<()> {
     let n = a.len();
     if n < min || n > max {
-        return err(format!("{name}(): expected {} arguments, got {n}", if min == max { min.to_string() } else { format!("{min}..{max}") }));
+        return err(format!(
+            "{name}(): expected {} arguments, got {n}",
+            if min == max { min.to_string() } else { format!("{min}..{max}") }
+        ));
     }
     Ok(())
 }
@@ -115,7 +120,9 @@ fn mk(sql: String, ty: KqlType, a: &[TExpr]) -> TExpr {
 fn long_arg(ctx: &Ctx, t: &TExpr) -> String {
     match t.ty {
         KqlType::Long => t.sql.clone(),
-        KqlType::Dynamic | KqlType::String | KqlType::Real | KqlType::Decimal => ctx.convert(t.clone(), KqlType::Long).sql,
+        KqlType::Dynamic | KqlType::String | KqlType::Real | KqlType::Decimal => {
+            ctx.convert(t.clone(), KqlType::Long).sql
+        }
         _ => ctx.d.cast(&t.sql, KqlType::Long),
     }
 }
@@ -131,7 +138,11 @@ fn strcmp(ctx: &mut Ctx, a: &[TExpr]) -> Result<TExpr> {
     let (x, y) = (str_arg(ctx, &a[0]), str_arg(ctx, &a[1]));
     let c = if ctx.d.kind() == Dialect::Postgres { " COLLATE \"C\"" } else { "" };
     let int = ctx.d.sql_type(KqlType::Int);
-    Ok(mk(format!("CAST(CASE WHEN {x}{c} < {y}{c} THEN -1 WHEN {x} = {y} THEN 0 ELSE 1 END AS {int})"), KqlType::Int, a))
+    Ok(mk(
+        format!("CAST(CASE WHEN {x}{c} < {y}{c} THEN -1 WHEN {x} = {y} THEN 0 ELSE 1 END AS {int})"),
+        KqlType::Int,
+        a,
+    ))
 }
 
 /// Wraps a 128-bit integer expression to a signed 64-bit value (two's complement).
@@ -153,7 +164,9 @@ fn bits(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
         "binary_xor" if pg => format!("({x} # {y})"),
         "binary_xor" => format!("xor({x}, {y})"),
         "binary_not" => format!("(~{x})"),
-        "bitset_count_ones" if pg => format!("CAST(length(replace(CAST(CAST({x} AS bit(64)) AS text), '0', '')) AS integer)"),
+        "bitset_count_ones" if pg => {
+            format!("CAST(length(replace(CAST(CAST({x} AS bit(64)) AS text), '0', '')) AS integer)")
+        }
         "bitset_count_ones" => format!("CAST(bit_count({x}) AS INTEGER)"),
         // .NET semantics: the shift count is taken modulo 64; left shifts wrap around
         "binary_shift_left" if pg => format!("({x} << CAST(({y}) & 63 AS integer))"),
@@ -262,7 +275,11 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let k = ctx.alias();
             let key_list = format!("list_transform({}, {k} -> json_extract_string({k}, '$'))", jlist(&keys));
             let kept = format!("list_filter({es}, {e} -> NOT COALESCE(list_contains({key_list}, {e}.k), false))");
-            Ok(mk(format!("CASE WHEN json_type({bag}) = 'OBJECT' THEN {} END", bag_from_entries(ctx, &kept)), Dynamic, a))
+            Ok(mk(
+                format!("CASE WHEN json_type({bag}) = 'OBJECT' THEN {} END", bag_from_entries(ctx, &kept)),
+                Dynamic,
+                a,
+            ))
         }
         "bag_set_key" => {
             need(name, a, 3, 3)?;
@@ -291,7 +308,14 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let list = format!(
                 "list_filter(list_transform(range(len({kl})), {i} -> {{'k': CASE WHEN json_type({kl}[{i} + 1]) = 'VARCHAR' THEN json_extract_string({kl}[{i} + 1], '$') END, 'v': {vl}[{i} + 1]}}), {i} -> {i}.k IS NOT NULL)"
             );
-            Ok(mk(format!("CASE WHEN json_type({ks}) = 'ARRAY' AND json_type({vs}) = 'ARRAY' THEN {} END", bag_from_entries(ctx, &list)), Dynamic, a))
+            Ok(mk(
+                format!(
+                    "CASE WHEN json_type({ks}) = 'ARRAY' AND json_type({vs}) = 'ARRAY' THEN {} END",
+                    bag_from_entries(ctx, &list)
+                ),
+                Dynamic,
+                a,
+            ))
         }
         "dynamic_to_json" => {
             need(name, a, 1, 1)?;
@@ -343,7 +367,10 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let arr = dyn_arg(ctx, &a[0]);
             let idx = if a[1].ty == Dynamic {
                 let i = ctx.alias();
-                format!("list_transform({}, {i} -> TRY_CAST(json_extract_string({i}, '$') AS BIGINT))", jlist(&a[1].sql))
+                format!(
+                    "list_transform({}, {i} -> TRY_CAST(json_extract_string({i}, '$') AS BIGINT))",
+                    jlist(&a[1].sql)
+                )
             } else {
                 format!("[{}]", long_arg(ctx, &a[1]))
             };
@@ -368,7 +395,19 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             for t in &a[1..3] {
                 branch.push(if t.ty == Dynamic {
                     let l = ctx.alias();
-                    (Some((l.clone(), format!("CASE WHEN json_type({0}) = 'ARRAY' THEN CAST({0} AS JSON[]) ELSE [{0}] END", t.sql))), format!("CASE WHEN len({l}) = 1 AND json_type({0}) <> 'ARRAY' THEN {l}[1] ELSE {l}[{i} + 1] END", t.sql))
+                    (
+                        Some((
+                            l.clone(),
+                            format!(
+                                "CASE WHEN json_type({0}) = 'ARRAY' THEN CAST({0} AS JSON[]) ELSE [{0}] END",
+                                t.sql
+                            ),
+                        )),
+                        format!(
+                            "CASE WHEN len({l}) = 1 AND json_type({0}) <> 'ARRAY' THEN {l}[1] ELSE {l}[{i} + 1] END",
+                            t.sql
+                        ),
+                    )
                 } else {
                     (None, dyn_arg(ctx, t))
                 });
@@ -404,15 +443,27 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let e3 = ctx.alias();
             let inter = format!("len(list_filter({xs}, {e3} -> list_contains({ys}, {e3})))");
             let union = format!("len(list_distinct(list_concat({xs}, {ys})))");
-            Ok(mk(format!("CASE WHEN {union} = 0 THEN {} ELSE CAST({inter} AS DOUBLE) / {union} END", d.real_literal(f64::NAN)), Real, a))
+            Ok(mk(
+                format!(
+                    "CASE WHEN {union} = 0 THEN {} ELSE CAST({inter} AS DOUBLE) / {union} END",
+                    d.real_literal(f64::NAN)
+                ),
+                Real,
+                a,
+            ))
         }
         "treepath" => {
             need(name, a, 1, 1)?;
             if let Some(Const::Dynamic(v)) = &a[0].konst {
                 let mut paths = Vec::new();
                 tree_paths(v, "", &mut paths);
-                let json = serde_json::Value::Array(paths.into_iter().map(serde_json::Value::String).collect()).to_string();
-                return Ok(TExpr::konst(d.json_literal(&json), Dynamic, Const::Dynamic(serde_json::from_str(&json).unwrap_or_default())));
+                let json =
+                    serde_json::Value::Array(paths.into_iter().map(serde_json::Value::String).collect()).to_string();
+                return Ok(TExpr::konst(
+                    d.json_literal(&json),
+                    Dynamic,
+                    Const::Dynamic(serde_json::from_str(&json).unwrap_or_default()),
+                ));
             }
             let x = dyn_arg(ctx, &a[0]);
             let t = ctx.alias();
@@ -433,7 +484,13 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let v = dyn_arg(ctx, &a[0]);
             let n = long_arg(ctx, &a[1]);
             let i = ctx.alias();
-            Ok(mk(format!("CASE WHEN {n} IS NOT NULL THEN to_json(list_transform(range(greatest({n}, 0)), {i} -> {v})) END"), Dynamic, a))
+            Ok(mk(
+                format!(
+                    "CASE WHEN {n} IS NOT NULL THEN to_json(list_transform(range(greatest({n}, 0)), {i} -> {v})) END"
+                ),
+                Dynamic,
+                a,
+            ))
         }
         // ------------------------------------------------------------------ strings
         "make_string" => {
@@ -479,7 +536,9 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let s = str_arg(ctx, &a[0]);
             // .NET Regex.Escape
             let esc = format!("regexp_replace({s}, '([\\\\*+?|{{\\[()^$.#])', '\\\\\\1', 'g')");
-            let esc = format!("replace(replace(replace(replace({esc}, ' ', '\\ '), chr(9), '\\t'), chr(10), '\\n'), chr(13), '\\r')");
+            let esc = format!(
+                "replace(replace(replace(replace({esc}, ' ', '\\ '), chr(9), '\\t'), chr(10), '\\n'), chr(13), '\\r')"
+            );
             Ok(mk(esc, String, a))
         }
         "indexof_regex" => {
@@ -533,8 +592,11 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
         "parse_url" => {
             need(name, a, 1, 1)?;
             let s = str_arg(ctx, &a[0]);
-            let re = quote_str(r"^([A-Za-z][A-Za-z0-9+.\-]*)://(?:([^:@/?#]*)(?::([^@/?#]*))?@)?(\[[^\]]*\]|[^:/?#]*)(?::([0-9]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$");
-            let g = |n: u32| format!("CASE WHEN regexp_matches({s}, {re}) THEN regexp_extract({s}, {re}, {n}) ELSE '' END");
+            let re = quote_str(
+                r"^([A-Za-z][A-Za-z0-9+.\-]*)://(?:([^:@/?#]*)(?::([^@/?#]*))?@)?(\[[^\]]*\]|[^:/?#]*)(?::([0-9]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$",
+            );
+            let g =
+                |n: u32| format!("CASE WHEN regexp_matches({s}, {re}) THEN regexp_extract({s}, {re}, {n}) ELSE '' END");
             let q = query_bag(ctx, &g(7));
             Ok(mk(
                 format!(
@@ -587,7 +649,9 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             match a.get(2) {
                 Some(tl) => {
                     let ty = match &tl.konst {
-                        Some(Const::Str(s)) => KqlType::from_name(s).ok_or_else(|| crate::Error::new(format!("unknown type '{s}'")))?,
+                        Some(Const::Str(s)) => {
+                            KqlType::from_name(s).ok_or_else(|| crate::Error::new(format!("unknown type '{s}'")))?
+                        }
                         _ => return err("extract_json(): the third argument must be typeof(<type>)"),
                     };
                     if ty == String {
@@ -622,7 +686,16 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let s = str_arg(ctx, &a[0]);
             let m = long_arg(ctx, &a[1]);
             let ip = ipv4(&s);
-            Ok(mk(bind(ctx, &ip, |_, x| format!("CASE WHEN {m} BETWEEN 0 AND 32 THEN {} END", masked(&format!("{x}.v"), &format!("least({x}.p, {m})")))), Long, a))
+            Ok(mk(
+                bind(ctx, &ip, |_, x| {
+                    format!(
+                        "CASE WHEN {m} BETWEEN 0 AND 32 THEN {} END",
+                        masked(&format!("{x}.v"), &format!("least({x}.p, {m})"))
+                    )
+                }),
+                Long,
+                a,
+            ))
         }
         "ipv4_compare" | "ipv4_is_match" => {
             need(name, a, 2, 3)?;
@@ -657,8 +730,12 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let mut ranges = Vec::new();
             for t in &a[1..] {
                 match &t.konst {
-                    Some(Const::Dynamic(serde_json::Value::Array(items))) => ranges.extend(items.iter().filter_map(|v| v.as_str().map(quote_str))),
-                    _ if t.ty == Dynamic => return err("ipv4_is_in_any_range(): the ranges must be strings or a constant array"),
+                    Some(Const::Dynamic(serde_json::Value::Array(items))) => {
+                        ranges.extend(items.iter().filter_map(|v| v.as_str().map(quote_str)))
+                    }
+                    _ if t.ty == Dynamic => {
+                        return err("ipv4_is_in_any_range(): the ranges must be strings or a constant array")
+                    }
                     _ => ranges.push(str_arg(ctx, t)),
                 }
             }
@@ -667,14 +744,25 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             }
             let conds: Vec<std::string::String> = ranges.iter().map(|r| ipv4_in_range(ctx, &ip, r)).collect();
             let valid = ipv4(&ip);
-            Ok(mk(format!("CASE WHEN {valid} IS NULL THEN NULL ELSE COALESCE({}, false) END", conds.join(" OR ")), Bool, a))
+            Ok(mk(
+                format!("CASE WHEN {valid} IS NULL THEN NULL ELSE COALESCE({}, false) END", conds.join(" OR ")),
+                Bool,
+                a,
+            ))
         }
         "ipv4_is_private" => {
             need(name, a, 1, 1)?;
             let ip = ipv4(&str_arg(ctx, &a[0]));
             let sql = bind(ctx, &ip, |_, x| {
-                let inside = |net: i64, bits: i64| format!("({x}.p >= {bits} AND ({x}.v // {}) = {})", 1i64 << (32 - bits), net >> (32 - bits));
-                format!("CASE WHEN {x} IS NULL THEN NULL ELSE ({} OR {} OR {}) END", inside(0x0A00_0000, 8), inside(0xAC10_0000, 12), inside(0xC0A8_0000, 16))
+                let inside = |net: i64, bits: i64| {
+                    format!("({x}.p >= {bits} AND ({x}.v // {}) = {})", 1i64 << (32 - bits), net >> (32 - bits))
+                };
+                format!(
+                    "CASE WHEN {x} IS NULL THEN NULL ELSE ({} OR {} OR {}) END",
+                    inside(0x0A00_0000, 8),
+                    inside(0xAC10_0000, 12),
+                    inside(0xC0A8_0000, 16)
+                )
             });
             Ok(mk(sql, Bool, a))
         }
@@ -691,11 +779,18 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
                 format!("CASE WHEN {x} BETWEEN 0 AND 4294967295 AND {m} BETWEEN 0 AND 32 THEN {} END", masked(&x, &m))
             } else {
                 let ip = ipv4(&str_arg(ctx, &a[0]));
-                bind(ctx, &ip, |_, x| format!("CASE WHEN {m} BETWEEN 0 AND 32 THEN {} END", masked(&format!("{x}.v"), &format!("least({x}.p, {m})"))))
+                bind(ctx, &ip, |_, x| {
+                    format!(
+                        "CASE WHEN {m} BETWEEN 0 AND 32 THEN {} END",
+                        masked(&format!("{x}.v"), &format!("least({x}.p, {m})"))
+                    )
+                })
             };
             let with_mask = name == "format_ipv4_mask";
             let sql = bind(ctx, &v, |_, v| {
-                let dotted = format!("printf('%d.%d.%d.%d', {v} // 16777216, ({v} // 65536) % 256, ({v} // 256) % 256, {v} % 256)");
+                let dotted = format!(
+                    "printf('%d.%d.%d.%d', {v} // 16777216, ({v} // 65536) % 256, ({v} // 256) % 256, {v} % 256)"
+                );
                 if with_mask {
                     format!("CASE WHEN {v} IS NULL THEN '' ELSE {dotted} || '/' || CAST({m} AS VARCHAR) END")
                 } else {
@@ -712,7 +807,9 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             for t in &a[1..] {
                 match &t.konst {
                     Some(Const::Str(v)) => needles.push(v.clone()),
-                    Some(Const::Dynamic(serde_json::Value::Array(items))) => needles.extend(items.iter().filter_map(|v| v.as_str().map(str::to_string))),
+                    Some(Const::Dynamic(serde_json::Value::Array(items))) => {
+                        needles.extend(items.iter().filter_map(|v| v.as_str().map(str::to_string)))
+                    }
                     _ => return err(format!("{name}(): the IP addresses must be constants")),
                 }
             }
@@ -724,7 +821,13 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
                 .map(|n| {
                     // an address is delimited by non-alphanumeric, non-dot characters
                     let body = crate::regex::escape(n);
-                    let tail = if prefix && n.ends_with('.') { "[0-9]".to_string() } else if prefix { "([.][0-9]|[^0-9A-Za-z.]|$)".to_string() } else { "([^0-9A-Za-z.]|[.][^0-9]|[.]$|$)".to_string() };
+                    let tail = if prefix && n.ends_with('.') {
+                        "[0-9]".to_string()
+                    } else if prefix {
+                        "([.][0-9]|[^0-9A-Za-z.]|$)".to_string()
+                    } else {
+                        "([^0-9A-Za-z.]|[.][^0-9]|[.]$|$)".to_string()
+                    };
                     format!("regexp_matches({s}, {})", quote_str(&format!("(^|[^0-9A-Za-z.]){body}{tail}")))
                 })
                 .collect();
@@ -848,7 +951,13 @@ fn pg(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Option<Result<TExpr>> {
             "bag_set_key" => {
                 need(name, a, 3, 3)?;
                 let (bag, key, val) = (dyn_arg(ctx, &a[0]), str_arg(ctx, &a[1]), dyn_arg(ctx, &a[2]));
-                mk(format!("CASE WHEN jsonb_typeof({bag}) = 'object' THEN {bag} || jsonb_build_object({key}, {val}) END"), Dynamic, a)
+                mk(
+                    format!(
+                        "CASE WHEN jsonb_typeof({bag}) = 'object' THEN {bag} || jsonb_build_object({key}, {val}) END"
+                    ),
+                    Dynamic,
+                    a,
+                )
             }
             "bag_zip" => {
                 need(name, a, 2, 2)?;
@@ -898,7 +1007,11 @@ fn pg(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Option<Result<TExpr>> {
                 need(name, a, 2, 2)?;
                 let arr = dyn_arg(ctx, &a[0]);
                 let idx = if a[1].ty == Dynamic {
-                    format!("ARRAY(SELECT {} FROM jsonb_array_elements_text({}) AS _t(x))", d.try_cast("_t.x", Long), pg_arr(&a[1].sql))
+                    format!(
+                        "ARRAY(SELECT {} FROM jsonb_array_elements_text({}) AS _t(x))",
+                        d.try_cast("_t.x", Long),
+                        pg_arr(&a[1].sql)
+                    )
                 } else {
                     format!("ARRAY[{}]", long_arg(ctx, &a[1]))
                 };
@@ -907,7 +1020,11 @@ fn pg(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Option<Result<TExpr>> {
                 let bounds = format!(
                     "SELECT CAST(0 AS bigint) AS k, CAST(0 AS bigint) AS b UNION ALL SELECT _j.o, {norm} FROM unnest({idx}) WITH ORDINALITY AS _j(x, o) UNION ALL SELECT 9223372036854775807, {len}"
                 );
-                let piece = format!("(SELECT {} FROM {} WHERE _e.__kql_i - 1 >= _b.lo AND _e.__kql_i - 1 < _b.hi)", agg("_e.__kql_v", "_e.__kql_i"), pg_elems(&arr, "_e"));
+                let piece = format!(
+                    "(SELECT {} FROM {} WHERE _e.__kql_i - 1 >= _b.lo AND _e.__kql_i - 1 < _b.hi)",
+                    agg("_e.__kql_v", "_e.__kql_i"),
+                    pg_elems(&arr, "_e")
+                );
                 mk(
                     format!(
                         "CASE WHEN jsonb_typeof({arr}) = 'array' THEN (SELECT {} FROM (SELECT _c.k, _c.b AS lo, lead(_c.b) OVER (ORDER BY _c.k) AS hi FROM ({bounds}) AS _c) AS _b WHERE _b.hi IS NOT NULL) END",
@@ -933,7 +1050,15 @@ fn pg(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Option<Result<TExpr>> {
                     .collect();
                 let truth = "CASE WHEN jsonb_typeof(_c.__kql_v) = 'boolean' THEN _c.__kql_v = 'true'::jsonb WHEN jsonb_typeof(_c.__kql_v) = 'number' THEN CAST(_c.__kql_v #>> '{}' AS double precision) <> 0 END";
                 let elem = format!("CASE WHEN {truth} THEN {} WHEN NOT {truth} THEN {} END", branch[0], branch[1]);
-                mk(format!("CASE WHEN jsonb_typeof({cond}) = 'array' THEN (SELECT {} FROM {}) END", agg(&elem, "_c.__kql_i"), pg_elems(&cond, "_c")), Dynamic, a)
+                mk(
+                    format!(
+                        "CASE WHEN jsonb_typeof({cond}) = 'array' THEN (SELECT {} FROM {}) END",
+                        agg(&elem, "_c.__kql_i"),
+                        pg_elems(&cond, "_c")
+                    ),
+                    Dynamic,
+                    a,
+                )
             }
             "array_strcat" => {
                 need(name, a, 2, 2)?;
@@ -976,25 +1101,50 @@ fn pg(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Option<Result<TExpr>> {
                         let step = a.get(2).map(|t| t.sql.clone()).unwrap_or_else(|| "864000000000".into());
                         let (f, t) = (d.epoch_us(&start.sql), d.epoch_us(&ctx.convert(stop.clone(), DateTime).sql));
                         let st = format!("CAST(trunc(({step}) / 10) AS bigint)");
-                        let n = format!("least(CAST(floor(({t} - {f}) / {}) AS bigint), 1048575)", d.cast(&format!("NULLIF({st}, 0)"), Real));
-                        (format!("{st} = 0"), n, d.to_json(&ctx.datetime_to_string(&d.ts_from_us(&format!("({f} + {i} * {st})")))))
+                        let n = format!(
+                            "least(CAST(floor(({t} - {f}) / {}) AS bigint), 1048575)",
+                            d.cast(&format!("NULLIF({st}, 0)"), Real)
+                        );
+                        (
+                            format!("{st} = 0"),
+                            n,
+                            d.to_json(&ctx.datetime_to_string(&d.ts_from_us(&format!("({f} + {i} * {st})")))),
+                        )
                     }
                     TimeSpan => {
                         let step = a.get(2).map(|t| t.sql.clone()).unwrap_or_else(|| "1".into());
-                        let n = format!("least(CAST(floor(({} - {}) / {}) AS bigint), 1048575)", stop.sql, start.sql, d.cast(&format!("NULLIF({step}, 0)"), Real));
-                        (format!("{step} = 0"), n, d.to_json(&ctx.timespan_to_string(&format!("({} + {i} * {step})", start.sql))))
+                        let n = format!(
+                            "least(CAST(floor(({} - {}) / {}) AS bigint), 1048575)",
+                            stop.sql,
+                            start.sql,
+                            d.cast(&format!("NULLIF({step}, 0)"), Real)
+                        );
+                        (
+                            format!("{step} = 0"),
+                            n,
+                            d.to_json(&ctx.timespan_to_string(&format!("({} + {i} * {step})", start.sql))),
+                        )
                     }
                     t if t.is_numeric() || t == Dynamic => {
                         let step_ty = a.get(2).map(|s| s.ty).unwrap_or(Long);
-                        if start.ty.is_integer() && (stop.ty.is_integer() || stop.ty == Dynamic) && step_ty.is_integer() {
+                        if start.ty.is_integer() && (stop.ty.is_integer() || stop.ty == Dynamic) && step_ty.is_integer()
+                        {
                             let (f, t) = (long_arg(ctx, start), long_arg(ctx, stop));
                             let s = a.get(2).map(|x| long_arg(ctx, x)).unwrap_or_else(|| "1".into());
-                            (format!("{s} = 0"), format!("least(({t} - {f}) / NULLIF({s}, 0), 1048575)"), format!("to_jsonb({f} + {i} * {s})"))
+                            (
+                                format!("{s} = 0"),
+                                format!("least(({t} - {f}) / NULLIF({s}, 0), 1048575)"),
+                                format!("to_jsonb({f} + {i} * {s})"),
+                            )
                         } else {
                             let real = |ctx: &Ctx, x: &TExpr| ctx.convert(x.clone(), Real).sql;
                             let (f, t) = (real(ctx, start), real(ctx, stop));
                             let s = a.get(2).map(|x| real(ctx, x)).unwrap_or_else(|| d.real_literal(1.0));
-                            (format!("{s} = 0"), format!("least(CAST(floor(({t} - {f}) / NULLIF({s}, 0)) AS bigint), 1048575)"), format!("to_jsonb({f} + {i} * {s})"))
+                            (
+                                format!("{s} = 0"),
+                                format!("least(CAST(floor(({t} - {f}) / NULLIF({s}, 0)) AS bigint), 1048575)"),
+                                format!("to_jsonb({f} + {i} * {s})"),
+                            )
                         }
                     }
                     _ => return err("range(): unsupported argument types"),
@@ -1086,7 +1236,11 @@ fn ipv4_in_range(ctx: &mut Ctx, ip: &str, range: &str) -> String {
     let (xs, rs) = (ipv4(ip), ipv4(range));
     bind(ctx, &xs, |ctx, x| {
         bind(ctx, &rs, |_, r| {
-            format!("CASE WHEN {x} IS NULL OR {r} IS NULL THEN NULL ELSE ({} = {} AND {x}.p >= {r}.p) END", masked(&format!("{x}.v"), &format!("{r}.p")), masked(&format!("{r}.v"), &format!("{r}.p")))
+            format!(
+                "CASE WHEN {x} IS NULL OR {r} IS NULL THEN NULL ELSE ({} = {} AND {x}.p >= {r}.p) END",
+                masked(&format!("{x}.v"), &format!("{r}.p")),
+                masked(&format!("{r}.v"), &format!("{r}.p"))
+            )
         })
     })
 }
@@ -1109,7 +1263,9 @@ fn format_bytes(ctx: &mut Ctx, a: &[TExpr]) -> Result<TExpr> {
             };
             i.to_string()
         }
-        None if a.get(2).is_some() && a[2].str_const().is_none() => return err("format_bytes(): the unit must be a constant"),
+        None if a.get(2).is_some() && a[2].str_const().is_none() => {
+            return err("format_bytes(): the unit must be a constant")
+        }
         None => format!("CAST(least(greatest(floor(log(abs({v})) / log({base})), 0), 6) AS INTEGER)"),
     };
     let idx = format!("(CASE WHEN {v} = 0 THEN 0 ELSE {idx} END)");
@@ -1128,7 +1284,8 @@ fn range(ctx: &mut Ctx, a: &[TExpr]) -> Result<TExpr> {
     let (start, stop) = (&a[0], &a[1]);
     let i = ctx.alias();
     // number of elements - 1, capped like Kusto (1,048,576 elements)
-    let count = |from: &str, to: &str, step: &str| format!("least(CAST(floor(({to} - {from}) / {step}) AS BIGINT), 1048575)");
+    let count =
+        |from: &str, to: &str, step: &str| format!("least(CAST(floor(({to} - {from}) / {step}) AS BIGINT), 1048575)");
     match start.ty {
         DateTime => {
             let step = a.get(2).map(|t| t.sql.clone()).unwrap_or_else(|| "864000000000".into());

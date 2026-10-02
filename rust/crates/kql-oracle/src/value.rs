@@ -164,12 +164,7 @@ pub fn format_datetime(ticks: i64) -> String {
     let (y, m, d) = civil_from_days(days);
     let secs = rem / TICKS_PER_SECOND;
     let frac = rem % TICKS_PER_SECOND;
-    format!(
-        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{frac:07}Z",
-        secs / 3600,
-        (secs / 60) % 60,
-        secs % 60
-    )
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{frac:07}Z", secs / 3600, (secs / 60) % 60, secs % 60)
 }
 
 /// Parses an ISO-8601-ish datetime (`YYYY-MM-DD[(T| )hh:mm[:ss[.fffffff]]][Z|±hh:mm]`) to ticks.
@@ -329,7 +324,9 @@ mod tests {
 
     #[test]
     fn timespan_roundtrip() {
-        for s in ["4.00:00:00", "-00:00:01.5000000", "00:00:00.0000001", "6.23:59:59.9999999", "00:00:00", "-1.02:03:04"] {
+        for s in
+            ["4.00:00:00", "-00:00:01.5000000", "00:00:00.0000001", "6.23:59:59.9999999", "00:00:00", "-1.02:03:04"]
+        {
             let t = parse_timespan(s).unwrap();
             assert_eq!(format_timespan(t), s, "{s}");
         }

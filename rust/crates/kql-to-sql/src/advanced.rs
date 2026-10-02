@@ -28,11 +28,20 @@ fn inner_identifier(e: &Expr) -> Option<String> {
     }
 }
 
-pub(crate) fn mv_expand(ctx: &mut Ctx, rel: Rel, params: &[OpParam], items: &[MvExpandItem], limit: Option<&Expr>, env: &Env) -> Result<Rel> {
+pub(crate) fn mv_expand(
+    ctx: &mut Ctx,
+    rel: Rel,
+    params: &[OpParam],
+    items: &[MvExpandItem],
+    limit: Option<&Expr>,
+    env: &Env,
+) -> Result<Rel> {
     let mut rel = rel;
     rel.order.clear();
     let rel = rel.passthrough(ctx);
-    let bag_as_array = param_word(params, "bagexpansion").or_else(|| param_word(params, "kind")).is_some_and(|b| b.eq_ignore_ascii_case("array"));
+    let bag_as_array = param_word(params, "bagexpansion")
+        .or_else(|| param_word(params, "kind"))
+        .is_some_and(|b| b.eq_ignore_ascii_case("array"));
     let index_col = param_word(params, "with_itemindex");
     let d = ctx.d;
 
@@ -70,7 +79,8 @@ pub(crate) fn mv_expand(ctx: &mut Ctx, rel: Rel, params: &[OpParam], items: &[Mv
 
     // step 2: expand. Values, keys (bags) and positions are unnested in the select list, which
     // keeps element order and expands several columns in parallel (shorter ones padded with null).
-    let mut items2: Vec<Item> = r1.cols.iter().map(|c| Item { sql: quote_ident(&c.name), alias: c.name.clone() }).collect();
+    let mut items2: Vec<Item> =
+        r1.cols.iter().map(|c| Item { sql: quote_ident(&c.name), alias: c.name.clone() }).collect();
     let mut cols2 = r1.cols.clone();
     for i in 0..specs.len() {
         let h = format!("__kql_mv{i}");
@@ -116,8 +126,15 @@ pub(crate) fn mv_expand(ctx: &mut Ctx, rel: Rel, params: &[OpParam], items: &[Mv
     }
     for (i, (name, replaces, _)) in specs.iter().enumerate() {
         let (v, k) = (format!("__kql_v{i}"), format!("__kql_k{i}"));
-        let bag_item = if bag_as_array { d.json_array(&[d.to_json(&k), v.clone()]) } else { d.json_object(&[(k.clone(), v.clone())]) };
-        let value = format!("CASE WHEN {k} IS NOT NULL THEN {bag_item} WHEN {} = 'null' THEN NULL ELSE {v} END", d.json_type(&v));
+        let bag_item = if bag_as_array {
+            d.json_array(&[d.to_json(&k), v.clone()])
+        } else {
+            d.json_object(&[(k.clone(), v.clone())])
+        };
+        let value = format!(
+            "CASE WHEN {k} IS NOT NULL THEN {bag_item} WHEN {} = 'null' THEN NULL ELSE {v} END",
+            d.json_type(&v)
+        );
         // typed conversion happens in a final step over the plain column
         if *replaces {
             let j = cols.iter().position(|c| c.name == *name).unwrap();
@@ -153,7 +170,15 @@ pub(crate) fn mv_expand(ctx: &mut Ctx, rel: Rel, params: &[OpParam], items: &[Mv
     Ok(r5.project(ctx, items5, cols))
 }
 
-pub(crate) fn parse(ctx: &mut Ctx, rel: Rel, params: &[OpParam], expr: &Expr, parts: &[ParsePart], filter: bool, env: &Env) -> Result<Rel> {
+pub(crate) fn parse(
+    ctx: &mut Ctx,
+    rel: Rel,
+    params: &[OpParam],
+    expr: &Expr,
+    parts: &[ParsePart],
+    filter: bool,
+    env: &Env,
+) -> Result<Rel> {
     let kind = param_word(params, "kind").unwrap_or_else(|| "simple".into()).to_ascii_lowercase();
     let regex_mode = kind == "regex";
     let rel = rel.passthrough(ctx);
@@ -176,7 +201,9 @@ pub(crate) fn parse(ctx: &mut Ctx, rel: Rel, params: &[OpParam], expr: &Expr, pa
                     Some(t) => KqlType::from_name(t).ok_or_else(|| crate::Error::new(format!("unknown type '{t}'")))?,
                     None => KqlType::String,
                 };
-                let last = !parts[i + 1..].iter().any(|p| matches!(p, ParsePart::Column { .. } | ParsePart::Text(_) | ParsePart::Regex(_)));
+                let last = !parts[i + 1..]
+                    .iter()
+                    .any(|p| matches!(p, ParsePart::Column { .. } | ParsePart::Text(_) | ParsePart::Regex(_)));
                 re.push_str(match ty {
                     KqlType::Int | KqlType::Long => r"(-?\d+)",
                     KqlType::Real | KqlType::Decimal => r"(-?\d+\.?\d*(?:[eE][+-]?\d+)?)",
@@ -243,7 +270,9 @@ pub(crate) fn apply_advanced(ctx: &mut Ctx, rel: Rel, op: &Operator, env: &Env) 
         Operator::MakeSeries { params, aggs, on, from, to, step, by } => {
             op_series::make_series(ctx, rel, params, aggs, on, from.as_ref(), to.as_ref(), step, by, env)
         }
-        Operator::Scan { order_by, partition_by, declare, steps } => op_series::scan(ctx, rel, order_by, partition_by, declare, steps, env),
+        Operator::Scan { order_by, partition_by, declare, steps } => {
+            op_series::scan(ctx, rel, order_by, partition_by, declare, steps, env)
+        }
         Operator::Search { params, tables, predicate } => {
             if !tables.is_empty() {
                 return err("search: 'in (tables)' is only valid when search starts the query");

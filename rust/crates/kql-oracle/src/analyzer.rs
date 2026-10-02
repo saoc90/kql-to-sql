@@ -11,9 +11,28 @@
 
 /// Functions/operators whose results are time-dependent, random, or approximate.
 const NONDETERMINISTIC_MARKERS: &[&str] = &[
-    "rand", "now", "ago", "new_guid", "newguid", "guid(", "datetime(now", "dcount", "dcountif", "hll",
-    "hll_if", "hll_merge", "tdigest", "percentile", "sample", "take_any", "any(", "anyif", "current_",
-    "rand(", "make_string(rand", "top-hitters",
+    "rand",
+    "now",
+    "ago",
+    "new_guid",
+    "newguid",
+    "guid(",
+    "datetime(now",
+    "dcount",
+    "dcountif",
+    "hll",
+    "hll_if",
+    "hll_merge",
+    "tdigest",
+    "percentile",
+    "sample",
+    "take_any",
+    "any(",
+    "anyif",
+    "current_",
+    "rand(",
+    "make_string(rand",
+    "top-hitters",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,9 +70,7 @@ pub fn analyze(kql: &str) -> Analysis {
 
 /// Splits the leading operator keyword (letters, digits, '-', '_') off a pipe stage.
 fn split_keyword(stage: &str) -> (&str, &str) {
-    let end = stage
-        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-        .unwrap_or(stage.len());
+    let end = stage.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).unwrap_or(stage.len());
     (&stage[..end], &stage[end..])
 }
 
@@ -70,7 +87,8 @@ fn by_keys(rest: &str) -> Vec<String> {
         let is_ident = !ident.is_empty()
             && ident.chars().all(|c| c.is_alphanumeric() || c == '_')
             && !ident.starts_with(|c: char| c.is_ascii_digit());
-        let modifiers_ok = words.all(|w| matches!(w.to_ascii_lowercase().as_str(), "asc" | "desc" | "nulls" | "first" | "last"));
+        let modifiers_ok =
+            words.all(|w| matches!(w.to_ascii_lowercase().as_str(), "asc" | "desc" | "nulls" | "first" | "last"));
         if !is_ident || !modifiers_ok {
             break;
         }

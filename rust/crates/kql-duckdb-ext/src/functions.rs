@@ -39,7 +39,12 @@ fn read_str(strings: &[duckdb_string_t], vector: &duckdb::core::FlatVector, i: u
 
 /// Shared body of the two scalar functions: `dialect_col` is the input column holding the
 /// dialect name, if any.
-fn translate_column(shared: &Shared, input: &mut DataChunkHandle, output: &mut dyn WritableVector, dialect_col: Option<usize>) -> Result<(), BoxError> {
+fn translate_column(
+    shared: &Shared,
+    input: &mut DataChunkHandle,
+    output: &mut dyn WritableVector,
+    dialect_col: Option<usize>,
+) -> Result<(), BoxError> {
     let n = input.len();
     let kql_vec = input.flat_vector(0);
     let kql = unsafe { kql_vec.as_slice_with_len::<duckdb_string_t>(n) };
@@ -77,7 +82,11 @@ struct KqlToSql;
 impl VScalar for KqlToSql {
     type State = Arc<Shared>;
 
-    fn invoke(state: &Self::State, input: &mut DataChunkHandle, output: &mut dyn WritableVector) -> Result<(), BoxError> {
+    fn invoke(
+        state: &Self::State,
+        input: &mut DataChunkHandle,
+        output: &mut dyn WritableVector,
+    ) -> Result<(), BoxError> {
         translate_column(state, input, output, None)
     }
 
@@ -96,7 +105,11 @@ struct KqlToSqlDialect;
 impl VScalar for KqlToSqlDialect {
     type State = Arc<Shared>;
 
-    fn invoke(state: &Self::State, input: &mut DataChunkHandle, output: &mut dyn WritableVector) -> Result<(), BoxError> {
+    fn invoke(
+        state: &Self::State,
+        input: &mut DataChunkHandle,
+        output: &mut dyn WritableVector,
+    ) -> Result<(), BoxError> {
         translate_column(state, input, output, Some(1))
     }
 

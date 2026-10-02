@@ -80,7 +80,8 @@ fn kql_to_sql_translates_against_the_live_catalog() {
     assert_eq!(n, 2);
 
     // tables created after LOAD are visible (the catalog is re-read on every call)
-    con.execute_batch("CREATE TABLE Later(a INTEGER, b VARCHAR); INSERT INTO Later VALUES (1, 'x'), (2, 'y');").unwrap();
+    con.execute_batch("CREATE TABLE Later(a INTEGER, b VARCHAR); INSERT INTO Later VALUES (1, 'x'), (2, 'y');")
+        .unwrap();
     let sql = string(&con, "SELECT kql_to_sql('Later | where a > 1 | project b')");
     assert_eq!(string(&con, &sql), "y");
 
@@ -130,7 +131,8 @@ fn kql_explain_returns_one_row() {
     assert_eq!(dialect, "duckdb");
     assert_eq!(columns, "State:string, InjuriesDirect:int");
     assert_eq!(strings(&con, &sql).len(), 2);
-    let names: Vec<String> = describe(&con, "SELECT * FROM kql_explain('StormEvents | take 1')").into_iter().map(|c| c.0).collect();
+    let names: Vec<String> =
+        describe(&con, "SELECT * FROM kql_explain('StormEvents | take 1')").into_iter().map(|c| c.0).collect();
     assert_eq!(names, ["kql_input", "sql_output", "dialect", "columns"]);
     let d = string(&con, "SELECT dialect FROM kql_explain('StormEvents | take 1', dialect := 'pglite')");
     assert_eq!(d, "postgres");
@@ -142,7 +144,8 @@ fn kql_explain_returns_one_row() {
 fn kql_executes_with_kusto_column_types() {
     let Some(con) = setup() else { return };
     let rows: Vec<(String, i64)> = {
-        let mut stmt = con.prepare("SELECT * FROM kql('StormEvents | summarize count() by State | order by State asc')").unwrap();
+        let mut stmt =
+            con.prepare("SELECT * FROM kql('StormEvents | summarize count() by State | order by State asc')").unwrap();
         stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
     };
     assert_eq!(rows, [("KANSAS".to_string(), 2), ("OHIO".to_string(), 1), ("TEXAS".to_string(), 2)]);
@@ -178,7 +181,9 @@ fn kql_executes_with_kusto_column_types() {
     assert_eq!(inj, ["7", "3", "2", "1", "0"]);
 
     // composes with SQL
-    let n: i64 = con.query_row("SELECT sum(count_) FROM kql('StormEvents | summarize count() by EventType')", [], |r| r.get(0)).unwrap();
+    let n: i64 = con
+        .query_row("SELECT sum(count_) FROM kql('StormEvents | summarize count() by EventType')", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(n, 5);
 
     let e = error(&con, "SELECT * FROM kql('Missing | take 1')");
@@ -196,7 +201,10 @@ fn kql_streams_large_results_and_survives_pool_exhaustion() {
     let n: i64 = con.query_row("SELECT count(*) FROM (SELECT * FROM kql('Big') LIMIT 5)", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 5);
     // more concurrent scans than streaming connections (4): the rest are materialized
-    let union = (0..7).map(|i| format!("SELECT count(*) AS c FROM kql('Big | where x % 7 == {i}')")).collect::<Vec<_>>().join(" UNION ALL ");
+    let union = (0..7)
+        .map(|i| format!("SELECT count(*) AS c FROM kql('Big | where x % 7 == {i}')"))
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
     let total: i64 = con.query_row(&format!("SELECT sum(c) FROM ({union})"), [], |r| r.get(0)).unwrap();
     assert_eq!(total, 300000);
     let joined: i64 = con

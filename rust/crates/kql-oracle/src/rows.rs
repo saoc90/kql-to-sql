@@ -43,11 +43,7 @@ fn parse_cells(rest: &str, classes: &[Class], out: &mut Row) -> bool {
     };
     for (value, len) in candidates(rest, class) {
         let after = &rest[len..];
-        let next = if more.is_empty() {
-            Some(after)
-        } else {
-            after.strip_prefix(", ")
-        };
+        let next = if more.is_empty() { Some(after) } else { after.strip_prefix(", ") };
         let Some(next) = next else { continue };
         if more.is_empty() && !next.is_empty() {
             continue;
@@ -150,9 +146,8 @@ fn number(s: &str) -> Option<(Value, usize)> {
             if let Ok(i) = tok.parse::<i128>() {
                 Value::Int(i)
             } else {
-                let looks_numeric = tok
-                    .bytes()
-                    .all(|c| c.is_ascii_digit() || matches!(c, b'-' | b'+' | b'.' | b'E' | b'e'));
+                let looks_numeric =
+                    tok.bytes().all(|c| c.is_ascii_digit() || matches!(c, b'-' | b'+' | b'.' | b'E' | b'e'));
                 if !looks_numeric {
                     return None;
                 }
@@ -225,10 +220,7 @@ mod tests {
         );
         // A string containing the separator pattern itself ("', '") - backtracking must
         // give the int column its value.
-        assert_eq!(
-            p("('x', 'y', 7)", &[String, Int]),
-            vec![Value::Str("x', 'y".into()), Value::Int(7)]
-        );
+        assert_eq!(p("('x', 'y', 7)", &[String, Int]), vec![Value::Str("x', 'y".into()), Value::Int(7)]);
         assert_eq!(p("('')", &[String]), vec![Value::Str("".into())]);
         assert_eq!(p("('a)')", &[String]), vec![Value::Str("a)".into())]);
         assert_eq!(p("('multi\nline')", &[String]), vec![Value::Str("multi\nline".into())]);

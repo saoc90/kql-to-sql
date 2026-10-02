@@ -136,7 +136,11 @@ impl<'a> Cmd<'a> {
             Tok::Ident(s) => s.to_ascii_lowercase(),
             _ => return err(format!("expected a command keyword {}", self.here())),
         };
-        while self.is_punct(0, "-") && self.pos > 0 && self.toks[self.pos - 1].span.end == self.toks[self.pos].span.start && self.adjacent(0) {
+        while self.is_punct(0, "-")
+            && self.pos > 0
+            && self.toks[self.pos - 1].span.end == self.toks[self.pos].span.start
+            && self.adjacent(0)
+        {
             self.bump();
             match self.bump().tok {
                 Tok::Ident(s) => {
@@ -353,7 +357,11 @@ impl<'a> Cmd<'a> {
                     let _ = self.with_props()?;
                     self.done()?;
                     let cols = self.table_cols(&src)?;
-                    return Ok(ddl(vec![format!("CREATE TABLE IF NOT EXISTS {} ({})", quote_ident(&t), self.column_defs(&cols))]));
+                    return Ok(ddl(vec![format!(
+                        "CREATE TABLE IF NOT EXISTS {} ({})",
+                        quote_ident(&t),
+                        self.column_defs(&cols)
+                    )]));
                 }
                 let cols = self.schema()?;
                 let props = self.with_props()?;
@@ -365,7 +373,11 @@ impl<'a> Cmd<'a> {
                         // create-merge: create if missing, then add any missing columns
                         let mut s = vec![format!("CREATE TABLE IF NOT EXISTS {qt} ({})", self.column_defs(&cols))];
                         for c in &cols {
-                            s.push(format!("ALTER TABLE {qt} ADD COLUMN IF NOT EXISTS {} {}", quote_ident(&c.name), self.sql_type(c.ty)));
+                            s.push(format!(
+                                "ALTER TABLE {qt} ADD COLUMN IF NOT EXISTS {} {}",
+                                quote_ident(&c.name),
+                                self.sql_type(c.ty)
+                            ));
                         }
                         s
                     }
@@ -406,7 +418,8 @@ impl<'a> Cmd<'a> {
                     ("create", false) => "CREATE VIEW",
                     _ => "CREATE OR REPLACE VIEW",
                 };
-                let create = if self.dialect == Dialect::Postgres && ifnotexists { "CREATE OR REPLACE VIEW" } else { create };
+                let create =
+                    if self.dialect == Dialect::Postgres && ifnotexists { "CREATE OR REPLACE VIEW" } else { create };
                 Ok(ddl(vec![format!("{create} {} AS {sql}", quote_ident(&name))]))
             }
             "materialized-view" => {
@@ -465,11 +478,19 @@ impl<'a> Cmd<'a> {
                 let mut stmts = Vec::new();
                 for c in &cols {
                     match existing.iter().find(|e| e.name == c.name) {
-                        None => stmts.push(format!("ALTER TABLE {qt} ADD COLUMN {} {}", quote_ident(&c.name), self.sql_type(c.ty))),
-                        Some(e) if e.ty != c.ty && verb == "alter" => {
-                            stmts.push(format!("ALTER TABLE {qt} ALTER COLUMN {} TYPE {}", quote_ident(&c.name), self.sql_type(c.ty)))
+                        None => stmts.push(format!(
+                            "ALTER TABLE {qt} ADD COLUMN {} {}",
+                            quote_ident(&c.name),
+                            self.sql_type(c.ty)
+                        )),
+                        Some(e) if e.ty != c.ty && verb == "alter" => stmts.push(format!(
+                            "ALTER TABLE {qt} ALTER COLUMN {} TYPE {}",
+                            quote_ident(&c.name),
+                            self.sql_type(c.ty)
+                        )),
+                        Some(e) if e.ty != c.ty => {
+                            return err(format!(".alter-merge cannot change the type of column '{}'", e.name))
                         }
-                        Some(e) if e.ty != c.ty => return err(format!(".alter-merge cannot change the type of column '{}'", e.name)),
                         Some(_) => {}
                     }
                 }
@@ -493,7 +514,12 @@ impl<'a> Cmd<'a> {
                 let ty_name = self.simple_name()?;
                 let ty = KqlType::from_name(&ty_name).ok_or_else(|| Error::new(format!("unknown type '{ty_name}'")))?;
                 self.done()?;
-                Ok(ddl(vec![format!("ALTER TABLE {} ALTER COLUMN {} TYPE {}", quote_ident(&t), quote_ident(&c), self.sql_type(ty))]))
+                Ok(ddl(vec![format!(
+                    "ALTER TABLE {} ALTER COLUMN {} TYPE {}",
+                    quote_ident(&t),
+                    quote_ident(&c),
+                    self.sql_type(ty)
+                )]))
             }
             "function" | "materialized-view" => {
                 // same as create-or-alter
@@ -548,7 +574,12 @@ impl<'a> Cmd<'a> {
                 let c = self.simple_name()?;
                 let ifexists = self.eat_word("ifexists");
                 self.done()?;
-                Ok(ddl(vec![format!("ALTER TABLE {} DROP COLUMN {}{}", quote_ident(&t), if ifexists { "IF EXISTS " } else { "" }, quote_ident(&c))]))
+                Ok(ddl(vec![format!(
+                    "ALTER TABLE {} DROP COLUMN {}{}",
+                    quote_ident(&t),
+                    if ifexists { "IF EXISTS " } else { "" },
+                    quote_ident(&c)
+                )]))
             }
             "function" | "materialized-view" | "view" => {
                 let n = self.name()?;
@@ -591,7 +622,12 @@ impl<'a> Cmd<'a> {
                 self.expect_word("to")?;
                 let n = self.simple_name()?;
                 self.done()?;
-                Ok(ddl(vec![format!("ALTER TABLE {} RENAME COLUMN {} TO {}", quote_ident(&t), quote_ident(&c), quote_ident(&n))]))
+                Ok(ddl(vec![format!(
+                    "ALTER TABLE {} RENAME COLUMN {} TO {}",
+                    quote_ident(&t),
+                    quote_ident(&c),
+                    quote_ident(&n)
+                )]))
             }
             other => err(format!("unsupported command '.rename {other}'")),
         }
@@ -650,7 +686,11 @@ impl<'a> Cmd<'a> {
         let t = self.name()?;
         let props = self.with_props()?;
         let data = self.piped_text()?;
-        let format = props.iter().find(|(k, _)| k == "format").map(|(_, v)| v.to_ascii_lowercase()).unwrap_or_else(|| "csv".into());
+        let format = props
+            .iter()
+            .find(|(k, _)| k == "format")
+            .map(|(_, v)| v.to_ascii_lowercase())
+            .unwrap_or_else(|| "csv".into());
         let sep = match format.as_str() {
             "csv" => ',',
             "tsv" => '\t',
@@ -691,7 +731,11 @@ impl<'a> Cmd<'a> {
                 None => "NULL".into(),
             },
             KqlType::TimeSpan => match kql_parser::parse_timespan_text(field) {
-                Some(ticks) => format!("CAST({} AS {})", quote_str(&format!("{} microseconds", ticks / 10)), self.sql_type(KqlType::TimeSpan)),
+                Some(ticks) => format!(
+                    "CAST({} AS {})",
+                    quote_str(&format!("{} microseconds", ticks / 10)),
+                    self.sql_type(KqlType::TimeSpan)
+                ),
                 None => "NULL".into(),
             },
             _ => format!("CAST({} AS {})", quote_str(field), self.sql_type(ty)),
@@ -725,7 +769,13 @@ impl<'a> Cmd<'a> {
                 let rows: Vec<String> = cols
                     .iter()
                     .enumerate()
-                    .map(|(i, c)| format!("SELECT {} AS ColumnName, {i} AS ColumnOrdinal, {} AS ColumnType", quote_str(&c.name), quote_str(c.ty.name())))
+                    .map(|(i, c)| {
+                        format!(
+                            "SELECT {} AS ColumnName, {i} AS ColumnOrdinal, {} AS ColumnType",
+                            quote_str(&c.name),
+                            quote_str(c.ty.name())
+                        )
+                    })
                     .collect();
                 Ok(CommandTranslation {
                     statements: vec![rows.join(" UNION ALL ")],
@@ -748,7 +798,10 @@ impl<'a> Cmd<'a> {
             }
             "version" => {
                 self.done()?;
-                Ok(CommandTranslation { statements: vec!["SELECT version() AS BuildVersion".into()], columns: vec![s("BuildVersion")] })
+                Ok(CommandTranslation {
+                    statements: vec!["SELECT version() AS BuildVersion".into()],
+                    columns: vec![s("BuildVersion")],
+                })
             }
             other => err(format!("unsupported command '.show {other}'")),
         }
@@ -814,20 +867,32 @@ mod tests {
 
     #[test]
     fn create_and_alter() {
-        assert_eq!(sql(".create table X (a:long, ['my col']:string)"), vec!["CREATE TABLE IF NOT EXISTS X (a BIGINT, \"my col\" VARCHAR)"]);
+        assert_eq!(
+            sql(".create table X (a:long, ['my col']:string)"),
+            vec!["CREATE TABLE IF NOT EXISTS X (a BIGINT, \"my col\" VARCHAR)"]
+        );
         // .alter keeps data: add/drop/retype individual columns only
-        assert_eq!(sql(".alter table T (a:real, b:int)"), vec![
-            "ALTER TABLE T ALTER COLUMN a TYPE DOUBLE",
-            "ALTER TABLE T ADD COLUMN b INTEGER",
-            "ALTER TABLE T DROP COLUMN s",
-        ]);
+        assert_eq!(
+            sql(".alter table T (a:real, b:int)"),
+            vec![
+                "ALTER TABLE T ALTER COLUMN a TYPE DOUBLE",
+                "ALTER TABLE T ADD COLUMN b INTEGER",
+                "ALTER TABLE T DROP COLUMN s",
+            ]
+        );
         assert_eq!(sql(".alter-merge table T (b:int)"), vec!["ALTER TABLE T ADD COLUMN b INTEGER"]);
-        assert_eq!(sql(".create-merge table N (a:long)"), vec!["CREATE TABLE IF NOT EXISTS N (a BIGINT)", "ALTER TABLE N ADD COLUMN IF NOT EXISTS a BIGINT"]);
+        assert_eq!(
+            sql(".create-merge table N (a:long)"),
+            vec!["CREATE TABLE IF NOT EXISTS N (a BIGINT)", "ALTER TABLE N ADD COLUMN IF NOT EXISTS a BIGINT"]
+        );
     }
 
     #[test]
     fn quoting_blocks_injection() {
-        assert_eq!(sql(".alter table T docstring \"x'; DROP TABLE T; --\""), vec!["COMMENT ON TABLE T IS 'x''; DROP TABLE T; --'"]);
+        assert_eq!(
+            sql(".alter table T docstring \"x'; DROP TABLE T; --\""),
+            vec!["COMMENT ON TABLE T IS 'x''; DROP TABLE T; --'"]
+        );
         assert!(translate_command(".drop tables (x; DROP TABLE y)", &cat(), Dialect::DuckDb).is_err());
         assert_eq!(sql(".drop table ['a\"b'] ifexists"), vec!["DROP TABLE IF EXISTS \"a\"\"b\""]);
     }

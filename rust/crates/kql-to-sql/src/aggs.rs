@@ -86,7 +86,13 @@ pub(crate) fn summarize(ctx: &mut Ctx, rel: Rel, aggs: &[NamedExpr], by: &[Named
 
 /// Aggregates that produce several columns: `arg_max`/`arg_min`, `take_any(a, b)`/`take_any(*)`,
 /// `percentiles(x, p1, p2)`.
-fn multi_column_aggregate(ctx: &mut Ctx, ne: &NamedExpr, cols: &[Column], keys: &[String], env: &Env) -> Result<Option<Vec<(String, TExpr)>>> {
+fn multi_column_aggregate(
+    ctx: &mut Ctx,
+    ne: &NamedExpr,
+    cols: &[Column],
+    keys: &[String],
+    env: &Env,
+) -> Result<Option<Vec<(String, TExpr)>>> {
     let Expr::Call { name, args } = &ne.expr else { return Ok(None) };
     let lname = name.to_ascii_lowercase();
     let scope = Scope::rows(cols);
@@ -95,7 +101,8 @@ fn multi_column_aggregate(ctx: &mut Ctx, ne: &NamedExpr, cols: &[Column], keys: 
         for a in args {
             if matches!(a.expr, Expr::Star) {
                 for c in cols {
-                    if !skip.contains(&c.name) && !out.iter().any(|e: &Expr| matches!(e, Expr::Name(n) if *n == c.name)) {
+                    if !skip.contains(&c.name) && !out.iter().any(|e: &Expr| matches!(e, Expr::Name(n) if *n == c.name))
+                    {
                         out.push(Expr::Name(c.name.clone()));
                     }
                 }
@@ -119,7 +126,8 @@ fn multi_column_aggregate(ctx: &mut Ctx, ne: &NamedExpr, cols: &[Column], keys: 
             let is_max = lname.contains("max");
             let by_expr = &args[0].expr;
             let by = ctx.expr(by_expr, &scope, env)?;
-            let by_name = result_name(by_expr, false).unwrap_or_else(|| if is_max { "max".into() } else { "min".into() });
+            let by_name =
+                result_name(by_expr, false).unwrap_or_else(|| if is_max { "max".into() } else { "min".into() });
             let mut out = vec![(by_name.clone(), {
                 let f = if is_max { "max" } else { "min" };
                 TExpr::new(format!("{f}({})", by.sql), by.ty)
@@ -159,7 +167,10 @@ fn multi_column_aggregate(ctx: &mut Ctx, ne: &NamedExpr, cols: &[Column], keys: 
                     Some(Const::Real(v)) => v,
                     _ => return err("percentilesw(): percentiles must be constants"),
                 };
-                out.push((format!("percentile_{xname}_{}", format_percentile(pv)), TExpr::new(weighted_percentile_sql(ctx, &x.sql, &w.sql, pv)?, x.ty)));
+                out.push((
+                    format!("percentile_{xname}_{}", format_percentile(pv)),
+                    TExpr::new(weighted_percentile_sql(ctx, &x.sql, &w.sql, pv)?, x.ty),
+                ));
             }
             Ok(Some(rename(out)))
         }
@@ -178,7 +189,10 @@ fn multi_column_aggregate(ctx: &mut Ctx, ne: &NamedExpr, cols: &[Column], keys: 
                     _ => return err("percentiles(): percentiles must be constants"),
                 };
                 let label = format_percentile(pv);
-                out.push((format!("percentile_{xname}_{label}"), TExpr::new(percentile_sql(ctx, &x.sql, pv), percentile_type(x.ty))));
+                out.push((
+                    format!("percentile_{xname}_{label}"),
+                    TExpr::new(percentile_sql(ctx, &x.sql, pv), percentile_type(x.ty)),
+                ));
             }
             Ok(Some(rename(out)))
         }
@@ -213,10 +227,9 @@ pub(crate) fn arg_extreme(ctx: &Ctx, value: &str, by: &str, max: bool) -> String
             "CASE WHEN COUNT({by}) = 0 THEN first({value}) ELSE {}({value}, {by}) END",
             if max { "arg_max" } else { "arg_min" }
         ),
-        Dialect::Postgres => format!(
-            "(array_agg({value} ORDER BY {by} {} NULLS LAST))[1]",
-            if max { "DESC" } else { "ASC" }
-        ),
+        Dialect::Postgres => {
+            format!("(array_agg({value} ORDER BY {by} {} NULLS LAST))[1]", if max { "DESC" } else { "ASC" })
+        }
     }
 }
 
@@ -227,7 +240,15 @@ pub(crate) fn any_value(_ctx: &Ctx, x: &str) -> String {
 /// Compiles an aggregate function call. Arguments are compiled in the (non-aggregate) row scope.
 pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: &Env) -> Result<TExpr> {
     let lname = name.to_ascii_lowercase();
-    let row_scope = Scope { cols: scope.cols, qual: scope.qual, join: None, aggregates: false, order: scope.order, extra: scope.extra, serialized: scope.serialized };
+    let row_scope = Scope {
+        cols: scope.cols,
+        qual: scope.qual,
+        join: None,
+        aggregates: false,
+        order: scope.order,
+        extra: scope.extra,
+        serialized: scope.serialized,
+    };
     let mut a = Vec::new();
     for arg in args {
         if matches!(arg.expr, Expr::Star) {
@@ -288,7 +309,10 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: 
             if x.ty == KqlType::TimeSpan {
                 (format!("CAST(AVG({}){filter} AS BIGINT)", x.sql), KqlType::TimeSpan)
             } else {
-                (format!("COALESCE(AVG(CAST({} AS {real})){filter}, {})", x.sql, d.real_literal(f64::NAN)), KqlType::Real)
+                (
+                    format!("COALESCE(AVG(CAST({} AS {real})){filter}, {})", x.sql, d.real_literal(f64::NAN)),
+                    KqlType::Real,
+                )
             }
         }
         "min" | "max" | "minif" | "maxif" => {
@@ -298,10 +322,19 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: 
             (format!("{f}({}){filter}", x.sql), x.ty)
         }
         "dcount" | "dcountif" | "count_distinct" | "count_distinctif" => {
-            let filter = if lname.ends_with("if") { format!(" FILTER (WHERE {})", pred(ctx, &a[1])) } else { String::new() };
+            let filter =
+                if lname.ends_with("if") { format!(" FILTER (WHERE {})", pred(ctx, &a[1])) } else { String::new() };
             (format!("COUNT(DISTINCT {}){filter}", a[0].sql), KqlType::Long)
         }
-        "make_list" | "makelist" | "make_list_if" | "makelist_if" | "make_set" | "makeset" | "make_set_if" | "makeset_if" | "make_list_with_nulls" => {
+        "make_list"
+        | "makelist"
+        | "make_list_if"
+        | "makelist_if"
+        | "make_set"
+        | "makeset"
+        | "make_set_if"
+        | "makeset_if"
+        | "make_list_with_nulls" => {
             let distinct = lname.contains("set");
             let is_if = lname.ends_with("_if");
             let with_nulls = lname == "make_list_with_nulls";
@@ -312,7 +345,11 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: 
         }
         "make_bag" | "make_bag_if" => {
             let x = &a[0];
-            let v = if lname == "make_bag_if" { format!("CASE WHEN {} THEN {} END", pred(ctx, &a[1]), x.sql) } else { x.sql.clone() };
+            let v = if lname == "make_bag_if" {
+                format!("CASE WHEN {} THEN {} END", pred(ctx, &a[1]), x.sql)
+            } else {
+                x.sql.clone()
+            };
             (bag_merge_agg(ctx, &v), KqlType::Dynamic)
         }
         "take_any" | "any" | "take_anyif" | "anyif" => {
@@ -345,20 +382,38 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: 
                 "variance" | "varianceif" => "var_samp",
                 _ => "var_pop",
             };
-            let filter = if lname.ends_with("if") { format!(" FILTER (WHERE {})", pred(ctx, &a[1])) } else { String::new() };
+            let filter =
+                if lname.ends_with("if") { format!(" FILTER (WHERE {})", pred(ctx, &a[1])) } else { String::new() };
             let x = num(&a[0]);
             (format!("COALESCE({f}(CAST({} AS {real})){filter}, {})", x.sql, d.real_literal(0.0)), KqlType::Real)
         }
         "covariance" | "covariancep" | "covarianceif" | "covariancepif" => {
             let f = if lname.starts_with("covariancep") { "covar_pop" } else { "covar_samp" };
-            let filter = if lname.ends_with("if") { format!(" FILTER (WHERE {})", pred(ctx, &a[2])) } else { String::new() };
+            let filter =
+                if lname.ends_with("if") { format!(" FILTER (WHERE {})", pred(ctx, &a[2])) } else { String::new() };
             let (x, y) = (num(&a[0]), num(&a[1]));
-            (format!("COALESCE({f}(CAST({} AS {real}), CAST({} AS {real})){filter}, {})", x.sql, y.sql, d.real_literal(0.0)), KqlType::Real)
+            (
+                format!(
+                    "COALESCE({f}(CAST({} AS {real}), CAST({} AS {real})){filter}, {})",
+                    x.sql,
+                    y.sql,
+                    d.real_literal(0.0)
+                ),
+                KqlType::Real,
+            )
         }
         "variancepif" | "stdevpif" => {
             let f = if lname.starts_with("variance") { "var_pop" } else { "stddev_pop" };
             let x = num(&a[0]);
-            (format!("COALESCE({f}(CAST({} AS {real})) FILTER (WHERE {}), {})", x.sql, pred(ctx, &a[1]), d.real_literal(0.0)), KqlType::Real)
+            (
+                format!(
+                    "COALESCE({f}(CAST({} AS {real})) FILTER (WHERE {}), {})",
+                    x.sql,
+                    pred(ctx, &a[1]),
+                    d.real_literal(0.0)
+                ),
+                KqlType::Real,
+            )
         }
         "percentilew" => {
             need(3, 3)?;
@@ -414,7 +469,15 @@ pub(crate) fn qi(n: &str) -> String {
 
 /// `make_list`/`make_set` and variants. Dynamic arrays are flattened into the result (Kusto
 /// appends array elements), nulls are skipped unless `with_nulls`, the input order is kept.
-fn make_list_sql(ctx: &Ctx, x: &TExpr, cond: Option<&str>, distinct: bool, with_nulls: bool, max_size: Option<&TExpr>, order: &[String]) -> String {
+fn make_list_sql(
+    ctx: &Ctx,
+    x: &TExpr,
+    cond: Option<&str>,
+    distinct: bool,
+    with_nulls: bool,
+    max_size: Option<&TExpr>,
+    order: &[String],
+) -> String {
     let d = ctx.d;
     let v = if x.ty == KqlType::Dynamic { x.sql.clone() } else { ctx.to_dynamic(x.clone()).sql };
     let order_by = if order.is_empty() { String::new() } else { format!(" ORDER BY {}", order.join(", ")) };
@@ -457,7 +520,9 @@ fn make_list_sql(ctx: &Ctx, x: &TExpr, cond: Option<&str>, distinct: bool, with_
                      LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(_m.__kql_x) = 'array' THEN _m.__kql_x ELSE jsonb_build_array(_m.__kql_x) END) WITH ORDINALITY AS _y(__kql_v, __kql_j)"
                 )
             } else {
-                format!("SELECT _m.__kql_v, _m.__kql_n FROM unnest({collected}) WITH ORDINALITY AS _m(__kql_v, __kql_n)")
+                format!(
+                    "SELECT _m.__kql_v, _m.__kql_n FROM unnest({collected}) WITH ORDINALITY AS _m(__kql_v, __kql_n)"
+                )
             };
             let rows = if distinct {
                 format!("SELECT _f.__kql_v, min(_f.__kql_n) AS __kql_n FROM ({flat}) AS _f GROUP BY _f.__kql_v")
@@ -465,10 +530,14 @@ fn make_list_sql(ctx: &Ctx, x: &TExpr, cond: Option<&str>, distinct: bool, with_
                 flat
             };
             let rows = match max_size {
-                Some(n) => format!("SELECT * FROM ({rows}) AS _l ORDER BY _l.__kql_n LIMIT {}", d.cast(&n.sql, KqlType::Long)),
+                Some(n) => {
+                    format!("SELECT * FROM ({rows}) AS _l ORDER BY _l.__kql_n LIMIT {}", d.cast(&n.sql, KqlType::Long))
+                }
                 None => rows,
             };
-            format!("(SELECT COALESCE(jsonb_agg(_s.__kql_v ORDER BY _s.__kql_n), CAST('[]' AS jsonb)) FROM ({rows}) AS _s)")
+            format!(
+                "(SELECT COALESCE(jsonb_agg(_s.__kql_v ORDER BY _s.__kql_n), CAST('[]' AS jsonb)) FROM ({rows}) AS _s)"
+            )
         }
     }
 }

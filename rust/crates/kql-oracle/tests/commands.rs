@@ -8,7 +8,8 @@ fn catalog(conn: &Connection) -> Catalog {
     let mut stmt = conn
         .prepare("SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'main' ORDER BY table_name, ordinal_position")
         .unwrap();
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))).unwrap();
+    let rows =
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))).unwrap();
     let mut tables: Vec<(String, Vec<Column>)> = Vec::new();
     for row in rows {
         let (t, c, ty) = row.unwrap();
@@ -33,7 +34,12 @@ fn query(conn: &Connection, kql: &str) -> Vec<String> {
     let mut stmt = conn.prepare(&t.sql).unwrap();
     let n = t.columns.len();
     let rows = stmt
-        .query_map([], |r| Ok((0..n).map(|i| format!("{:?}", r.get::<_, duckdb::types::Value>(i).unwrap())).collect::<Vec<_>>().join("|")))
+        .query_map([], |r| {
+            Ok((0..n)
+                .map(|i| format!("{:?}", r.get::<_, duckdb::types::Value>(i).unwrap()))
+                .collect::<Vec<_>>()
+                .join("|"))
+        })
         .unwrap();
     rows.map(Result::unwrap).collect()
 }
@@ -54,7 +60,10 @@ fn table_lifecycle() {
     run(&conn, ".alter-merge table Events (Extra:int)"); // idempotent
     run(&conn, ".rename column Events.Score to Rating");
     run(&conn, ".drop table Events columns (Extra)");
-    assert_eq!(query(&conn, "Events | getschema | project ColumnName"), vec!["Text(\"Id\")", "Text(\"Name\")", "Text(\"Rating\")"]);
+    assert_eq!(
+        query(&conn, "Events | getschema | project ColumnName"),
+        vec!["Text(\"Id\")", "Text(\"Name\")", "Text(\"Rating\")"]
+    );
     run(&conn, ".create-or-alter function Big() { Events | where Id >= 3 }");
     assert_eq!(query(&conn, "Big | count"), vec!["BigInt(2)"]);
     run(&conn, ".drop function Big");

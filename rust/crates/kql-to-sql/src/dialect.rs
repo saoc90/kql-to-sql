@@ -174,7 +174,8 @@ pub(crate) fn get(d: Dialect) -> &'static dyn SqlDialect {
 /// bigint). Returns `None` for functions not handled here.
 pub(crate) fn pg_array_fn(name: &str, args: &[String]) -> Option<String> {
     let arr = |x: &str| format!("CASE WHEN jsonb_typeof({x}) = 'array' THEN {x} ELSE '[]'::jsonb END");
-    let elems = |x: &str, al: &str| format!("jsonb_array_elements({}) WITH ORDINALITY AS {al}(__kql_v, __kql_i)", arr(x));
+    let elems =
+        |x: &str, al: &str| format!("jsonb_array_elements({}) WITH ORDINALITY AS {al}(__kql_v, __kql_i)", arr(x));
     let is_arr = |x: &str| format!("jsonb_typeof({x}) = 'array'");
     let agg = |v: &str, ord: &str| format!("COALESCE(jsonb_agg({v} ORDER BY {ord}), '[]'::jsonb)");
     let a0 = args.first()?;
@@ -594,7 +595,8 @@ impl SqlDialect for Postgres {
     }
 
     fn real_div(&self, a: &str, b: &str) -> String {
-        let (nan, inf, ninf) = (self.real_literal(f64::NAN), self.real_literal(f64::INFINITY), self.real_literal(f64::NEG_INFINITY));
+        let (nan, inf, ninf) =
+            (self.real_literal(f64::NAN), self.real_literal(f64::INFINITY), self.real_literal(f64::NEG_INFINITY));
         // NaN sorts above every number in PostgreSQL, so test it before the sign
         format!(
             "(CASE WHEN {b} = 0 AND {a} IS NOT NULL THEN CASE WHEN {a} = 0 OR {a} = {nan} THEN {nan} WHEN {a} > 0 THEN {inf} ELSE {ninf} END ELSE {a} / {b} END)"

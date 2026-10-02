@@ -41,7 +41,10 @@ pub enum From {
 pub enum Query {
     Select(Box<Select>),
     /// `UNION ALL` etc. of several queries (each rendered in parentheses).
-    SetOp { op: &'static str, parts: Vec<Query> },
+    SetOp {
+        op: &'static str,
+        parts: Vec<Query>,
+    },
 }
 
 impl Select {
@@ -65,7 +68,13 @@ impl Select {
             Some(items) => {
                 let parts: Vec<String> = items
                     .iter()
-                    .map(|i| if i.sql == quote_ident(&i.alias) { i.sql.clone() } else { format!("{} AS {}", i.sql, quote_ident(&i.alias)) })
+                    .map(|i| {
+                        if i.sql == quote_ident(&i.alias) {
+                            i.sql.clone()
+                        } else {
+                            format!("{} AS {}", i.sql, quote_ident(&i.alias))
+                        }
+                    })
                     .collect();
                 s.push_str(&parts.join(", "));
             }
@@ -125,19 +134,148 @@ impl Query {
 /// SQL keywords that must be quoted when used as identifiers (union of DuckDB and PostgreSQL
 /// reserved words).
 const RESERVED: &[&str] = &[
-    "all", "analyse", "analyze", "and", "any", "array", "as", "asc", "asymmetric", "at", "authorization", "between",
-    "binary", "both", "case", "cast", "check", "collate", "collation", "column", "concurrently", "constraint", "create",
-    "cross", "current_catalog", "current_date", "current_role", "current_schema", "current_time",
-    "current_timestamp", "current_user", "default", "deferrable", "desc", "describe", "distinct", "do", "else", "end",
-    "except", "false", "fetch", "for", "foreign", "freeze", "from", "full", "glob", "grant", "group", "having", "ilike",
-    "in", "initially", "inner", "intersect", "into", "is", "isnull", "join", "lateral", "leading", "left", "like",
-    "limit", "localtime", "localtimestamp", "map", "natural", "not", "notnull", "null", "offset", "on", "only", "or",
-    "order", "outer", "overlaps", "pivot", "pivot_longer", "pivot_wider", "placing", "primary", "qualify",
-    "references", "returning", "right", "select", "semi", "anti", "session_user", "show", "similar", "some", "struct",
-    "summarize", "symmetric", "table", "tablesample", "then", "to", "trailing", "true", "try_cast", "union", "unique",
-    "unpivot", "user", "using", "variadic", "verbose", "when", "where", "window", "with", "year", "month", "day",
-    "hour", "minute", "second", "interval", "over", "filter", "within", "row", "rows", "range", "value", "values",
-    "time", "timestamp", "date", "position", "count", "sample", "lambda", "asof", "positional", "by", "key",
+    "all",
+    "analyse",
+    "analyze",
+    "and",
+    "any",
+    "array",
+    "as",
+    "asc",
+    "asymmetric",
+    "at",
+    "authorization",
+    "between",
+    "binary",
+    "both",
+    "case",
+    "cast",
+    "check",
+    "collate",
+    "collation",
+    "column",
+    "concurrently",
+    "constraint",
+    "create",
+    "cross",
+    "current_catalog",
+    "current_date",
+    "current_role",
+    "current_schema",
+    "current_time",
+    "current_timestamp",
+    "current_user",
+    "default",
+    "deferrable",
+    "desc",
+    "describe",
+    "distinct",
+    "do",
+    "else",
+    "end",
+    "except",
+    "false",
+    "fetch",
+    "for",
+    "foreign",
+    "freeze",
+    "from",
+    "full",
+    "glob",
+    "grant",
+    "group",
+    "having",
+    "ilike",
+    "in",
+    "initially",
+    "inner",
+    "intersect",
+    "into",
+    "is",
+    "isnull",
+    "join",
+    "lateral",
+    "leading",
+    "left",
+    "like",
+    "limit",
+    "localtime",
+    "localtimestamp",
+    "map",
+    "natural",
+    "not",
+    "notnull",
+    "null",
+    "offset",
+    "on",
+    "only",
+    "or",
+    "order",
+    "outer",
+    "overlaps",
+    "pivot",
+    "pivot_longer",
+    "pivot_wider",
+    "placing",
+    "primary",
+    "qualify",
+    "references",
+    "returning",
+    "right",
+    "select",
+    "semi",
+    "anti",
+    "session_user",
+    "show",
+    "similar",
+    "some",
+    "struct",
+    "summarize",
+    "symmetric",
+    "table",
+    "tablesample",
+    "then",
+    "to",
+    "trailing",
+    "true",
+    "try_cast",
+    "union",
+    "unique",
+    "unpivot",
+    "user",
+    "using",
+    "variadic",
+    "verbose",
+    "when",
+    "where",
+    "window",
+    "with",
+    "year",
+    "month",
+    "day",
+    "hour",
+    "minute",
+    "second",
+    "interval",
+    "over",
+    "filter",
+    "within",
+    "row",
+    "rows",
+    "range",
+    "value",
+    "values",
+    "time",
+    "timestamp",
+    "date",
+    "position",
+    "count",
+    "sample",
+    "lambda",
+    "asof",
+    "positional",
+    "by",
+    "key",
 ];
 
 thread_local! {
@@ -200,13 +338,19 @@ mod tests {
     #[test]
     fn render_select() {
         let s = Select {
-            items: Some(vec![Item { sql: "a".into(), alias: "a".into() }, Item { sql: "(a + 1)".into(), alias: "b".into() }]),
+            items: Some(vec![
+                Item { sql: "a".into(), alias: "a".into() },
+                Item { sql: "(a + 1)".into(), alias: "b".into() },
+            ]),
             from: From::Table("T".into()),
             filters: vec!["(a > 1)".into(), "(a < 5)".into()],
             order_by: vec!["a ASC NULLS FIRST".into()],
             limit: Some("10".into()),
             ..Default::default()
         };
-        assert_eq!(s.render(), "SELECT a, (a + 1) AS b FROM T WHERE (a > 1) AND (a < 5) ORDER BY a ASC NULLS FIRST LIMIT 10");
+        assert_eq!(
+            s.render(),
+            "SELECT a, (a + 1) AS b FROM T WHERE (a > 1) AND (a < 5) ORDER BY a ASC NULLS FIRST LIMIT 10"
+        );
     }
 }

@@ -121,7 +121,10 @@ unsafe fn connect(db: ffi::duckdb_database) -> Result<RawCon, Box<dyn Error>> {
     Ok(RawCon(con))
 }
 
-unsafe fn init(info: ffi::duckdb_extension_info, access: *const ffi::duckdb_extension_access) -> Result<bool, Box<dyn Error>> {
+unsafe fn init(
+    info: ffi::duckdb_extension_info,
+    access: *const ffi::duckdb_extension_access,
+) -> Result<bool, Box<dyn Error>> {
     unsafe {
         if !ffi::duckdb_rs_extension_api_init(info, access, MIN_CAPI_VERSION)? {
             return Ok(false);
@@ -151,7 +154,10 @@ unsafe fn init(info: ffi::duckdb_extension_info, access: *const ffi::duckdb_exte
 /// # Safety
 /// Called by DuckDB with valid `info`/`access` pointers.
 #[no_mangle]
-pub unsafe extern "C" fn kql_init_c_api(info: ffi::duckdb_extension_info, access: *const ffi::duckdb_extension_access) -> bool {
+pub unsafe extern "C" fn kql_init_c_api(
+    info: ffi::duckdb_extension_info,
+    access: *const ffi::duckdb_extension_access,
+) -> bool {
     let result = std::panic::catch_unwind(|| unsafe { init(info, access) });
     let message = match result {
         Ok(Ok(ok)) => return ok,

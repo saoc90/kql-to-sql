@@ -38,7 +38,14 @@ fn param_text(params: &[OpParam], name: &str) -> Option<String> {
 // ====================================================================== search
 
 /// `search` as an operator (`input` is Some) or as a source over tables.
-pub(crate) fn search(ctx: &mut Ctx, input: Option<Rel>, params: &[OpParam], tables: &[Expr], predicate: &Expr, env: &Env) -> Result<Rel> {
+pub(crate) fn search(
+    ctx: &mut Ctx,
+    input: Option<Rel>,
+    params: &[OpParam],
+    tables: &[Expr],
+    predicate: &Expr,
+    env: &Env,
+) -> Result<Rel> {
     let cs = match param_text(params, "kind") {
         None => false,
         Some(k) if k.eq_ignore_ascii_case("case_sensitive") => true,
@@ -62,8 +69,13 @@ pub(crate) fn search(ctx: &mut Ctx, input: Option<Rel>, params: &[OpParam], tabl
         for t in tables {
             match t {
                 Expr::Name(n) if n.contains('*') => {
-                    let mut names: Vec<String> =
-                        ctx.catalog.tables.iter().map(|(tn, _)| tn.clone()).filter(|tn| crate::ops::wildcard(n, tn)).collect();
+                    let mut names: Vec<String> = ctx
+                        .catalog
+                        .tables
+                        .iter()
+                        .map(|(tn, _)| tn.clone())
+                        .filter(|tn| crate::ops::wildcard(n, tn))
+                        .collect();
                     names.sort();
                     for tn in names {
                         let r = ctx.table_ref(&tn, env)?;
@@ -125,7 +137,8 @@ fn with_table_column(ctx: &mut Ctx, rel: Rel, label: &str) -> Rel {
 fn piped_label(ctx: &Ctx, rel: &Rel) -> String {
     let s = &rel.sel;
     if let From::Table(q) = &s.from {
-        let plain = s.filters.is_empty() && s.group_by.is_empty() && s.limit.is_none() && !s.distinct && s.order_by.is_empty();
+        let plain =
+            s.filters.is_empty() && s.group_by.is_empty() && s.limit.is_none() && !s.distinct && s.order_by.is_empty();
         if plain {
             if let Some((name, _)) = ctx.catalog.tables.iter().find(|(n, _)| quote_ident(n) == *q) {
                 return name.clone();
@@ -168,7 +181,9 @@ fn search_cond(ctx: &mut Ctx, e: &Expr, scope: &Scope, cs: bool, env: &Env) -> R
         Expr::Paren(x) if !ctx.is_tabular(x, env) => search_cond(ctx, x, scope, cs, env),
         Expr::Literal(Literal::String(term)) => Ok(bool_expr(any_column_term(ctx, scope, term, cs), &[])),
         // non-string literals are not search terms; they never match
-        Expr::Literal(Literal::Bool(b)) => Ok(TExpr::konst(if *b { "true" } else { "false" }, KqlType::Bool, Const::Bool(*b))),
+        Expr::Literal(Literal::Bool(b)) => {
+            Ok(TExpr::konst(if *b { "true" } else { "false" }, KqlType::Bool, Const::Bool(*b)))
+        }
         Expr::Literal(_) => Ok(TExpr::konst("false", KqlType::Bool, Const::Bool(false))),
         Expr::Binary { op: op @ (BinaryOp::And | BinaryOp::Or), left, right } => {
             let l = search_cond(ctx, left, scope, cs, env)?;
@@ -183,7 +198,9 @@ fn search_cond(ctx: &mut Ctx, e: &Expr, scope: &Scope, cs: bool, env: &Env) -> R
             Ok(bool_expr(format!("(NOT {})", x.sql), &[&x]))
         }
         // `Col:"term"` (and `Col has "term"`): a term with search wildcards against one column
-        Expr::Binary { op: BinaryOp::Str(StringOp::Has, negated), left, right } if matches!(&**right, Expr::Literal(Literal::String(_))) => {
+        Expr::Binary { op: BinaryOp::Str(StringOp::Has, negated), left, right }
+            if matches!(&**right, Expr::Literal(Literal::String(_))) =>
+        {
             let Expr::Literal(Literal::String(term)) = &**right else { unreachable!() };
             let sql = if matches!(&**left, Expr::Star) {
                 any_column_term(ctx, scope, term, cs)
@@ -246,7 +263,8 @@ fn term_sql(ctx: &Ctx, s: &str, term: &str, cs: bool) -> String {
     }
     // an inner wildcard: \bprefix.*suffix\b
     let pg = ctx.d.kind() == Dialect::Postgres;
-    let (bl, br) = if pg { ("(^|[^[:alnum:]])", "([^[:alnum:]]|$)") } else { ("(^|[^\\p{L}\\p{N}])", "([^\\p{L}\\p{N}]|$)") };
+    let (bl, br) =
+        if pg { ("(^|[^[:alnum:]])", "([^[:alnum:]]|$)") } else { ("(^|[^\\p{L}\\p{N}])", "([^\\p{L}\\p{N}]|$)") };
     let body: Vec<String> = core.split('*').map(crate::regex::escape).collect();
     let mut re = String::new();
     if !lead && core.chars().next().is_some_and(char::is_alphanumeric) {
@@ -275,7 +293,8 @@ pub(crate) fn star_binary(ctx: &mut Ctx, op: BinaryOp, right: &Expr, scope: &Sco
     };
     let mut parts: Vec<TExpr> = Vec::new();
     for c in scope.cols {
-        let e = Expr::Binary { op: positive, left: Box::new(Expr::Name(c.name.clone())), right: Box::new(right.clone()) };
+        let e =
+            Expr::Binary { op: positive, left: Box::new(Expr::Name(c.name.clone())), right: Box::new(right.clone()) };
         parts.push(ctx.expr(&e, scope, env)?);
     }
     let any = if parts.is_empty() {
@@ -303,7 +322,14 @@ fn class_escape(s: &str) -> String {
     out
 }
 
-pub(crate) fn parse_kv(ctx: &mut Ctx, rel: Rel, expr: &Expr, columns: &[ColumnDecl], params: &[OpParam], env: &Env) -> Result<Rel> {
+pub(crate) fn parse_kv(
+    ctx: &mut Ctx,
+    rel: Rel,
+    expr: &Expr,
+    columns: &[ColumnDecl],
+    params: &[OpParam],
+    env: &Env,
+) -> Result<Rel> {
     for p in params {
         if !matches!(p.name.as_str(), "pair_delimiter" | "kv_delimiter" | "quote" | "escape" | "greedy" | "regex") {
             return err(format!("parse-kv: unknown option '{}'", p.name));
@@ -341,11 +367,21 @@ pub(crate) fn parse_kv(ctx: &mut Ctx, rel: Rel, expr: &Expr, columns: &[ColumnDe
                 k = quote_str(&c.name)
             )
         } else {
-            let key = format!("(?:^|{})\\s*{}\\s*{}\\s*", crate::regex::escape(&pair), crate::regex::escape(&c.name), crate::regex::escape(&kv));
+            let key = format!(
+                "(?:^|{})\\s*{}\\s*{}\\s*",
+                crate::regex::escape(&pair),
+                crate::regex::escape(&c.name),
+                crate::regex::escape(&kv)
+            );
             let unquoted = if greedy {
                 // the value runs up to the next `<pair>key<kv>`
                 let tail = format!("{key}(.*)$");
-                let stop = format!("{}[^{}]*{}.*$", crate::regex::escape(&pair), class_escape(&format!("{pair}{kv}")), crate::regex::escape(&kv));
+                let stop = format!(
+                    "{}[^{}]*{}.*$",
+                    crate::regex::escape(&pair),
+                    class_escape(&format!("{pair}{kv}")),
+                    crate::regex::escape(&kv)
+                );
                 format!(
                     "trim(regexp_replace({}, {}, ''))",
                     d.regex_extract(&src.sql, &quote_str(&tail), 1),
@@ -364,11 +400,22 @@ pub(crate) fn parse_kv(ctx: &mut Ctx, rel: Rel, expr: &Expr, columns: &[ColumnDe
             for q in quotes.chars().rev() {
                 let qe = crate::regex::escape(&q.to_string());
                 let re = quote_str(&format!("{key}{qe}([^{}]*){qe}", class_escape(&q.to_string())));
-                v = format!("CASE WHEN {} THEN {} ELSE {v} END", d.regex_match(&src.sql, &re), d.regex_extract(&src.sql, &re, 1));
+                v = format!(
+                    "CASE WHEN {} THEN {} ELSE {v} END",
+                    d.regex_match(&src.sql, &re),
+                    d.regex_extract(&src.sql, &re, 1)
+                );
             }
             v
         };
-        let raw = TExpr::new(if raw.starts_with('(') || raw.starts_with("trim(") || raw.starts_with("COALESCE(") { raw } else { format!("({raw})") }, KqlType::String);
+        let raw = TExpr::new(
+            if raw.starts_with('(') || raw.starts_with("trim(") || raw.starts_with("COALESCE(") {
+                raw
+            } else {
+                format!("({raw})")
+            },
+            KqlType::String,
+        );
         let v = if ty == KqlType::String { raw.sql } else { ctx.convert(raw, ty).sql };
         match cols.iter().position(|x| x.name == c.name) {
             Some(j) => {

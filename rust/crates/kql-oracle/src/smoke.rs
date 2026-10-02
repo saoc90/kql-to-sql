@@ -158,7 +158,10 @@ pub fn cmd_smoke(args: &[String]) -> Result<(), String> {
                 .collect();
             let setup = pg::Setup {
                 sql: Some(pg_storm_ddl()),
-                copies: vec![(kql_to_sql::sql::quote_ident_for("StormEvents", kql_to_sql::Dialect::Postgres), csv.clone().into())],
+                copies: vec![(
+                    kql_to_sql::sql::quote_ident_for("StormEvents", kql_to_sql::Dialect::Postgres),
+                    csv.clone().into(),
+                )],
             };
             let mut raw = pg::run_batch(&stmts, &setup)?;
             (0..items.len())
@@ -184,25 +187,26 @@ pub fn cmd_smoke(args: &[String]) -> Result<(), String> {
                     println!("TRANSLATE {file}\n  {kql}\n  {e}");
                 }
             }
-            (Ok(sql), res) => {
-                match res.unwrap_or(Ok(())) {
-                    Ok(()) => ok += 1,
-                    Err(m) if m == TIMED_OUT => {
-                        slow += 1;
-                        println!("SLOW (> {}s) {file}\n  {kql}", TIMEOUT.as_secs());
-                    }
-                    Err(m) => {
-                        ex_err += 1;
-                        *ex_groups.entry(m.lines().next().unwrap_or("").chars().take(90).collect()).or_default() += 1;
-                        if verbose {
-                            println!("EXECUTE {file}\n  {kql}\n  {sql}\n  {}", m.lines().next().unwrap_or(""));
-                        }
+            (Ok(sql), res) => match res.unwrap_or(Ok(())) {
+                Ok(()) => ok += 1,
+                Err(m) if m == TIMED_OUT => {
+                    slow += 1;
+                    println!("SLOW (> {}s) {file}\n  {kql}", TIMEOUT.as_secs());
+                }
+                Err(m) => {
+                    ex_err += 1;
+                    *ex_groups.entry(m.lines().next().unwrap_or("").chars().take(90).collect()).or_default() += 1;
+                    if verbose {
+                        println!("EXECUTE {file}\n  {kql}\n  {sql}\n  {}", m.lines().next().unwrap_or(""));
                     }
                 }
-            }
+            },
         }
     }
-    println!("smoke ({engine:?}): {} queries — ok {ok}, translate errors {tr_err}, invalid SQL {ex_err}, timed out {slow}", ok + tr_err + ex_err + slow);
+    println!(
+        "smoke ({engine:?}): {} queries — ok {ok}, translate errors {tr_err}, invalid SQL {ex_err}, timed out {slow}",
+        ok + tr_err + ex_err + slow
+    );
     if !tr_groups.is_empty() {
         println!("\ntranslate errors:");
         let mut g: Vec<_> = tr_groups.into_iter().collect();

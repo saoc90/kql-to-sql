@@ -17,7 +17,10 @@ pub enum Tok {
     TimeSpan(i64),
     Str(String),
     /// A typed literal with raw contents: `datetime(2020-01-01)`, `long(null)`, `guid(...)`.
-    Goo { ty: String, text: String },
+    Goo {
+        ty: String,
+        text: String,
+    },
     Punct(&'static str),
     Eof,
 }
@@ -29,14 +32,14 @@ pub struct Token {
 }
 
 const PUNCTS: &[&str] = &[
-    "!~", "!=", "<>", "<=", ">=", "==", "=~", "=>", "..", "<|", "(", ")", "[", "]", "{", "}", "|",
-    ".", ",", ";", ":", "=", "<", ">", "+", "-", "*", "/", "%", "!", "?", "@", "~", "#", "$",
+    "!~", "!=", "<>", "<=", ">=", "==", "=~", "=>", "..", "<|", "(", ")", "[", "]", "{", "}", "|", ".", ",", ";", ":",
+    "=", "<", ">", "+", "-", "*", "/", "%", "!", "?", "@", "~", "#", "$",
 ];
 
 /// Type names whose `name(...)` form is a literal with raw contents.
 const GOO_TYPES: &[&str] = &[
-    "bool", "boolean", "int", "long", "real", "double", "decimal", "datetime", "date", "timespan",
-    "time", "guid", "uuid", "uniqueid",
+    "bool", "boolean", "int", "long", "real", "double", "decimal", "datetime", "date", "timespan", "time", "guid",
+    "uuid", "uniqueid",
 ];
 
 pub fn tokenize(text: &str) -> Result<Vec<Token>, ParseError> {
@@ -482,13 +485,22 @@ mod tests {
                 Tok::Eof
             ]
         );
-        assert_eq!(toks("a // c\n| b"), vec![Tok::Ident("a".into()), Tok::Punct("|"), Tok::Ident("b".into()), Tok::Eof]);
-        assert_eq!(toks("$left.k"), vec![Tok::Ident("$left".into()), Tok::Punct("."), Tok::Ident("k".into()), Tok::Eof]);
+        assert_eq!(
+            toks("a // c\n| b"),
+            vec![Tok::Ident("a".into()), Tok::Punct("|"), Tok::Ident("b".into()), Tok::Eof]
+        );
+        assert_eq!(
+            toks("$left.k"),
+            vec![Tok::Ident("$left".into()), Tok::Punct("."), Tok::Ident("k".into()), Tok::Eof]
+        );
     }
 
     #[test]
     fn timespan_text() {
-        assert_eq!(parse_timespan_text("1.02:03:04"), Some(864_000_000_000 + 2 * 36_000_000_000 + 3 * 600_000_000 + 4 * 10_000_000));
+        assert_eq!(
+            parse_timespan_text("1.02:03:04"),
+            Some(864_000_000_000 + 2 * 36_000_000_000 + 3 * 600_000_000 + 4 * 10_000_000)
+        );
         assert_eq!(parse_timespan_text("00:00:00.5"), Some(5_000_000));
         assert_eq!(parse_timespan_text("2d"), Some(2 * 864_000_000_000));
         assert_eq!(parse_timespan_text("-1h"), Some(-36_000_000_000));

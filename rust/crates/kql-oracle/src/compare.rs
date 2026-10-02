@@ -250,11 +250,8 @@ pub fn ordered_equal(a: &[Row], b: &[Row], key_idx: &[usize], opts: &Options) ->
     let mut i = 0;
     while i < a.len() {
         let len = tie_block_len(a, i, key_idx, opts);
-        let ok = if len == 1 {
-            row_equal(&a[i], &b[i], opts)
-        } else {
-            multiset_equal(&a[i..i + len], &b[i..i + len], opts)
-        };
+        let ok =
+            if len == 1 { row_equal(&a[i], &b[i], opts) } else { multiset_equal(&a[i..i + len], &b[i..i + len], opts) };
         if !ok {
             return false;
         }
@@ -275,8 +272,7 @@ fn ordered_prefix_equal(a: &[Row], b: &[Row], key_idx: &[usize], opts: &Options)
         let len = tie_block_len(a, i, key_idx, opts);
         let last_block = i + len == a.len();
         let ok = if last_block && !key_idx.is_empty() {
-            let tail: Vec<Row> =
-                b[i..].iter().take_while(|r| keys_equal(&a[i], r, key_idx, opts)).cloned().collect();
+            let tail: Vec<Row> = b[i..].iter().take_while(|r| keys_equal(&a[i], r, key_idx, opts)).cloned().collect();
             contains_all(&a[i..], &tail, opts)
         } else if len == 1 {
             row_equal(&a[i], &b[i], opts)
@@ -307,11 +303,7 @@ fn missing_row(kusto: &[Row], duck: &[Row], opts: &Options) -> String {
         match (0..duck.len()).find(|&j| !used[j] && row_equal(k, &duck[j], opts)) {
             Some(j) => used[j] = true,
             None => {
-                let near = duck
-                    .get(i)
-                    .or(duck.first())
-                    .map(|r| format_row(r))
-                    .unwrap_or_else(|| "<none>".into());
+                let near = duck.get(i).or(duck.first()).map(|r| format_row(r)).unwrap_or_else(|| "<none>".into());
                 return format!("kusto row[{i}] {} not in duck result (duck row[{i}]={near})", format_row(k));
             }
         }
@@ -440,9 +432,7 @@ fn json_side(v: &Value) -> JsonSide {
             Err(_) => JsonSide::Raw(s.trim().to_string()),
         },
         Value::Bool(b) => JsonSide::Parsed(Json::Bool(*b)),
-        Value::Int(i) => JsonSide::Parsed(
-            i64::try_from(*i).map(Json::from).unwrap_or_else(|_| Json::from(*i as f64)),
-        ),
+        Value::Int(i) => JsonSide::Parsed(i64::try_from(*i).map(Json::from).unwrap_or_else(|_| Json::from(*i as f64))),
         Value::Real(r) => match serde_json::Number::from_f64(*r) {
             Some(n) => JsonSide::Parsed(Json::Number(n)),
             None => JsonSide::Raw(format_real(*r)),
@@ -612,7 +602,10 @@ mod tests {
         assert!(eq(Str("abc".into()), Str("abc".into())));
         assert!(!eq(Str("abc".into()), Str("ABC".into())));
         assert!(eq(Str("e\u{301}".into()), Str("\u{e9}".into())), "NFC");
-        assert!(eq(Guid("550e8400-e29b-41d4-a716-446655440000".into()), Str("550e8400-e29b-41d4-a716-446655440000".into())));
+        assert!(eq(
+            Guid("550e8400-e29b-41d4-a716-446655440000".into()),
+            Str("550e8400-e29b-41d4-a716-446655440000".into())
+        ));
         assert!(eq(Bool(true), Bool(true)));
         assert!(!eq(Bool(true), Bool(false)));
         assert!(eq(Bool(true), Str("true".into())));
@@ -648,7 +641,10 @@ mod tests {
     fn columns_and_names() {
         let k = kusto(cols(&[("a", Class::Int)]), 1, vec![vec![Int(1)]]);
         let d = DuckResult { columns: cols(&[("a", Class::Int), ("b", Class::Int)]), rows: vec![vec![Int(1), Int(2)]] };
-        assert_eq!(compare(&analysis(Mode::Multiset, &[]), &k, &d, Options::default()).outcome, Outcome::MismatchColumns);
+        assert_eq!(
+            compare(&analysis(Mode::Multiset, &[]), &k, &d, Options::default()).outcome,
+            Outcome::MismatchColumns
+        );
 
         let d = DuckResult { columns: cols(&[("x", Class::Real)]), rows: vec![vec![Real(1.0)]] };
         let v = compare(&analysis(Mode::Multiset, &[]), &k, &d, Options::default());

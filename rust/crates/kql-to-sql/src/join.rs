@@ -120,7 +120,10 @@ pub(crate) fn join(ctx: &mut Ctx, left: Rel, params: &[OpParam], right: &Expr, o
 
     let semi = |ctx: &mut Ctx, outer: Rel, inner: Rel, oa: &str, ia: &str, negate: bool| -> Rel {
         let cols = outer.cols.clone();
-        let items: Vec<Item> = cols.iter().map(|c| Item { sql: format!("{oa}.{}", quote_ident(&c.name)), alias: c.name.clone() }).collect();
+        let items: Vec<Item> = cols
+            .iter()
+            .map(|c| Item { sql: format!("{oa}.{}", quote_ident(&c.name)), alias: c.name.clone() })
+            .collect();
         let not = if negate { "NOT " } else { "" };
         let (o, i) = (sub(ctx, outer), sub(ctx, inner));
         let sel = Select {
@@ -166,11 +169,22 @@ pub(crate) fn join(ctx: &mut Ctx, left: Rel, params: &[OpParam], right: &Expr, o
         cols.push(Column { name, ty: c.ty });
     }
     let (l, r) = (sub(ctx, left), sub(ctx, right));
-    let sel = Select { items: Some(items), from: From::Raw(format!("{l} AS L {sql_kind} {r} AS R ON {cond}")), ..Default::default() };
+    let sel = Select {
+        items: Some(items),
+        from: From::Raw(format!("{l} AS L {sql_kind} {r} AS R ON {cond}")),
+        ..Default::default()
+    };
     Ok(Rel::from_select(sel, cols))
 }
 
-pub(crate) fn lookup(ctx: &mut Ctx, left: Rel, params: &[OpParam], right: &Expr, on: &[Expr], env: &Env) -> Result<Rel> {
+pub(crate) fn lookup(
+    ctx: &mut Ctx,
+    left: Rel,
+    params: &[OpParam],
+    right: &Expr,
+    on: &[Expr],
+    env: &Env,
+) -> Result<Rel> {
     let kind = param_word(params, "kind").unwrap_or_else(|| "leftouter".into());
     let right = ctx.tabular(right, env)?;
     let keys = join_keys(on, &left.cols, &right.cols)?;
@@ -200,7 +214,11 @@ pub(crate) fn lookup(ctx: &mut Ctx, left: Rel, params: &[OpParam], right: &Expr,
     }
     let order = left.order.clone();
     let (l, r) = (sub(ctx, left), sub(ctx, right));
-    let sel = Select { items: Some(items), from: From::Raw(format!("{l} AS L {sql_kind} {r} AS R ON {cond}")), ..Default::default() };
+    let sel = Select {
+        items: Some(items),
+        from: From::Raw(format!("{l} AS L {sql_kind} {r} AS R ON {cond}")),
+        ..Default::default()
+    };
     let mut rel = Rel::from_select(sel, cols);
     rel.order = order;
     rel.order.clear();
@@ -222,7 +240,13 @@ pub(crate) fn union(ctx: &mut Ctx, input: Option<Rel>, params: &[OpParam], table
     for t in tables {
         match t {
             Expr::Name(n) if n.contains('*') => {
-                let mut names: Vec<String> = ctx.catalog.tables.iter().map(|(n, _)| n.clone()).filter(|tn| crate::ops::wildcard(n, tn)).collect();
+                let mut names: Vec<String> = ctx
+                    .catalog
+                    .tables
+                    .iter()
+                    .map(|(n, _)| n.clone())
+                    .filter(|tn| crate::ops::wildcard(n, tn))
+                    .collect();
                 names.sort();
                 for tn in names {
                     let r = ctx.table_ref(&tn, env)?;
@@ -287,7 +311,9 @@ pub(crate) fn union(ctx: &mut Ctx, input: Option<Rel>, params: &[OpParam], table
         for (oname, src, ty) in &out {
             let sql = match r.cols.iter().find(|c| c.name == *src && c.ty == *ty) {
                 Some(c) => quote_ident(&c.name),
-                None if *ty == KqlType::String => "CAST('' AS VARCHAR)".replace("VARCHAR", ctx.d.sql_type(KqlType::String)),
+                None if *ty == KqlType::String => {
+                    "CAST('' AS VARCHAR)".replace("VARCHAR", ctx.d.sql_type(KqlType::String))
+                }
                 None => format!("CAST(NULL AS {})", ctx.d.sql_type(*ty)),
             };
             items.push(Item { sql, alias: oname.clone() });

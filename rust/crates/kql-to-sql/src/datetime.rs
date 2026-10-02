@@ -49,12 +49,21 @@ const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "au
 /// Parses the text of a Kusto `datetime(...)` literal into microseconds since the epoch.
 pub fn parse_datetime(text: &str) -> Option<i64> {
     let t = text.trim();
-    let t = t.strip_prefix('\'').and_then(|x| x.strip_suffix('\'')).or_else(|| t.strip_prefix('"').and_then(|x| x.strip_suffix('"'))).unwrap_or(t).trim();
+    let t = t
+        .strip_prefix('\'')
+        .and_then(|x| x.strip_suffix('\''))
+        .or_else(|| t.strip_prefix('"').and_then(|x| x.strip_suffix('"')))
+        .unwrap_or(t)
+        .trim();
     // yyyy and yyyy-MM
     if t.len() == 4 && t.bytes().all(|b| b.is_ascii_digit()) {
         return make_us(t.parse().ok()?, 1, 1, 0, 0, 0, 0);
     }
-    if t.len() == 7 && t.as_bytes()[4] == b'-' && t[..4].bytes().all(|b| b.is_ascii_digit()) && t[5..].bytes().all(|b| b.is_ascii_digit()) {
+    if t.len() == 7
+        && t.as_bytes()[4] == b'-'
+        && t[..4].bytes().all(|b| b.is_ascii_digit())
+        && t[5..].bytes().all(|b| b.is_ascii_digit())
+    {
         return make_us(t[..4].parse().ok()?, t[5..].parse().ok()?, 1, 0, 0, 0, 0);
     }
     if t.is_empty() {
@@ -146,7 +155,9 @@ fn parse_iso(t: &str) -> Option<i64> {
     while c.eat(b' ') {}
     if c.eat(b'Z') || c.eat(b'z') {
     } else if matches!(c.peek(), Some(b'+' | b'-')) {
-        let sign = if c.eat(b'-') { -1 } else {
+        let sign = if c.eat(b'-') {
+            -1
+        } else {
             c.eat(b'+');
             1
         };
@@ -245,10 +256,22 @@ mod tests {
     fn parses() {
         assert_eq!(parse_datetime("1970-01-01"), Some(0));
         assert_eq!(parse_datetime("2020-01-01 10:00").map(format_sql).as_deref(), Some("2020-01-01 10:00:00"));
-        assert_eq!(parse_datetime("2015-12-31 23:59:59.9").map(format_sql).as_deref(), Some("2015-12-31 23:59:59.900000"));
-        assert_eq!(parse_datetime("2014-05-25T08:20:03.123456Z").map(format_sql).as_deref(), Some("2014-05-25 08:20:03.123456"));
-        assert_eq!(parse_datetime("2024-02-29 23:59:59.9999999").map(format_sql).as_deref(), Some("2024-02-29 23:59:59.999999"));
-        assert_eq!(parse_datetime("Sat, 8 Nov 2014 15:05:02 GMT").map(format_sql).as_deref(), Some("2014-11-08 15:05:02"));
+        assert_eq!(
+            parse_datetime("2015-12-31 23:59:59.9").map(format_sql).as_deref(),
+            Some("2015-12-31 23:59:59.900000")
+        );
+        assert_eq!(
+            parse_datetime("2014-05-25T08:20:03.123456Z").map(format_sql).as_deref(),
+            Some("2014-05-25 08:20:03.123456")
+        );
+        assert_eq!(
+            parse_datetime("2024-02-29 23:59:59.9999999").map(format_sql).as_deref(),
+            Some("2024-02-29 23:59:59.999999")
+        );
+        assert_eq!(
+            parse_datetime("Sat, 8 Nov 2014 15:05:02 GMT").map(format_sql).as_deref(),
+            Some("2014-11-08 15:05:02")
+        );
         assert_eq!(parse_datetime("1960-03-01").map(format_sql).as_deref(), Some("1960-03-01 00:00:00"));
         assert_eq!(parse_datetime("2020-02-30"), None);
         assert_eq!(parse_datetime("2020-01-01T00:00:00+02:00").map(format_sql).as_deref(), Some("2019-12-31 22:00:00"));

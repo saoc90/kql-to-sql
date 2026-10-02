@@ -52,7 +52,10 @@ pub(crate) fn format_datetime(d: Dialect, ts: &str, fmt: &str) -> Result<String>
         let mut left = run;
         while left > 0 {
             let Some(&n) = spec_lengths(c).iter().find(|&&k| k <= left) else {
-                return err(format!("format_datetime(): unsupported format specifier '{}'", c.to_string().repeat(left)));
+                return err(format!(
+                    "format_datetime(): unsupported format specifier '{}'",
+                    c.to_string().repeat(left)
+                ));
             };
             left -= n;
             let s = match (c, n) {
@@ -129,7 +132,9 @@ pub(crate) fn format_timespan(ctx: &Ctx, ticks: &str, fmt: &str) -> Result<Strin
             's' => Some(pad(format!("(({a} {div} 10000000) % 60)"), n)),
             'f' if n <= 7 => Some(format!("substr({}, 1, {n})", pad(format!("({a} % 10000000)"), 7))),
             'F' if n <= 7 => Some(format!("rtrim(substr({}, 1, {n}), '0')", pad(format!("({a} % 10000000)"), 7))),
-            c if c.is_ascii_alphabetic() => return err(format!("format_timespan(): unsupported format specifier '{c}'")),
+            c if c.is_ascii_alphabetic() => {
+                return err(format!("format_timespan(): unsupported format specifier '{c}'"))
+            }
             c if !SEPARATORS.contains(c) => return err(format!("format_timespan(): unsupported separator '{c}'")),
             _ => None,
         };

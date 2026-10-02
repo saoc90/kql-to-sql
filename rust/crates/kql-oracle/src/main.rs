@@ -11,12 +11,12 @@
 //! Every command takes `--engine duckdb|pglite` (default duckdb). `pglite` translates with
 //! `Dialect::Postgres` and executes in PGlite (PostgreSQL as WASI, in-process via `pglite-oxide`).
 
-mod smoke;
 mod analyzer;
 mod compare;
 mod duck;
 mod pg;
 mod rows;
+mod smoke;
 mod value;
 
 use std::collections::BTreeMap;
@@ -170,7 +170,10 @@ fn kusto_sample(summary: &ResultSummary) -> Result<KustoSample, String> {
 
 /// Runs every statement in one PGlite batch and returns an executor that serves the results
 /// (keyed by SQL text), converting cells with the declared classes at lookup time.
-fn pglite_executor(sqls: Vec<String>, setup: &pg::Setup) -> Result<impl Fn(&str, &[Class]) -> Result<DuckResult, String>, String> {
+fn pglite_executor(
+    sqls: Vec<String>,
+    setup: &pg::Setup,
+) -> Result<impl Fn(&str, &[Class]) -> Result<DuckResult, String>, String> {
     let mut unique: Vec<String> = sqls;
     unique.sort();
     unique.dedup();
@@ -197,7 +200,8 @@ fn planned_sql(rec: &Record, engine: Engine) -> Option<String> {
 fn run_record(rec: &Record, use_record_sql: bool, engine: Engine, exec: &Executor) -> RunResult {
     let analysis = analyzer::analyze(&rec.kql);
     let rejected = rec.kusto_rejected();
-    let done = |sql, outcome, detail: Option<String>| RunResult { sql, verdict: Verdict::new(outcome, detail), duck: None };
+    let done =
+        |sql, outcome, detail: Option<String>| RunResult { sql, verdict: Verdict::new(outcome, detail), duck: None };
 
     if rec.outcome == "SkippedNondeterministic" && !rejected {
         return done(None, Outcome::SkippedNondeterministic, None);
@@ -205,7 +209,10 @@ fn run_record(rec: &Record, use_record_sql: bool, engine: Engine, exec: &Executo
 
     let translated = if use_record_sql {
         // Harness self-check: replay the C# translator's SQL (no declared schema).
-        rec.sql.clone().map(|sql| kql_to_sql::Translation { sql, columns: Vec::new(), render: None }).ok_or_else(|| "record has no Sql".to_string())
+        rec.sql
+            .clone()
+            .map(|sql| kql_to_sql::Translation { sql, columns: Vec::new(), render: None })
+            .ok_or_else(|| "record has no Sql".to_string())
     } else {
         translate(&rec.kql, engine.dialect())
     };
@@ -223,7 +230,11 @@ fn run_record(rec: &Record, use_record_sql: bool, engine: Engine, exec: &Executo
         Err(e) if engine.is_engine_domain_error(&e) => return done(sql, Outcome::SkippedEngineError, Some(e)),
         Err(e) => return done(sql, Outcome::SqlExecError, Some(e)),
     };
-    let with_duck = |outcome, detail: Option<String>, duck| RunResult { sql: sql.clone(), verdict: Verdict::new(outcome, detail), duck };
+    let with_duck = |outcome, detail: Option<String>, duck| RunResult {
+        sql: sql.clone(),
+        verdict: Verdict::new(outcome, detail),
+        duck,
+    };
 
     if rejected {
         let err = rec.kusto.as_ref().and_then(|k| k.error.clone());
@@ -241,7 +252,9 @@ fn run_record(rec: &Record, use_record_sql: bool, engine: Engine, exec: &Executo
     let declared_names: Vec<&str> = translation.columns.iter().map(|c| c.name.as_str()).collect();
     let actual_names: Vec<&str> = duck.columns.iter().map(|c| c.name.as_str()).collect();
     if !use_record_sql && declared_names != actual_names {
-        verdict.sub_verdicts.push(format!("DECLARED_SCHEMA_MISMATCH[declared={declared_names:?} actual={actual_names:?}]"));
+        verdict
+            .sub_verdicts
+            .push(format!("DECLARED_SCHEMA_MISMATCH[declared={declared_names:?} actual={actual_names:?}]"));
     }
     RunResult { sql, verdict, duck: Some(duck) }
 }
@@ -362,8 +375,12 @@ fn parse_run_args(args: &[String]) -> Result<RunArgs, String> {
         let mut value = || it.next().cloned().ok_or_else(|| format!("{a} needs a value\n{USAGE}"));
         match a.as_str() {
             "--in" => out.inputs.push(PathBuf::from(value()?)),
-            "--min-match" => out.min_match = Some(value()?.parse().map_err(|_| "--min-match needs a number".to_string())?),
-            "--max-sql-errors" => out.max_sql_errors = Some(value()?.parse().map_err(|_| "--max-sql-errors needs a number".to_string())?),
+            "--min-match" => {
+                out.min_match = Some(value()?.parse().map_err(|_| "--min-match needs a number".to_string())?)
+            }
+            "--max-sql-errors" => {
+                out.max_sql_errors = Some(value()?.parse().map_err(|_| "--max-sql-errors needs a number".to_string())?)
+            }
             "--filter" => out.filter = Some(value()?),
             "--out" => out.out = Some(PathBuf::from(value()?)),
             "--verbose" | "-v" => out.verbose = true,
@@ -496,7 +513,9 @@ fn print_detail(rec: &Record, res: &RunResult) {
         println!("subs: {}", v.sub_verdicts.join(" "));
     }
     if let Some(k) = &rec.kusto {
-        if k.error.is_none() && matches!(v.outcome, Outcome::MismatchRows | Outcome::MismatchOrder | Outcome::MismatchColumns) {
+        if k.error.is_none()
+            && matches!(v.outcome, Outcome::MismatchRows | Outcome::MismatchOrder | Outcome::MismatchColumns)
+        {
             println!("kusto: {} rows {:?}", k.row_count, k.columns);
             for r in &k.sample_rows {
                 println!("  {r}");
@@ -513,7 +532,11 @@ fn print_detail(rec: &Record, res: &RunResult) {
     println!();
 }
 
-fn print_summary(total: usize, totals: &BTreeMap<Outcome, usize>, by_family: &BTreeMap<String, BTreeMap<Outcome, usize>>) {
+fn print_summary(
+    total: usize,
+    totals: &BTreeMap<Outcome, usize>,
+    by_family: &BTreeMap<String, BTreeMap<Outcome, usize>>,
+) {
     println!("\n{total} records");
     println!("{:<28} {:>6} {:>7}", "outcome", "count", "%");
     for (o, n) in totals {
@@ -522,7 +545,10 @@ fn print_summary(total: usize, totals: &BTreeMap<Outcome, usize>, by_family: &BT
 
     let outcomes: Vec<Outcome> = totals.keys().copied().collect();
     let abbrev = |o: Outcome| o.short();
-    println!("\nby family ({})", outcomes.iter().map(|o| format!("{}={}", abbrev(*o), o.name())).collect::<Vec<_>>().join(", "));
+    println!(
+        "\nby family ({})",
+        outcomes.iter().map(|o| format!("{}={}", abbrev(*o), o.name())).collect::<Vec<_>>().join(", ")
+    );
     print!("{:<28}", "family");
     for o in &outcomes {
         print!(" {:>6}", abbrev(*o));
@@ -578,7 +604,10 @@ fn cmd_one(args: &[String]) -> Result<(), String> {
         let exec: &Executor = match engine {
             Engine::DuckDb => &execute,
             Engine::PgLite => {
-                pg_exec = pglite_executor(hits.iter().filter_map(|r| planned_sql(r, engine)).collect(), &pg::Setup::default())?;
+                pg_exec = pglite_executor(
+                    hits.iter().filter_map(|r| planned_sql(r, engine)).collect(),
+                    &pg::Setup::default(),
+                )?;
                 &pg_exec
             }
         };
@@ -586,7 +615,10 @@ fn cmd_one(args: &[String]) -> Result<(), String> {
             let res = run_record(rec, false, engine, exec);
             print_detail(rec, &res);
             if let Some(d) = &res.duck {
-                if !matches!(res.verdict.outcome, Outcome::MismatchRows | Outcome::MismatchOrder | Outcome::MismatchColumns) {
+                if !matches!(
+                    res.verdict.outcome,
+                    Outcome::MismatchRows | Outcome::MismatchOrder | Outcome::MismatchColumns
+                ) {
                     print_rows(d);
                 }
             }

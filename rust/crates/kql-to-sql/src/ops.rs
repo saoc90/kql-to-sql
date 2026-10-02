@@ -57,8 +57,12 @@ pub(crate) fn apply(ctx: &mut Ctx, rel: Rel, op: &Operator, env: &Env) -> Result
             ctx.render = Some(render_info(chart, props)?);
             Ok(rel)
         }
-        Operator::MvExpand { params, items, limit } => crate::advanced::mv_expand(ctx, rel, params, items, limit.as_ref(), env),
-        Operator::Parse { params, expr, parts, filter } => crate::advanced::parse(ctx, rel, params, expr, parts, *filter, env),
+        Operator::MvExpand { params, items, limit } => {
+            crate::advanced::mv_expand(ctx, rel, params, items, limit.as_ref(), env)
+        }
+        Operator::Parse { params, expr, parts, filter } => {
+            crate::advanced::parse(ctx, rel, params, expr, parts, *filter, env)
+        }
         other => crate::advanced::apply_advanced(ctx, rel, other, env),
     }
 }
@@ -166,7 +170,9 @@ pub(crate) fn output_sql(ctx: &Ctx, t: &TExpr) -> String {
         return t.bool_sql();
     }
     match &t.konst {
-        Some(Const::Long(_)) | Some(Const::Real(_)) | Some(Const::Bool(_)) if !t.sql.starts_with("CAST(") => ctx.d.cast(&t.sql, t.ty),
+        Some(Const::Long(_)) | Some(Const::Real(_)) | Some(Const::Bool(_)) if !t.sql.starts_with("CAST(") => {
+            ctx.d.cast(&t.sql, t.ty)
+        }
         Some(Const::TimeSpan(_)) => ctx.d.cast(&t.sql, KqlType::TimeSpan),
         Some(Const::Str(_)) if t.ty == KqlType::String => ctx.d.cast(&t.sql, KqlType::String),
         _ => t.sql.clone(),
@@ -269,7 +275,8 @@ fn project_rename(ctx: &mut Ctx, rel: Rel, pairs: &[(String, String)]) -> Result
 fn project_reorder(ctx: &mut Ctx, rel: Rel, pats: &[ast::NamePattern]) -> Result<Rel> {
     let mut first: Vec<Column> = Vec::new();
     for p in pats {
-        let mut matched: Vec<Column> = rel.cols.iter().filter(|c| wildcard(&p.pattern, &c.name) && !first.contains(c)).cloned().collect();
+        let mut matched: Vec<Column> =
+            rel.cols.iter().filter(|c| wildcard(&p.pattern, &c.name) && !first.contains(c)).cloned().collect();
         if matched.is_empty() && !p.pattern.contains('*') {
             return err(format!("unknown column '{}'", p.pattern));
         }
@@ -308,7 +315,12 @@ pub(crate) fn sort(ctx: &mut Ctx, rel: Rel, keys: &[ast::OrderKey], env: &Env) -
             Some(c) => specs.push(OrderSpec { col: c.name.clone(), desc, nulls_first }),
             None => {}
         }
-        physical.push(format!("{} {} NULLS {}", t.sql, if desc { "DESC" } else { "ASC" }, if nulls_first { "FIRST" } else { "LAST" }));
+        physical.push(format!(
+            "{} {} NULLS {}",
+            t.sql,
+            if desc { "DESC" } else { "ASC" },
+            if nulls_first { "FIRST" } else { "LAST" }
+        ));
     }
     rel.serialized = true;
     if specs.len() == keys.len() {
@@ -386,7 +398,14 @@ fn getschema(ctx: &mut Ctx, rel: &Rel) -> Result<Rel> {
         .cols
         .iter()
         .enumerate()
-        .map(|(i, c)| vec![quote_str(&c.name), format!("CAST({i} AS {})", ctx.d.sql_type(KqlType::Int)), quote_str(c.ty.clr_name()), quote_str(c.ty.name())])
+        .map(|(i, c)| {
+            vec![
+                quote_str(&c.name),
+                format!("CAST({i} AS {})", ctx.d.sql_type(KqlType::Int)),
+                quote_str(c.ty.clr_name()),
+                quote_str(c.ty.name()),
+            ]
+        })
         .collect();
     Ok(values_rel(ctx, &cols, rows))
 }
@@ -394,7 +413,10 @@ fn getschema(ctx: &mut Ctx, rel: &Rel) -> Result<Rel> {
 /// A relation from literal rows.
 pub(crate) fn values_rel(ctx: &mut Ctx, cols: &[Column], rows: Vec<Vec<String>>) -> Rel {
     if rows.is_empty() {
-        let items = cols.iter().map(|c| Item { sql: format!("CAST(NULL AS {})", ctx.d.sql_type(c.ty)), alias: c.name.clone() }).collect();
+        let items = cols
+            .iter()
+            .map(|c| Item { sql: format!("CAST(NULL AS {})", ctx.d.sql_type(c.ty)), alias: c.name.clone() })
+            .collect();
         let sel = Select { items: Some(items), filters: vec!["false".into()], ..Default::default() };
         return Rel::from_select(sel, cols.to_vec());
     }
@@ -436,7 +458,11 @@ fn print(ctx: &mut Ctx, items: &[NamedExpr], env: &Env) -> Result<Rel> {
 fn datatable(ctx: &mut Ctx, columns: &[ast::ColumnDecl], values: &[Expr], env: &Env) -> Result<Rel> {
     let cols: Vec<Column> = columns
         .iter()
-        .map(|c| KqlType::from_name(&c.ty).map(|ty| Column { name: c.name.clone(), ty }).ok_or_else(|| crate::Error::new(format!("unknown type '{}'", c.ty))))
+        .map(|c| {
+            KqlType::from_name(&c.ty)
+                .map(|ty| Column { name: c.name.clone(), ty })
+                .ok_or_else(|| crate::Error::new(format!("unknown type '{}'", c.ty)))
+        })
         .collect::<Result<_>>()?;
     if values.len() % cols.len() != 0 {
         return err(format!("datatable: {} values do not fill {} columns", values.len(), cols.len()));
@@ -451,7 +477,9 @@ fn datatable(ctx: &mut Ctx, columns: &[ast::ColumnDecl], values: &[Expr], env: &
             let t = ctx.expr(v, &Scope::empty(), env)?;
             let t = coerce_value(ctx, t, c.ty)?;
             // one explicit cast pins the VALUES column type (no double casts for typed literals)
-            let already = t.ty == c.ty && t.sql.starts_with("CAST(") && t.sql.ends_with(&format!(" AS {})", ctx.d.sql_type(c.ty)));
+            let already = t.ty == c.ty
+                && t.sql.starts_with("CAST(")
+                && t.sql.ends_with(&format!(" AS {})", ctx.d.sql_type(c.ty)));
             row.push(if already { t.sql } else { ctx.d.cast(&t.sql, c.ty) });
         }
         rows.push(row);
@@ -489,26 +517,42 @@ fn range(ctx: &mut Ctx, name: &str, from: &Expr, to: &Expr, step: &Expr, env: &E
     let col = quote_ident(name);
     let d = ctx.d;
     let (from_item, item_sql, ty) = match f.ty {
-        ty if ty.is_integer() && t.ty.is_integer() && s.ty.is_integer() => {
-            (d.generate_series(&d.cast(&f.sql, KqlType::Long), &d.cast(&t.sql, KqlType::Long), &d.cast(&s.sql, KqlType::Long), &alias, &col), col.clone(), KqlType::Long)
-        }
+        ty if ty.is_integer() && t.ty.is_integer() && s.ty.is_integer() => (
+            d.generate_series(
+                &d.cast(&f.sql, KqlType::Long),
+                &d.cast(&t.sql, KqlType::Long),
+                &d.cast(&s.sql, KqlType::Long),
+                &alias,
+                &col,
+            ),
+            col.clone(),
+            KqlType::Long,
+        ),
         KqlType::TimeSpan => (d.generate_series(&f.sql, &t.sql, &s.sql, &alias, &col), col.clone(), KqlType::TimeSpan),
         KqlType::DateTime if s.ty == KqlType::TimeSpan => {
             let (fu, tu) = (d.epoch_us(&f.sql), d.epoch_us(&t.sql));
             let step_us = format!("CAST(trunc({} / 10) AS BIGINT)", s.sql);
-            let n = format!("CASE WHEN {step_us} = 0 THEN -1 ELSE CAST(floor(({tu} - {fu}) / {}) AS BIGINT) END", d.cast(&step_us, KqlType::Real));
+            let n = format!(
+                "CASE WHEN {step_us} = 0 THEN -1 ELSE CAST(floor(({tu} - {fu}) / {}) AS BIGINT) END",
+                d.cast(&step_us, KqlType::Real)
+            );
             let gs = d.generate_series("0", &n, "1", &alias, "i");
             (gs, d.ts_from_us(&format!("({fu} + {alias}.i * {step_us})")), KqlType::DateTime)
         }
         ty if ty.is_numeric() => {
-            let (fr, tr, sr) = (d.cast(&f.sql, KqlType::Real), d.cast(&t.sql, KqlType::Real), d.cast(&s.sql, KqlType::Real));
+            let (fr, tr, sr) =
+                (d.cast(&f.sql, KqlType::Real), d.cast(&t.sql, KqlType::Real), d.cast(&s.sql, KqlType::Real));
             let n = format!("CASE WHEN {sr} = 0 THEN -1 ELSE CAST(floor(({tr} - {fr}) / {sr} + 1e-9) AS BIGINT) END");
             let gs = d.generate_series("0", &n, "1", &alias, "i");
             (gs, format!("({fr} + {alias}.i * {sr})"), KqlType::Real)
         }
         _ => return err(format!("range: unsupported types {}, {}, {}", f.ty, t.ty, s.ty)),
     };
-    let sel = Select { items: Some(vec![Item { sql: item_sql, alias: name.to_string() }]), from: From::Raw(from_item), ..Default::default() };
+    let sel = Select {
+        items: Some(vec![Item { sql: item_sql, alias: name.to_string() }]),
+        from: From::Raw(from_item),
+        ..Default::default()
+    };
     let mut rel = Rel::from_select(sel, vec![Column { name: name.to_string(), ty }]);
     // range produces ascending (or descending for a negative step) values in order
     let desc = matches!(s.konst, Some(Const::Long(v)) if v < 0) || matches!(s.konst, Some(Const::Real(v)) if v < 0.0);

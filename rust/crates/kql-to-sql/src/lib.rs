@@ -8,9 +8,9 @@ use std::fmt;
 mod advanced;
 mod aggs;
 mod binder;
-mod commands;
 #[allow(dead_code)]
 mod catalog_data;
+mod commands;
 mod datefmt;
 pub mod datetime;
 mod dialect;
@@ -204,7 +204,10 @@ pub fn translate(kql: &str, catalog: &Catalog, dialect: Dialect) -> Result<Trans
     } else {
         // a bare scalar expression: `print`-like single value
         let t = ctx.expr(result, &expr::Scope::empty(), &env)?;
-        let sel = sql::Select { items: Some(vec![sql::Item { sql: ops::output_sql(&ctx, &t), alias: "print_0".into() }]), ..Default::default() };
+        let sel = sql::Select {
+            items: Some(vec![sql::Item { sql: ops::output_sql(&ctx, &t), alias: "print_0".into() }]),
+            ..Default::default()
+        };
         binder::Rel::from_select(sel, vec![Column::new("print_0", t.ty)])
     };
     Ok(finish(&mut ctx, rel))
@@ -240,11 +243,8 @@ fn finish(ctx: &mut binder::Ctx, rel: binder::Rel) -> Translation {
     let sql = if ctx.ctes.is_empty() {
         body
     } else {
-        let ctes: Vec<String> = ctx
-            .ctes
-            .iter()
-            .map(|(n, q, m)| format!("{n} AS {}({q})", if *m { "MATERIALIZED " } else { "" }))
-            .collect();
+        let ctes: Vec<String> =
+            ctx.ctes.iter().map(|(n, q, m)| format!("{n} AS {}({q})", if *m { "MATERIALIZED " } else { "" })).collect();
         format!("WITH {} {body}", ctes.join(", "))
     };
     Translation { sql, columns, render: ctx.render.take() }

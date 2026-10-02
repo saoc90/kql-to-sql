@@ -81,7 +81,11 @@ impl Prepared {
         let mut p = Prepared(ptr::null_mut());
         if unsafe { ffi::duckdb_prepare(con, c.as_ptr(), &mut p.0) } != ffi::DuckDBSuccess {
             let err = unsafe { ffi::duckdb_prepare_error(p.0) };
-            let msg = if err.is_null() { "unknown error".into() } else { unsafe { CStr::from_ptr(err) }.to_string_lossy().into_owned() };
+            let msg = if err.is_null() {
+                "unknown error".into()
+            } else {
+                unsafe { CStr::from_ptr(err) }.to_string_lossy().into_owned()
+            };
             return Err(format!("kql: the generated SQL failed to prepare: {msg}\nSQL: {sql}"));
         }
         Ok(p)
@@ -92,7 +96,8 @@ impl Prepared {
     }
 
     fn column_name(&self, i: usize) -> String {
-        unsafe { take_duck_string(ffi::duckdb_prepared_statement_column_name(self.0, i as u64) as *mut _) }.unwrap_or_default()
+        unsafe { take_duck_string(ffi::duckdb_prepared_statement_column_name(self.0, i as u64) as *mut _) }
+            .unwrap_or_default()
     }
 
     fn column_type(&self, i: usize) -> LogicalType {
@@ -174,7 +179,11 @@ fn quote_ident(name: &str) -> String {
 unsafe fn varchar_parameter(info: ffi::duckdb_bind_info, index: u64) -> Res<String> {
     unsafe {
         let mut v = ffi::duckdb_bind_get_parameter(info, index);
-        let s = if v.is_null() || ffi::duckdb_is_null_value(v) { None } else { take_duck_string(ffi::duckdb_get_varchar(v)) };
+        let s = if v.is_null() || ffi::duckdb_is_null_value(v) {
+            None
+        } else {
+            take_duck_string(ffi::duckdb_get_varchar(v))
+        };
         if !v.is_null() {
             ffi::duckdb_destroy_value(&mut v);
         }
@@ -190,8 +199,15 @@ unsafe fn bind_impl(info: ffi::duckdb_bind_info) -> Res<BindData> {
         let con = lock(&shared.exec);
         let prepared = Prepared::new(con.0, &t.sql)?;
         let n = prepared.column_count();
-        let names: Vec<String> =
-            (0..n).map(|i| t.columns.get(i).filter(|_| t.columns.len() == n).map(|c| c.name.clone()).unwrap_or_else(|| prepared.column_name(i))).collect();
+        let names: Vec<String> = (0..n)
+            .map(|i| {
+                t.columns
+                    .get(i)
+                    .filter(|_| t.columns.len() == n)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_else(|| prepared.column_name(i))
+            })
+            .collect();
         let mut cast = false;
         let mut items = Vec::with_capacity(n);
         for i in 0..n {
@@ -231,7 +247,9 @@ unsafe extern "C" fn kql_bind(info: ffi::duckdb_bind_info) {
     });
     unsafe {
         match (err, data) {
-            (None, Some(d)) => ffi::duckdb_bind_set_bind_data(info, Box::into_raw(Box::new(d)).cast(), Some(drop_box::<BindData>)),
+            (None, Some(d)) => {
+                ffi::duckdb_bind_set_bind_data(info, Box::into_raw(Box::new(d)).cast(), Some(drop_box::<BindData>))
+            }
             (e, _) => ffi::duckdb_bind_set_error(info, c_message(&e.unwrap_or_default()).as_ptr()),
         }
     }
@@ -278,7 +296,8 @@ unsafe fn init_impl(info: ffi::duckdb_init_info) -> Res<InitData> {
             None => {
                 // no free streaming connection: materialize on the shared connection
                 let con = lock(&shared.exec);
-                let sql = CString::new(bind.sql.as_str()).map_err(|_| "kql: the generated SQL contains a NUL byte".to_string())?;
+                let sql = CString::new(bind.sql.as_str())
+                    .map_err(|_| "kql: the generated SQL contains a NUL byte".to_string())?;
                 ffi::duckdb_query(con.0, sql.as_ptr(), &mut *result.0) == ffi::DuckDBSuccess
             }
         };
@@ -333,7 +352,10 @@ unsafe fn func_impl(info: ffi::duckdb_function_info, output: ffi::duckdb_data_ch
             if size > 0 {
                 let columns = ffi::duckdb_data_chunk_get_column_count(output);
                 for c in 0..columns {
-                    ffi::duckdb_vector_reference_vector(ffi::duckdb_data_chunk_get_vector(output, c), ffi::duckdb_data_chunk_get_vector(chunk, c));
+                    ffi::duckdb_vector_reference_vector(
+                        ffi::duckdb_data_chunk_get_vector(output, c),
+                        ffi::duckdb_data_chunk_get_vector(chunk, c),
+                    );
                 }
                 ffi::duckdb_data_chunk_set_size(output, size);
             }

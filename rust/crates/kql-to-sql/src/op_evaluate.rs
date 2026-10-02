@@ -17,7 +17,15 @@ use crate::{err, Column, Dialect, KqlType, Result};
 
 /// `T | evaluate plugin(...)` where the input expression `input` is available, so plugins whose
 /// output schema depends on constant data can inspect it.
-pub(crate) fn evaluate_with_input(ctx: &mut Ctx, rel: Rel, input: &Expr, params: &[OpParam], name: &str, args: &[Arg], env: &Env) -> Result<Rel> {
+pub(crate) fn evaluate_with_input(
+    ctx: &mut Ctx,
+    rel: Rel,
+    input: &Expr,
+    params: &[OpParam],
+    name: &str,
+    args: &[Arg],
+    env: &Env,
+) -> Result<Rel> {
     match name.to_ascii_lowercase().as_str() {
         "bag_unpack" => bag_unpack(ctx, rel, Some(input), args, env),
         "pivot" => pivot(ctx, rel, Some(input), args, env),
@@ -25,7 +33,14 @@ pub(crate) fn evaluate_with_input(ctx: &mut Ctx, rel: Rel, input: &Expr, params:
     }
 }
 
-pub(crate) fn evaluate(ctx: &mut Ctx, rel: Option<Rel>, _params: &[OpParam], name: &str, args: &[Arg], env: &Env) -> Result<Rel> {
+pub(crate) fn evaluate(
+    ctx: &mut Ctx,
+    rel: Option<Rel>,
+    _params: &[OpParam],
+    name: &str,
+    args: &[Arg],
+    env: &Env,
+) -> Result<Rel> {
     let lname = name.to_ascii_lowercase();
     let Some(rel) = rel else {
         return err(format!("the '{name}' plugin is not supported as a query source"));
@@ -55,24 +70,36 @@ fn column_values(input: &Expr, col: &str) -> Option<Vec<Expr>> {
                 }
                 Some(values.chunks(columns.len()).filter_map(|r| r.get(i).cloned()).collect())
             }
-            Operator::Print(items) => items.iter().enumerate().find(|(i, ne)| ne.name().map(str::to_string).unwrap_or_else(|| format!("print_{i}")) == col).map(|(_, ne)| vec![ne.expr.clone()]),
+            Operator::Print(items) => items
+                .iter()
+                .enumerate()
+                .find(|(i, ne)| ne.name().map(str::to_string).unwrap_or_else(|| format!("print_{i}")) == col)
+                .map(|(_, ne)| vec![ne.expr.clone()]),
             _ => None,
         },
         Expr::Pipe { input, op } => match &**op {
-            Operator::Extend(items) | Operator::Serialize(items) => match items.iter().rev().find(|ne| ne.names.iter().any(|n| n == col)) {
-                Some(ne) => Some(vec![ne.expr.clone()]),
-                None => column_values(input, col),
-            },
+            Operator::Extend(items) | Operator::Serialize(items) => {
+                match items.iter().rev().find(|ne| ne.names.iter().any(|n| n == col)) {
+                    Some(ne) => Some(vec![ne.expr.clone()]),
+                    None => column_values(input, col),
+                }
+            }
             Operator::Project(items) => {
-                let ne = items.iter().find(|ne| ne.name() == Some(col) || (ne.names.is_empty() && matches!(&ne.expr, Expr::Name(n) if n == col)))?;
+                let ne = items.iter().find(|ne| {
+                    ne.name() == Some(col) || (ne.names.is_empty() && matches!(&ne.expr, Expr::Name(n) if n == col))
+                })?;
                 match &ne.expr {
                     Expr::Name(src) => column_values(input, src),
                     e => Some(vec![e.clone()]),
                 }
             }
-            Operator::Sort(_) | Operator::Where(_) | Operator::Take(_) | Operator::ProjectAway(_) | Operator::ProjectKeep(_) | Operator::ProjectReorder(_) | Operator::Render { .. } => {
-                column_values(input, col)
-            }
+            Operator::Sort(_)
+            | Operator::Where(_)
+            | Operator::Take(_)
+            | Operator::ProjectAway(_)
+            | Operator::ProjectKeep(_)
+            | Operator::ProjectReorder(_)
+            | Operator::Render { .. } => column_values(input, col),
             _ => None,
         },
         _ => None,
@@ -151,12 +178,21 @@ fn bag_unpack(ctx: &mut Ctx, rel: Rel, input: Option<&Expr>, args: &[Arg], env: 
             },
         }
     };
-    let prefix = str_arg(ctx, named_arg(args, "OutputColumnPrefix").or(positional.get(1).map(|a| &a.expr)), "the column prefix")?.unwrap_or_default();
-    let conflict = str_arg(ctx, named_arg(args, "columnsConflict").or(positional.get(2).map(|a| &a.expr)), "columnsConflict")?.unwrap_or_else(|| "error".into());
+    let prefix = str_arg(
+        ctx,
+        named_arg(args, "OutputColumnPrefix").or(positional.get(1).map(|a| &a.expr)),
+        "the column prefix",
+    )?
+    .unwrap_or_default();
+    let conflict =
+        str_arg(ctx, named_arg(args, "columnsConflict").or(positional.get(2).map(|a| &a.expr)), "columnsConflict")?
+            .unwrap_or_else(|| "error".into());
     let ignored: Vec<String> = match named_arg(args, "ignoredProperties").or(positional.get(3).map(|a| &a.expr)) {
         None => Vec::new(),
         Some(e) => match ctx.expr(e, &Scope::empty(), env)?.konst {
-            Some(Const::Dynamic(serde_json::Value::Array(items))) => items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+            Some(Const::Dynamic(serde_json::Value::Array(items))) => {
+                items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
+            }
             _ => return err("bag_unpack(): ignoredProperties must be a constant dynamic array"),
         },
     };
@@ -209,7 +245,9 @@ fn bag_unpack(ctx: &mut Ctx, rel: Rel, input: Option<&Expr>, args: &[Arg], env: 
             continue;
         }
         match (key, conflict.as_str()) {
-            (Some(k), "error") => return err(format!("bag_unpack(): the unpacked column '{prefix}{k}' already exists")),
+            (Some(k), "error") => {
+                return err(format!("bag_unpack(): the unpacked column '{prefix}{k}' already exists"))
+            }
             (Some(k), "replace_source") => {
                 let (i, cl) = unpacked(ctx, &k, keys[&k]);
                 items.push(i);
@@ -248,7 +286,9 @@ fn pivot(ctx: &mut Ctx, rel: Rel, input: Option<&Expr>, args: &[Arg], env: &Env)
     }
     // the aggregation (default count()) and its "if" variant
     let (agg_name, agg_args, rest) = match args.get(1).map(|a| &a.expr) {
-        Some(Expr::Call { name, args: aa }) if crate::aggs::is_aggregate(name) => (name.to_ascii_lowercase(), aa.clone(), &args[2..]),
+        Some(Expr::Call { name, args: aa }) if crate::aggs::is_aggregate(name) => {
+            (name.to_ascii_lowercase(), aa.clone(), &args[2..])
+        }
         _ => ("count".to_string(), Vec::new(), &args[1.min(args.len())..]),
     };
     let if_name = match agg_name.as_str() {
@@ -284,7 +324,8 @@ fn pivot(ctx: &mut Ctx, rel: Rel, input: Option<&Expr>, args: &[Arg], env: &Env)
     let exprs = input
         .and_then(|i| column_values(i, pc))
         .ok_or_else(|| crate::Error::new("pivot(): the output columns depend on the data; only pivot columns with values known at translation time (datatable/print constants) are supported"))?;
-    let consts = constant_values(ctx, &exprs, env).ok_or_else(|| crate::Error::new("pivot(): the pivot column values must be constants"))?;
+    let consts = constant_values(ctx, &exprs, env)
+        .ok_or_else(|| crate::Error::new("pivot(): the pivot column values must be constants"))?;
     let mut values: BTreeMap<String, Expr> = BTreeMap::new();
     for (e, t) in exprs.iter().zip(&consts) {
         if t.is_null_const() {
@@ -293,7 +334,13 @@ fn pivot(ctx: &mut Ctx, rel: Rel, input: Option<&Expr>, args: &[Arg], env: &Env)
         let name = match &t.konst {
             Some(Const::Str(s)) => s.clone(),
             Some(Const::Long(v)) => v.to_string(),
-            Some(Const::Bool(b)) => if *b { "True".into() } else { "False".into() },
+            Some(Const::Bool(b)) => {
+                if *b {
+                    "True".into()
+                } else {
+                    "False".into()
+                }
+            }
             Some(Const::Real(v)) => v.to_string(),
             _ => return err("pivot(): unsupported pivot value type"),
         };
@@ -359,14 +406,20 @@ fn narrow(ctx: &mut Ctx, rel: Rel, args: &[Arg]) -> Result<Rel> {
     let vals: Vec<String> = r.cols.iter().map(|c| ctx.to_string(TExpr::new(quote_ident(&c.name), c.ty)).sql).collect();
     let (ln, lv) = match ctx.d.kind() {
         Dialect::DuckDb => (format!("unnest([{}])", names.join(", ")), format!("unnest([{}])", vals.join(", "))),
-        Dialect::Postgres => (format!("unnest(ARRAY[{}])", names.join(", ")), format!("unnest(ARRAY[{}])", vals.join(", "))),
+        Dialect::Postgres => {
+            (format!("unnest(ARRAY[{}])", names.join(", ")), format!("unnest(ARRAY[{}])", vals.join(", ")))
+        }
     };
     let items = vec![
         Item { sql: "__kql_row".into(), alias: "Row".into() },
         Item { sql: ln, alias: "Column".into() },
         Item { sql: lv, alias: "Value".into() },
     ];
-    let cols = vec![Column::new("Row", KqlType::Long), Column::new("Column", KqlType::String), Column::new("Value", KqlType::String)];
+    let cols = vec![
+        Column::new("Row", KqlType::Long),
+        Column::new("Column", KqlType::String),
+        Column::new("Value", KqlType::String),
+    ];
     let mut out = r;
     out.order.clear();
     out.sel.items = Some(items);
@@ -377,13 +430,23 @@ fn narrow(ctx: &mut Ctx, rel: Rel, args: &[Arg]) -> Result<Rel> {
 
 // ---------------------------------------------------------------------- externaldata
 
-pub(crate) fn externaldata(ctx: &mut Ctx, columns: &[ColumnDecl], uris: &[Expr], props: &[(String, Expr)], env: &Env) -> Result<Rel> {
+pub(crate) fn externaldata(
+    ctx: &mut Ctx,
+    columns: &[ColumnDecl],
+    uris: &[Expr],
+    props: &[(String, Expr)],
+    env: &Env,
+) -> Result<Rel> {
     if ctx.d.kind() != Dialect::DuckDb {
         return err("externaldata is only supported for DuckDB");
     }
     let cols: Vec<Column> = columns
         .iter()
-        .map(|c| KqlType::from_name(&c.ty).map(|ty| Column::new(c.name.clone(), ty)).ok_or_else(|| crate::Error::new(format!("unknown type '{}'", c.ty))))
+        .map(|c| {
+            KqlType::from_name(&c.ty)
+                .map(|ty| Column::new(c.name.clone(), ty))
+                .ok_or_else(|| crate::Error::new(format!("unknown type '{}'", c.ty)))
+        })
         .collect::<Result<_>>()?;
     if cols.is_empty() {
         return err("externaldata: at least one column is required");
@@ -414,7 +477,10 @@ pub(crate) fn externaldata(ctx: &mut Ctx, columns: &[ColumnDecl], uris: &[Expr],
         }
     }
     let list = format!("[{}]", paths.join(", "));
-    let all_varchar = format!("{{{}}}", cols.iter().map(|c| format!("{}: 'VARCHAR'", quote_str(&c.name))).collect::<Vec<_>>().join(", "));
+    let all_varchar = format!(
+        "{{{}}}",
+        cols.iter().map(|c| format!("{}: 'VARCHAR'", quote_str(&c.name))).collect::<Vec<_>>().join(", ")
+    );
     let from = match format.as_str() {
         "csv" | "tsv" | "tsve" | "psv" | "scsv" | "sohsv" | "txt" | "raw" => {
             let delim = match format.as_str() {

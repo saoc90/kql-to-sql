@@ -29,8 +29,18 @@ pub fn parse_schema(schema_json: &str) -> Result<Catalog, String> {
             Value::Array(a) => a
                 .iter()
                 .map(|c| {
-                    let n = c.get("name").or_else(|| c.get("column_name")).and_then(Value::as_str).unwrap_or("").to_string();
-                    let t = c.get("type").or_else(|| c.get("column_type")).and_then(Value::as_str).unwrap_or("").to_string();
+                    let n = c
+                        .get("name")
+                        .or_else(|| c.get("column_name"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let t = c
+                        .get("type")
+                        .or_else(|| c.get("column_type"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
                     (n, t)
                 })
                 .collect(),
@@ -75,7 +85,8 @@ pub fn translation_json(t: &Translation) -> Value {
 /// Translates KQL to SQL. Returns `{success, sql, error, columns, render}` as JSON.
 #[wasm_bindgen]
 pub fn translate(kql: &str, dialect_name: &str, schema_json: &str) -> String {
-    let result = parse_schema(schema_json).and_then(|cat| kql_to_sql::translate(kql, &cat, dialect(dialect_name)).map_err(|e| e.message));
+    let result = parse_schema(schema_json)
+        .and_then(|cat| kql_to_sql::translate(kql, &cat, dialect(dialect_name)).map_err(|e| e.message));
     match result {
         Ok(t) => translation_json(&t).to_string(),
         Err(e) => json!({"success": false, "sql": null, "error": e, "columns": [], "render": null}).to_string(),

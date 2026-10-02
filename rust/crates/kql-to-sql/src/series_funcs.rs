@@ -153,8 +153,16 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             };
             Ok(mk(apply_list(&a[0].sql, &l, &i, &body), KqlType::Dynamic))
         }
-        "series_add" | "series_subtract" | "series_multiply" | "series_divide" | "series_greater" | "series_greater_equals" | "series_less"
-        | "series_less_equals" | "series_equals" | "series_not_equals" => {
+        "series_add"
+        | "series_subtract"
+        | "series_multiply"
+        | "series_divide"
+        | "series_greater"
+        | "series_greater_equals"
+        | "series_less"
+        | "series_less_equals"
+        | "series_equals"
+        | "series_not_equals" => {
             need(name, a, 2, 2)?;
             let op = match name {
                 "series_add" => "+",
@@ -204,7 +212,10 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
                 ("len", format!("CAST(len({x}) AS BIGINT)")),
             ];
             let pairs: Vec<String> = fields.iter().map(|(k, v)| format!("'{k}', {v}")).collect();
-            Ok(mk(format!("CASE WHEN json_type({0}) = 'ARRAY' THEN json_object({1}) END", a[0].sql, pairs.join(", ")), KqlType::Dynamic))
+            Ok(mk(
+                format!("CASE WHEN json_type({0}) = 'ARRAY' THEN json_object({1}) END", a[0].sql, pairs.join(", ")),
+                KqlType::Dynamic,
+            ))
         }
         "series_fit_line" | "series_fit_line_dynamic" => {
             need(name, a, 1, 1)?;
@@ -215,13 +226,18 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let mx = format!("(({cnt} + 1) / 2.0)");
             let my = format!("list_avg({y})");
             let sxx = format!("list_sum(list_transform(range(1, len({y}) + 1), {i} -> ({i} - {mx}) * ({i} - {mx})))");
-            let sxy = format!("list_sum(list_transform(range(1, len({y}) + 1), {j} -> ({j} - {mx}) * ({y}[{j}] - {my})))");
+            let sxy =
+                format!("list_sum(list_transform(range(1, len({y}) + 1), {j} -> ({j} - {mx}) * ({y}[{j}] - {my})))");
             let slope = format!("({sxy} / NULLIF({sxx}, 0))");
             let icept = format!("({my} - {slope} * {mx})");
             let sst = format!("list_sum(list_transform({y}, {k} -> ({k} - {my}) * ({k} - {my})))");
             let r = n.v("r");
             let fit = |x: &str| format!("({icept} + {slope} * {x})");
-            let ssr = format!("list_sum(list_transform(range(1, len({y}) + 1), {r} -> ({y}[{r}] - {}) * ({y}[{r}] - {})))", fit(&r), fit(&r));
+            let ssr = format!(
+                "list_sum(list_transform(range(1, len({y}) + 1), {r} -> ({y}[{r}] - {}) * ({y}[{r}] - {})))",
+                fit(&r),
+                fit(&r)
+            );
             let rsq = format!("CASE WHEN {sst} = 0 THEN 1.0 ELSE 1 - {ssr} / {sst} END");
             if name == "series_fit_line" {
                 // used as a single value, series_fit_line() yields its first column (rsquare)
@@ -237,7 +253,10 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
                 ("line_fit", format!("to_json(list_transform(range(1, len({y}) + 1), {f} -> {}))", fit(&f))),
             ];
             let pairs: Vec<String> = pairs.iter().map(|(k, v)| format!("'{k}', {v}")).collect();
-            Ok(mk(format!("CASE WHEN json_type({0}) = 'ARRAY' THEN json_object({1}) END", a[0].sql, pairs.join(", ")), KqlType::Dynamic))
+            Ok(mk(
+                format!("CASE WHEN json_type({0}) = 'ARRAY' THEN json_object({1}) END", a[0].sql, pairs.join(", ")),
+                KqlType::Dynamic,
+            ))
         }
         "series_pearson_correlation" => {
             need(name, a, 2, 2)?;
@@ -246,9 +265,12 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let (i, j, k) = (n.v("i"), n.v("j"), n.v("k"));
             let (mx, my) = (format!("list_avg({x})"), format!("list_avg({y})"));
             let len = format!("least(len({x}), len({y}))");
-            let sxy = format!("list_sum(list_transform(range(1, {len} + 1), {i} -> ({x}[{i}] - {mx}) * ({y}[{i}] - {my})))");
-            let sxx = format!("list_sum(list_transform(range(1, {len} + 1), {j} -> ({x}[{j}] - {mx}) * ({x}[{j}] - {mx})))");
-            let syy = format!("list_sum(list_transform(range(1, {len} + 1), {k} -> ({y}[{k}] - {my}) * ({y}[{k}] - {my})))");
+            let sxy =
+                format!("list_sum(list_transform(range(1, {len} + 1), {i} -> ({x}[{i}] - {mx}) * ({y}[{i}] - {my})))");
+            let sxx =
+                format!("list_sum(list_transform(range(1, {len} + 1), {j} -> ({x}[{j}] - {mx}) * ({x}[{j}] - {mx})))");
+            let syy =
+                format!("list_sum(list_transform(range(1, {len} + 1), {k} -> ({y}[{k}] - {my}) * ({y}[{k}] - {my})))");
             Ok(mk(format!("({sxy} / NULLIF(sqrt({sxx} * {syy}), 0))"), KqlType::Real))
         }
         "series_fir" => {
@@ -283,10 +305,16 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
                 .enumerate()
                 .map(|(k, c)| {
                     let idx = format!("({i} - {k} + {shift})");
-                    format!("{} * (CASE WHEN {idx} >= 0 AND {idx} < len({x}) THEN COALESCE({x}[{idx} + 1], 0) ELSE 0 END)", real_lit(*c))
+                    format!(
+                        "{} * (CASE WHEN {idx} >= 0 AND {idx} < len({x}) THEN COALESCE({x}[{idx} + 1], 0) ELSE 0 END)",
+                        real_lit(*c)
+                    )
                 })
                 .collect();
-            Ok(mk(format!("to_json(list_transform(range(0, len({x})), {i} -> {}))", terms.join(" + ")), KqlType::Dynamic))
+            Ok(mk(
+                format!("to_json(list_transform(range(0, len({x})), {i} -> {}))", terms.join(" + ")),
+                KqlType::Dynamic,
+            ))
         }
         "series_iir" => {
             need(name, a, 3, 3)?;
@@ -308,7 +336,10 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
                     .enumerate()
                     .map(|(k, c)| {
                         let idx = format!("({m} - {k})");
-                        format!("{} * (CASE WHEN {idx} >= 0 THEN COALESCE({x}[{idx} + 1], 0) ELSE 0 END)", real_lit(c / a0))
+                        format!(
+                            "{} * (CASE WHEN {idx} >= 0 THEN COALESCE({x}[{idx} + 1], 0) ELSE 0 END)",
+                            real_lit(c / a0)
+                        )
                     })
                     .collect::<Vec<_>>()
                     .join(" + ")
@@ -317,7 +348,11 @@ fn duck(ctx: &mut Ctx, name: &str, a: &[TExpr]) -> Result<TExpr> {
             let body = if ratio == 0.0 {
                 format!("({})", f(&i))
             } else {
-                format!("list_sum(list_transform(range(0, {i} + 1), {m} -> pow({}, {i} - {m}) * ({})))", real_lit(ratio), f(&m))
+                format!(
+                    "list_sum(list_transform(range(0, {i} + 1), {m} -> pow({}, {i} - {m}) * ({})))",
+                    real_lit(ratio),
+                    f(&m)
+                )
             };
             Ok(mk(format!("to_json(list_transform(range(0, len({x})), {i} -> {body}))"), KqlType::Dynamic))
         }

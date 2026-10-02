@@ -13,11 +13,16 @@ impl Ctx<'_> {
         if let Some(Binding::Function(f)) = env.get(name).cloned() {
             return match self.call_user_function(&f, args, scope, env)? {
                 FnResult::Scalar(t) => Ok(t),
-                FnResult::Tabular(_) => err(format!("function '{name}' returns a table and cannot be used as a scalar")),
+                FnResult::Tabular(_) => {
+                    err(format!("function '{name}' returns a table and cannot be used as a scalar"))
+                }
             };
         }
         let lname = name.to_ascii_lowercase();
-        if crate::aggs::is_aggregate(&lname) && !crate::catalog_data::lookup(&lname, crate::catalog_data::FnKind::Scalar).is_some_and(|_| !scope.aggregates) {
+        if crate::aggs::is_aggregate(&lname)
+            && !crate::catalog_data::lookup(&lname, crate::catalog_data::FnKind::Scalar)
+                .is_some_and(|_| !scope.aggregates)
+        {
             if scope.aggregates {
                 return crate::aggs::call(self, name, args, scope, env);
             }
@@ -32,10 +37,16 @@ impl Ctx<'_> {
             }
             "toscalar" => {
                 let [a] = args else { return err("toscalar() takes one argument") };
-                return if self.is_tabular(&a.expr, env) { self.scalar_subquery(&a.expr, env) } else { self.expr(&a.expr, scope, env) };
+                return if self.is_tabular(&a.expr, env) {
+                    self.scalar_subquery(&a.expr, env)
+                } else {
+                    self.expr(&a.expr, scope, env)
+                };
             }
             "column_ifexists" => {
-                let (Some(Expr::Literal(Literal::String(col))), Some(def)) = (args.first().map(|a| &a.expr), args.get(1)) else {
+                let (Some(Expr::Literal(Literal::String(col))), Some(def)) =
+                    (args.first().map(|a| &a.expr), args.get(1))
+                else {
                     return err("column_ifexists(name, default) requires a constant column name");
                 };
                 return match scope.find(col) {
@@ -56,8 +67,14 @@ impl Ctx<'_> {
             }
             _ => {}
         }
-        if matches!(lname.as_str(), "row_number" | "prev" | "next" | "row_cumsum" | "row_rank_dense" | "row_rank_min" | "row_window_session") && !scope.serialized {
-            return err(format!("{name}(): the input is not serialized; use 'serialize' or 'sort' before calling window functions"));
+        if matches!(
+            lname.as_str(),
+            "row_number" | "prev" | "next" | "row_cumsum" | "row_rank_dense" | "row_rank_min" | "row_window_session"
+        ) && !scope.serialized
+        {
+            return err(format!(
+                "{name}(): the input is not serialized; use 'serialize' or 'sort' before calling window functions"
+            ));
         }
         let mut a = Vec::with_capacity(args.len());
         for arg in args {
@@ -73,7 +90,10 @@ impl Ctx<'_> {
         let n = a.len();
         let need = |min: usize, max: usize| -> Result<()> {
             if n < min || n > max {
-                err(format!("{name}(): expected {} arguments, got {n}", if min == max { min.to_string() } else { format!("{min}..{max}") }))
+                err(format!(
+                    "{name}(): expected {} arguments, got {n}",
+                    if min == max { min.to_string() } else { format!("{min}..{max}") }
+                ))
             } else {
                 Ok(())
             }
@@ -94,7 +114,8 @@ impl Ctx<'_> {
                 need(1, 1)?;
                 Ok(self.to_string(a[0].clone()))
             }
-            "toint" | "tolong" | "toreal" | "todouble" | "tobool" | "toboolean" | "todatetime" | "totimespan" | "totime" | "toguid" | "todecimal" => {
+            "toint" | "tolong" | "toreal" | "todouble" | "tobool" | "toboolean" | "todatetime" | "totimespan"
+            | "totime" | "toguid" | "todecimal" => {
                 need(1, 1)?;
                 let ty = match name {
                     "toint" => Int,
@@ -116,8 +137,12 @@ impl Ctx<'_> {
                     Dynamic => x.clone(),
                     String => {
                         let parse = match d.kind() {
-                            Dialect::DuckDb => format!("CASE WHEN json_valid({0}) THEN CAST({0} AS JSON) ELSE to_json({0}) END", x.sql),
-                            Dialect::Postgres => format!("COALESCE({}, {})", d.try_cast(&x.sql, Dynamic), d.to_json(&x.sql)),
+                            Dialect::DuckDb => {
+                                format!("CASE WHEN json_valid({0}) THEN CAST({0} AS JSON) ELSE to_json({0}) END", x.sql)
+                            }
+                            Dialect::Postgres => {
+                                format!("COALESCE({}, {})", d.try_cast(&x.sql, Dynamic), d.to_json(&x.sql))
+                            }
                         };
                         mk(format!("CASE WHEN {} = '' THEN NULL ELSE {parse} END", x.sql), Dynamic)
                     }
@@ -131,7 +156,10 @@ impl Ctx<'_> {
                     let mut jt = d.json_type(&x.sql);
                     if d.kind() == Dialect::Postgres {
                         // jsonb has a single 'number' type: integral literals are Kusto longs
-                        jt = format!("(CASE WHEN {jt} = 'number' AND ({}) ~ '^-?[0-9]+$' THEN 'bigint' ELSE {jt} END)", d.json_to_text(&x.sql));
+                        jt = format!(
+                            "(CASE WHEN {jt} = 'number' AND ({}) ~ '^-?[0-9]+$' THEN 'bigint' ELSE {jt} END)",
+                            d.json_to_text(&x.sql)
+                        );
                     }
                     let sql = format!(
                         "CASE WHEN {x} IS NULL THEN 'null' ELSE CASE {jt} WHEN 'object' THEN 'dictionary' WHEN 'array' THEN 'array' WHEN 'varchar' THEN 'string' WHEN 'string' THEN 'string' \
@@ -172,7 +200,8 @@ impl Ctx<'_> {
                 self.check_same_types(name, &a)?;
                 let (vals, ty) = self.unify(a.clone())?;
                 if ty == String {
-                    let items: Vec<std::string::String> = vals.iter().map(|v| format!("NULLIF({}, '')", v.sql)).collect();
+                    let items: Vec<std::string::String> =
+                        vals.iter().map(|v| format!("NULLIF({}, '')", v.sql)).collect();
                     return Ok(mk(format!("COALESCE({}, '')", items.join(", ")), String));
                 }
                 Ok(mk(format!("COALESCE({})", vals.iter().map(|v| v.sql.clone()).collect::<Vec<_>>().join(", ")), ty))
@@ -194,7 +223,12 @@ impl Ctx<'_> {
                 let x = &a[0];
                 let empty = match x.ty {
                     String => format!("({} = '')", x.sql),
-                    Dynamic => format!("({0} IS NULL OR {1} = 'null' OR {2} = '')", x.sql, d.json_type(&x.sql), d.json_to_text(&x.sql)),
+                    Dynamic => format!(
+                        "({0} IS NULL OR {1} = 'null' OR {2} = '')",
+                        x.sql,
+                        d.json_type(&x.sql),
+                        d.json_to_text(&x.sql)
+                    ),
                     _ => format!("({} IS NULL)", x.sql),
                 };
                 Ok(mk(if name == "isempty" { empty } else { format!("(NOT {empty})") }, Bool))
@@ -243,9 +277,15 @@ impl Ctx<'_> {
                 let start = format!("(CASE WHEN {st} < 0 THEN length({x}) + {st} ELSE {st} END)");
                 let sql = if n == 3 {
                     let len = format!("greatest({}, 0)", d.cast(&a[2].sql, Long));
-                    format!("CASE WHEN {start} < 0 THEN '' ELSE COALESCE({}, '') END", d.substr(&x, &format!("{start} + 1"), Some(&len)))
+                    format!(
+                        "CASE WHEN {start} < 0 THEN '' ELSE COALESCE({}, '') END",
+                        d.substr(&x, &format!("{start} + 1"), Some(&len))
+                    )
                 } else {
-                    format!("CASE WHEN {start} < 0 THEN '' ELSE COALESCE({}, '') END", d.substr(&x, &format!("{start} + 1"), None))
+                    format!(
+                        "CASE WHEN {start} < 0 THEN '' ELSE COALESCE({}, '') END",
+                        d.substr(&x, &format!("{start} + 1"), None)
+                    )
                 };
                 Ok(mk(sql, String))
             }
@@ -258,11 +298,20 @@ impl Ctx<'_> {
                 let x = s(self, &a[0]);
                 let look = s(self, &a[1]);
                 if n == 2 {
-                    return Ok(mk(format!("CASE WHEN {look} = '' THEN NULL ELSE CAST({} AS BIGINT) - 1 END", d.strpos(&x, &look)), Long));
+                    return Ok(mk(
+                        format!("CASE WHEN {look} = '' THEN NULL ELSE CAST({} AS BIGINT) - 1 END", d.strpos(&x, &look)),
+                        Long,
+                    ));
                 }
                 let start = d.cast(&a[2].sql, Long);
                 let sub = d.substr(&x, &format!("{start} + 1"), None);
-                Ok(mk(format!("CASE WHEN {p} = 0 THEN -1 ELSE CAST({p} AS BIGINT) - 1 + {start} END", p = d.strpos(&sub, &look)), Long))
+                Ok(mk(
+                    format!(
+                        "CASE WHEN {p} = 0 THEN -1 ELSE CAST({p} AS BIGINT) - 1 + {start} END",
+                        p = d.strpos(&sub, &look)
+                    ),
+                    Long,
+                ))
             }
             "replace_string" | "replace" if name == "replace_string" => {
                 need(3, 3)?;
@@ -319,7 +368,10 @@ impl Ctx<'_> {
                 };
                 if n == 3 {
                     let el = d.json_get_index(&arr, &d.cast(&a[2].sql, Long));
-                    return Ok(mk(format!("CASE WHEN {el} IS NULL THEN NULL ELSE {} END", d.json_array(&[el.clone()])), Dynamic));
+                    return Ok(mk(
+                        format!("CASE WHEN {el} IS NULL THEN NULL ELSE {} END", d.json_array(&[el.clone()])),
+                        Dynamic,
+                    ));
                 }
                 Ok(mk(arr, Dynamic))
             }
@@ -329,7 +381,9 @@ impl Ctx<'_> {
                     Some(r) => quote_str(&crate::regex::translate(r, d.kind())),
                     None => s(self, &a[0]),
                 };
-                let group = a[1].long_const().ok_or_else(|| crate::Error::new("extract(): the capture group must be a constant"))?;
+                let group = a[1]
+                    .long_const()
+                    .ok_or_else(|| crate::Error::new("extract(): the capture group must be a constant"))?;
                 let x = s(self, &a[2]);
                 let m = d.regex_match(&x, &re);
                 let v = format!("CASE WHEN {m} THEN {} END", d.regex_extract(&x, &re, group as u32));
@@ -343,7 +397,9 @@ impl Ctx<'_> {
             "extract_all" => {
                 need(2, 3)?;
                 let (re, text) = if n == 2 { (&a[0], &a[1]) } else { (&a[0], &a[2]) };
-                let r = re.str_const().ok_or_else(|| crate::Error::new("extract_all(): the regular expression must be a constant"))?;
+                let r = re
+                    .str_const()
+                    .ok_or_else(|| crate::Error::new("extract_all(): the regular expression must be a constant"))?;
                 let groups = crate::regex::capture_groups(r);
                 if groups == 0 {
                     return err("extract_all(): the regular expression must have at least one capture group");
@@ -444,14 +500,27 @@ impl Ctx<'_> {
                 }
                 Ok(TExpr::derived(format!("{f}({})", x.sql), x.ty, &[&x]))
             }
-            "sqrt" | "exp" | "log" | "log2" | "log10" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "cot" | "degrees" | "radians" | "exp2" | "exp10" | "gamma" | "loggamma" => {
+            "sqrt" | "exp" | "log" | "log2" | "log10" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "cot"
+            | "degrees" | "radians" | "exp2" | "exp10" | "gamma" | "loggamma" => {
                 need(1, 1)?;
                 let x = real(&a[0]);
                 let sql = match name {
-                    "log" => format!("CASE WHEN {x} > 0 THEN ln({x}) WHEN {x} = 0 THEN {} END", d.real_literal(f64::NEG_INFINITY)),
-                    "log2" => format!("CASE WHEN {x} > 0 THEN {} WHEN {x} = 0 THEN {} END", d.log2(&x), d.real_literal(f64::NEG_INFINITY)),
-                    "log10" => format!("CASE WHEN {x} > 0 THEN log10({x}) WHEN {x} = 0 THEN {} END", d.real_literal(f64::NEG_INFINITY)),
-                    "sqrt" => format!("CASE WHEN {x} >= 0 THEN sqrt({x}) WHEN {x} < 0 THEN {} END", d.real_literal(f64::NAN)),
+                    "log" => format!(
+                        "CASE WHEN {x} > 0 THEN ln({x}) WHEN {x} = 0 THEN {} END",
+                        d.real_literal(f64::NEG_INFINITY)
+                    ),
+                    "log2" => format!(
+                        "CASE WHEN {x} > 0 THEN {} WHEN {x} = 0 THEN {} END",
+                        d.log2(&x),
+                        d.real_literal(f64::NEG_INFINITY)
+                    ),
+                    "log10" => format!(
+                        "CASE WHEN {x} > 0 THEN log10({x}) WHEN {x} = 0 THEN {} END",
+                        d.real_literal(f64::NEG_INFINITY)
+                    ),
+                    "sqrt" => {
+                        format!("CASE WHEN {x} >= 0 THEN sqrt({x}) WHEN {x} < 0 THEN {} END", d.real_literal(f64::NAN))
+                    }
                     "exp" => d.exp(&x),
                     "exp2" => format!("power(2, {x})"),
                     "exp10" => format!("power(10, {x})"),
@@ -491,14 +560,19 @@ impl Ctx<'_> {
                 let digits = if n == 2 { d.cast(&a[1].sql, Int) } else { "0".into() };
                 let sql = match d.kind() {
                     Dialect::DuckDb => format!("round({}, {digits})", x.sql),
-                    Dialect::Postgres => format!("CAST(round(CAST({} AS numeric), {digits}) AS {})", x.sql, d.sql_type(x.ty)),
+                    Dialect::Postgres => {
+                        format!("CAST(round(CAST({} AS numeric), {digits}) AS {})", x.sql, d.sql_type(x.ty))
+                    }
                 };
                 Ok(TExpr::derived(sql, x.ty, &[&x]))
             }
             "rand" => {
                 need(0, 1)?;
                 if n == 1 {
-                    return Ok(mk(format!("CAST(floor({} * {}) AS BIGINT)", d.random(), d.cast(&a[0].sql, Real)), Long));
+                    return Ok(mk(
+                        format!("CAST(floor({} * {}) AS BIGINT)", d.random(), d.cast(&a[0].sql, Real)),
+                        Long,
+                    ));
                 }
                 Ok(mk(d.random(), Real))
             }
@@ -531,11 +605,21 @@ impl Ctx<'_> {
                 let now = TExpr::new(d.now(), DateTime);
                 Ok(self.dt_sub_ts(&now, &a[0]))
             }
-            "startofday" | "startofweek" | "startofmonth" | "startofyear" | "endofday" | "endofweek" | "endofmonth" | "endofyear" => {
+            "startofday" | "startofweek" | "startofmonth" | "startofyear" | "endofday" | "endofweek" | "endofmonth"
+            | "endofyear" => {
                 need(1, 2)?;
                 let x = self.convert(a[0].clone(), DateTime);
                 let offset = if n == 2 { d.cast(&a[1].sql, Long) } else { "0".into() };
-                let unit = &name[name.len() - if name.ends_with("day") { 3 } else if name.ends_with("week") { 4 } else if name.ends_with("month") { 5 } else { 4 }..];
+                let unit = &name[name.len()
+                    - if name.ends_with("day") {
+                        3
+                    } else if name.ends_with("week") {
+                        4
+                    } else if name.ends_with("month") {
+                        5
+                    } else {
+                        4
+                    }..];
                 let start = self.start_of(unit, &x.sql, &offset);
                 let sql = if name.starts_with("end") {
                     let next = self.start_of(unit, &x.sql, &format!("({offset} + 1)"));
@@ -549,7 +633,8 @@ impl Ctx<'_> {
                 need(1, 1)?;
                 Ok(mk(format!("(CAST({} AS BIGINT) * 864000000000)", d.extract("DOW", &a[0].sql)), TimeSpan))
             }
-            "dayofmonth" | "dayofyear" | "monthofyear" | "getmonth" | "getyear" | "hourofday" | "minuteofhour" | "secondofminute" | "week_of_year" | "weekofyear" => {
+            "dayofmonth" | "dayofyear" | "monthofyear" | "getmonth" | "getyear" | "hourofday" | "minuteofhour"
+            | "secondofminute" | "week_of_year" | "weekofyear" => {
                 need(1, 1)?;
                 let part = match name {
                     "dayofmonth" => "DAY",
@@ -561,12 +646,29 @@ impl Ctx<'_> {
                     "secondofminute" => "SECOND",
                     _ => "WEEK",
                 };
-                let ty = if matches!(name, "getyear" | "getmonth" | "dayofmonth" | "dayofyear" | "monthofyear" | "hourofday" | "week_of_year" | "weekofyear") { Int } else { Int };
+                let ty = if matches!(
+                    name,
+                    "getyear"
+                        | "getmonth"
+                        | "dayofmonth"
+                        | "dayofyear"
+                        | "monthofyear"
+                        | "hourofday"
+                        | "week_of_year"
+                        | "weekofyear"
+                ) {
+                    Int
+                } else {
+                    Int
+                };
                 Ok(mk(d.cast(&format!("floor({})", d.extract(part, &a[0].sql)), ty), ty))
             }
             "datetime_part" | "datepart" => {
                 need(2, 2)?;
-                let part = a[0].str_const().ok_or_else(|| crate::Error::new("datetime_part(): the part must be a constant"))?.to_ascii_lowercase();
+                let part = a[0]
+                    .str_const()
+                    .ok_or_else(|| crate::Error::new("datetime_part(): the part must be a constant"))?
+                    .to_ascii_lowercase();
                 let x = &a[1].sql;
                 let sql = match part.as_str() {
                     "year" => d.extract("YEAR", x),
@@ -587,7 +689,10 @@ impl Ctx<'_> {
             }
             "datetime_add" => {
                 need(3, 3)?;
-                let part = a[0].str_const().ok_or_else(|| crate::Error::new("datetime_add(): the period must be a constant"))?.to_ascii_lowercase();
+                let part = a[0]
+                    .str_const()
+                    .ok_or_else(|| crate::Error::new("datetime_add(): the period must be a constant"))?
+                    .to_ascii_lowercase();
                 let amount = d.cast(&a[1].sql, Long);
                 let x = &a[2];
                 let ticks = |mult: i64| format!("({amount} * {mult})");
@@ -614,10 +719,14 @@ impl Ctx<'_> {
             }
             "datetime_diff" => {
                 need(3, 3)?;
-                let part = a[0].str_const().ok_or_else(|| crate::Error::new("datetime_diff(): the period must be a constant"))?.to_ascii_lowercase();
+                let part = a[0]
+                    .str_const()
+                    .ok_or_else(|| crate::Error::new("datetime_diff(): the period must be a constant"))?
+                    .to_ascii_lowercase();
                 let (x, y) = (&a[1].sql, &a[2].sql);
                 let sql = match part.as_str() {
-                    "year" | "quarter" | "month" | "day" | "hour" | "minute" | "second" | "millisecond" | "microsecond" => match d.kind() {
+                    "year" | "quarter" | "month" | "day" | "hour" | "minute" | "second" | "millisecond"
+                    | "microsecond" => match d.kind() {
                         Dialect::DuckDb => format!("date_diff('{part}', {y}, {x})"),
                         Dialect::Postgres => self.pg_date_diff(&part, y, x),
                     },
@@ -652,7 +761,8 @@ impl Ctx<'_> {
                     3 => (0, 1, Some(2)),
                     _ => (1, 2, Some(3)),
                 };
-                let mut checks = vec![format!("{} >= 0 AND {} < 24", v[h], v[h]), format!("{} >= 0 AND {} < 60", v[m], v[m])];
+                let mut checks =
+                    vec![format!("{} >= 0 AND {} < 24", v[h], v[h]), format!("{} >= 0 AND {} < 60", v[m], v[m])];
                 if let Some(si) = sec {
                     checks.push(format!("{} >= 0 AND {} < 60", v[si], v[si]));
                 }
@@ -663,12 +773,21 @@ impl Ctx<'_> {
                 let sql = match n {
                     2 => format!("CAST(round(({} * 3600 + {} * 60) * 10000000) AS BIGINT)", v[0], v[1]),
                     3 => format!("CAST(round(({} * 3600 + {} * 60 + {}) * 10000000) AS BIGINT)", v[0], v[1], v[2]),
-                    4 => format!("CAST(round(({} * 86400 + {} * 3600 + {} * 60 + {}) * 10000000) AS BIGINT)", v[0], v[1], v[2], v[3]),
-                    _ => format!("CAST(round(({} * 86400 + {} * 3600 + {} * 60 + {}) * 10000000) AS BIGINT)", v[0], v[1], v[2], v[3]),
+                    4 => format!(
+                        "CAST(round(({} * 86400 + {} * 3600 + {} * 60 + {}) * 10000000) AS BIGINT)",
+                        v[0], v[1], v[2], v[3]
+                    ),
+                    _ => format!(
+                        "CAST(round(({} * 86400 + {} * 3600 + {} * 60 + {}) * 10000000) AS BIGINT)",
+                        v[0], v[1], v[2], v[3]
+                    ),
                 };
                 Ok(mk(format!("CASE WHEN {valid} THEN {sql} END"), TimeSpan))
             }
-            "unixtime_seconds_todatetime" | "unixtime_milliseconds_todatetime" | "unixtime_microseconds_todatetime" | "unixtime_nanoseconds_todatetime" => {
+            "unixtime_seconds_todatetime"
+            | "unixtime_milliseconds_todatetime"
+            | "unixtime_microseconds_todatetime"
+            | "unixtime_nanoseconds_todatetime" => {
                 need(1, 1)?;
                 let mult = match name {
                     "unixtime_seconds_todatetime" => "* 1000000",
@@ -681,12 +800,16 @@ impl Ctx<'_> {
             }
             "format_datetime" => {
                 need(2, 2)?;
-                let f = a[1].str_const().ok_or_else(|| crate::Error::new("format_datetime(): the format must be a constant"))?;
+                let f = a[1]
+                    .str_const()
+                    .ok_or_else(|| crate::Error::new("format_datetime(): the format must be a constant"))?;
                 Ok(mk(format!("COALESCE({}, '')", crate::datefmt::format_datetime(d.kind(), &a[0].sql, f)?), String))
             }
             "format_timespan" => {
                 need(2, 2)?;
-                let f = a[1].str_const().ok_or_else(|| crate::Error::new("format_timespan(): the format must be a constant"))?;
+                let f = a[1]
+                    .str_const()
+                    .ok_or_else(|| crate::Error::new("format_timespan(): the format must be a constant"))?;
                 Ok(mk(format!("COALESCE({}, '')", crate::datefmt::format_timespan(self, &a[0].sql, f)?), String))
             }
             // ---------------------------------------------------------- dynamic
@@ -707,8 +830,10 @@ impl Ctx<'_> {
                 if n % 2 != 0 {
                     return err(format!("{name}(): expected key/value pairs"));
                 }
-                let pairs: Vec<(std::string::String, std::string::String)> =
-                    a.chunks(2).map(|kv| (self.to_string(kv[0].clone()).sql, self.to_dynamic(kv[1].clone()).sql)).collect();
+                let pairs: Vec<(std::string::String, std::string::String)> = a
+                    .chunks(2)
+                    .map(|kv| (self.to_string(kv[0].clone()).sql, self.to_dynamic(kv[1].clone()).sql))
+                    .collect();
                 if pairs.is_empty() {
                     return Ok(mk(d.json_literal("{}"), Dynamic));
                 }
@@ -727,8 +852,13 @@ impl Ctx<'_> {
                 need(2, 2)?;
                 let k = s(self, &a[1]);
                 let sql = match d.kind() {
-                    Dialect::DuckDb => format!("COALESCE(json_type({}) = 'OBJECT' AND list_contains(json_keys({}), {k}), false)", a[0].sql, a[0].sql),
-                    Dialect::Postgres => format!("COALESCE(jsonb_typeof({0}) = 'object' AND {0} ? {k}, false)", a[0].sql),
+                    Dialect::DuckDb => format!(
+                        "COALESCE(json_type({}) = 'OBJECT' AND list_contains(json_keys({}), {k}), false)",
+                        a[0].sql, a[0].sql
+                    ),
+                    Dialect::Postgres => {
+                        format!("COALESCE(jsonb_typeof({0}) = 'object' AND {0} ? {k}, false)", a[0].sql)
+                    }
                 };
                 Ok(mk(sql, Bool))
             }
@@ -737,18 +867,30 @@ impl Ctx<'_> {
                 let sql = match d.kind() {
                     Dialect::DuckDb => {
                         // only arrays concatenate; any other argument makes the result null
-                        let lists: Vec<std::string::String> = a.iter().map(|t| format!("CAST({} AS JSON[])", t.sql)).collect();
-                        let concat = lists.iter().skip(1).fold(lists[0].clone(), |acc, l| format!("list_concat({acc}, {l})"));
-                        let checks: Vec<std::string::String> = a.iter().map(|t| format!("json_type({}) = 'ARRAY'", t.sql)).collect();
+                        let lists: Vec<std::string::String> =
+                            a.iter().map(|t| format!("CAST({} AS JSON[])", t.sql)).collect();
+                        let concat =
+                            lists.iter().skip(1).fold(lists[0].clone(), |acc, l| format!("list_concat({acc}, {l})"));
+                        let checks: Vec<std::string::String> =
+                            a.iter().map(|t| format!("json_type({}) = 'ARRAY'", t.sql)).collect();
                         format!("CASE WHEN {} THEN to_json({concat}) END", checks.join(" AND "))
                     }
                     // non-array arguments contribute nothing (Kusto)
-                    Dialect::Postgres => format!("({})", a.iter().map(|t| format!("(CASE WHEN jsonb_typeof({0}) = 'array' THEN {0} ELSE '[]'::jsonb END)", t.sql)).collect::<Vec<_>>().join(" || ")),
+                    Dialect::Postgres => format!(
+                        "({})",
+                        a.iter()
+                            .map(|t| format!(
+                                "(CASE WHEN jsonb_typeof({0}) = 'array' THEN {0} ELSE '[]'::jsonb END)",
+                                t.sql
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(" || ")
+                    ),
                 };
                 Ok(mk(sql, Dynamic))
             }
-            "array_slice" | "array_reverse" | "array_index_of" | "set_has_element" | "array_sum" | "array_sort_asc" | "array_sort_desc" | "zip"
-            | "strcat_array" | "set_union" | "set_intersect" | "set_difference"
+            "array_slice" | "array_reverse" | "array_index_of" | "set_has_element" | "array_sum" | "array_sort_asc"
+            | "array_sort_desc" | "zip" | "strcat_array" | "set_union" | "set_intersect" | "set_difference"
                 if d.kind() == Dialect::Postgres =>
             {
                 let (lo, hi, ty) = match name {
@@ -782,7 +924,9 @@ impl Ctx<'_> {
                 let len = format!("json_array_length({arr})");
                 let norm = |i: &str| format!("(CASE WHEN {i} < 0 THEN {i} + {len} ELSE {i} END)");
                 let sql = match d.kind() {
-                    Dialect::DuckDb => format!("to_json(list_slice(CAST({arr} AS JSON[]), {} + 1, {} + 1))", norm(&s0), norm(&e0)),
+                    Dialect::DuckDb => {
+                        format!("to_json(list_slice(CAST({arr} AS JSON[]), {} + 1, {} + 1))", norm(&s0), norm(&e0))
+                    }
                     Dialect::Postgres => return err("array_slice() is not supported for PostgreSQL yet"),
                 };
                 Ok(mk(sql, Dynamic))
@@ -794,11 +938,17 @@ impl Ctx<'_> {
             "array_index_of" | "set_has_element" => {
                 need(2, 2)?;
                 let v = self.to_dynamic(a[1].clone());
-                let pos = format!("list_position(list_transform(CAST({} AS JSON[]), x -> CAST(x AS VARCHAR)), CAST({} AS VARCHAR))", a[0].sql, v.sql);
+                let pos = format!(
+                    "list_position(list_transform(CAST({} AS JSON[]), x -> CAST(x AS VARCHAR)), CAST({} AS VARCHAR))",
+                    a[0].sql, v.sql
+                );
                 if name == "set_has_element" {
                     return Ok(mk(format!("COALESCE({pos} > 0, false)"), Bool));
                 }
-                Ok(mk(format!("CASE WHEN {} IS NULL THEN NULL ELSE COALESCE(CAST({pos} AS BIGINT), 0) - 1 END", a[0].sql), Long))
+                Ok(mk(
+                    format!("CASE WHEN {} IS NULL THEN NULL ELSE COALESCE(CAST({pos} AS BIGINT), 0) - 1 END", a[0].sql),
+                    Long,
+                ))
             }
             "array_sum" => {
                 need(1, 1)?;
@@ -808,13 +958,25 @@ impl Ctx<'_> {
                 need(1, 2)?;
                 let dir = if name.ends_with("asc") { "ASC" } else { "DESC" };
                 let x = &a[0].sql;
-                Ok(mk(format!("CASE WHEN json_type({x}) = 'ARRAY' THEN to_json(list_sort(CAST({x} AS JSON[]), '{dir}')) END"), Dynamic))
+                Ok(mk(
+                    format!(
+                        "CASE WHEN json_type({x}) = 'ARRAY' THEN to_json(list_sort(CAST({x} AS JSON[]), '{dir}')) END"
+                    ),
+                    Dynamic,
+                ))
             }
             "zip" => {
                 let lists: Vec<std::string::String> = a.iter().map(|t| format!("CAST({} AS JSON[])", t.sql)).collect();
                 let lens: Vec<std::string::String> = lists.iter().map(|l| format!("len({l})")).collect();
                 let elems: Vec<std::string::String> = lists.iter().map(|l| format!("{l}[i + 1]")).collect();
-                Ok(mk(format!("to_json(list_transform(range(greatest({})), i -> [{}]))", lens.join(", "), elems.join(", ")), Dynamic))
+                Ok(mk(
+                    format!(
+                        "to_json(list_transform(range(greatest({})), i -> [{}]))",
+                        lens.join(", "),
+                        elems.join(", ")
+                    ),
+                    Dynamic,
+                ))
             }
             "strcat_array" => {
                 need(2, 2)?;
@@ -870,7 +1032,9 @@ impl Ctx<'_> {
             match first {
                 None => first = Some(norm(v.ty)),
                 Some(t) if t == norm(v.ty) => {}
-                Some(t) => return err(format!("{name}(): all values must have the same type (found {t} and {})", v.ty)),
+                Some(t) => {
+                    return err(format!("{name}(): all values must have the same type (found {t} and {})", v.ty))
+                }
             }
         }
         Ok(())
@@ -900,7 +1064,10 @@ impl Ctx<'_> {
         } else if non_null.iter().any(|t| *t == KqlType::Dynamic) {
             KqlType::Dynamic
         } else {
-            return err(format!("values have incompatible types: {}", non_null.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")));
+            return err(format!(
+                "values have incompatible types: {}",
+                non_null.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
+            ));
         };
         let out = vals.into_iter().map(|v| if v.ty == ty { v } else { self.convert(v, ty) }).collect();
         Ok((out, ty))
@@ -915,14 +1082,19 @@ impl Ctx<'_> {
                 let step = match size.konst {
                     Some(Const::TimeSpan(t)) if t >= 10 => (t / 10).to_string(),
                     // PostgreSQL raises on integer division by zero (DuckDB yields NULL)
-                    _ if d.kind() == Dialect::Postgres => format!("NULLIF(CAST(trunc({} / 10) AS BIGINT), 0)", size.sql),
+                    _ if d.kind() == Dialect::Postgres => {
+                        format!("NULLIF(CAST(trunc({} / 10) AS BIGINT), 0)", size.sql)
+                    }
                     _ => format!("CAST(trunc({} / 10) AS BIGINT)", size.sql),
                 };
                 let idiv = if d.kind() == Dialect::Postgres { "/" } else { "//" };
                 let us = match at {
                     // Kusto bins datetimes from 0001-01-01 (tick 0); offsets from it are never
                     // negative, so integer division is floor division
-                    None => format!("(({} + 62135596800000000) {idiv} {step} * {step} - 62135596800000000)", d.epoch_us(&x.sql)),
+                    None => format!(
+                        "(({} + 62135596800000000) {idiv} {step} * {step} - 62135596800000000)",
+                        d.epoch_us(&x.sql)
+                    ),
                     Some(a) => {
                         let base = d.epoch_us(&self.convert(a.clone(), DateTime).sql);
                         let off = format!("({} - {base})", d.epoch_us(&x.sql));
@@ -933,7 +1105,16 @@ impl Ctx<'_> {
             }
             (TimeSpan, TimeSpan) => {
                 let base = at.map(|a| a.sql.clone()).unwrap_or_else(|| "0".into());
-                Ok(TExpr::derived(format!("(CAST(floor(({} - {base}) / {}) AS BIGINT) * {} + {base})", x.sql, d.cast(&size.sql, Real), size.sql), TimeSpan, &parts))
+                Ok(TExpr::derived(
+                    format!(
+                        "(CAST(floor(({} - {base}) / {}) AS BIGINT) * {} + {base})",
+                        x.sql,
+                        d.cast(&size.sql, Real),
+                        size.sql
+                    ),
+                    TimeSpan,
+                    &parts,
+                ))
             }
             (a, b) if a.is_numeric() && b.is_numeric() => {
                 let ty = match widest(a, b) {
@@ -958,7 +1139,10 @@ impl Ctx<'_> {
             "day" => d.ts_from_us(&format!("({} + {offset} * 86400000000)", d.epoch_us(&d.date_trunc("day", x)))),
             "week" => {
                 // Kusto weeks start on Sunday
-                let sunday = d.ts_from_us(&format!("({} - 86400000000)", d.epoch_us(&d.date_trunc("week", &d.ts_from_us(&format!("({} + 86400000000)", d.epoch_us(x)))))));
+                let sunday = d.ts_from_us(&format!(
+                    "({} - 86400000000)",
+                    d.epoch_us(&d.date_trunc("week", &d.ts_from_us(&format!("({} + 86400000000)", d.epoch_us(x)))))
+                ));
                 d.ts_from_us(&format!("({} + {offset} * 604800000000)", d.epoch_us(&sunday)))
             }
             "month" => self.add_months(&d.date_trunc("month", x), offset),

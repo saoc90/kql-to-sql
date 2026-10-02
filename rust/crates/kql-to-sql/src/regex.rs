@@ -66,7 +66,11 @@ pub(crate) fn capture_groups(re: &str) -> usize {
             b'[' => in_class = true,
             b']' => in_class = false,
             b'(' if !in_class => {
-                if b.get(i + 1) != Some(&b'?') || (b.get(i + 2) == Some(&b'P') || b.get(i + 2) == Some(&b'<')) && b.get(i + 3) != Some(&b'=') && b.get(i + 3) != Some(&b'!') {
+                if b.get(i + 1) != Some(&b'?')
+                    || (b.get(i + 2) == Some(&b'P') || b.get(i + 2) == Some(&b'<'))
+                        && b.get(i + 3) != Some(&b'=')
+                        && b.get(i + 3) != Some(&b'!')
+                {
                     n += 1;
                 }
             }

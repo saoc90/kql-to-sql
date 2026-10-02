@@ -65,29 +65,172 @@ const STRING_OPS: &[(&str, StringOp)] = &[
 /// Keywords that cannot be used as plain identifiers (Kusto.Language `SyntaxFacts` entries
 /// without `canBeIdentifier`); such names must be bracketed: `['first']`.
 const RESERVED: &[&str] = &[
-    "__contextual_datatable", "__crossCluster", "__crossDB", "__executeAndCache", "__id", "__isFuzzy", "__noWithSource", "__packedColumn", "__projectAway", "__sourceColumnIndex",
-    "accumulate", "and", "anomalychart", "areachart", "as", "asc", "bagexpansion", "barchart", "between", "bin_legacy",
-    "boolean", "by", "byte", "cachingpolicy", "callout", "cancel", "card", "char", "columnchart", "contains",
-    "contains_cs", "containscs", "cycles", "dataexport", "datascope", "datatable", "date", "datetime", "decimal", "decodeblocks",
-    "desc", "double", "dynamic", "earliest", "encodingpolicy", "endswith", "endswith_cs", "expandoutput", "extent_tags_retention", "external_data",
-    "externaldata", "find", "first", "flags", "float", "force_remote", "harddelete", "hardretention", "has", "has_all",
-    "has_any", "has_cs", "hasprefix", "hasprefix_cs", "hassuffix", "hassuffix_cs", "hotcache", "in", "int", "int16",
-    "int32", "int64", "int8", "invoke", "isfuzzy", "journal", "kind", "ladderchart", "last", "latest",
-    "like", "likecs", "linechart", "long", "materialize", "mdm", "missing", "nooptimization", "notcontains", "notcontainscs",
-    "notlike", "notlikecs", "of", "or", "others", "pathformat", "piechart", "pivotchart", "print", "project",
-    "queries", "query_results", "real", "relaxed", "restricted_view_access", "row_level_security", "rowstore", "rowstore_references", "rowstore_sealinfo", "rowstorepolicy",
-    "rowstores", "sample", "scatterchart", "seal", "seals", "search", "set", "shards", "simple", "softdelete",
-    "softretention", "sql", "stackedareachart", "startswith", "startswith_cs", "statistics", "storedqueryresultcontainers", "string", "tablepurge", "time",
-    "timechart", "timeline", "timepivot", "timespan", "title", "to", "toscalar", "totable", "treemap", "uint",
-    "uint16", "uint32", "uint64", "uint8", "ulong", "union", "uniqueid", "unrestrictedviewers", "verbose", "viewers",
-    "views", "where", "with_itemindex", "with_match_id", "with_source", "with_step_name", "withsource", "writeaheadlog",
+    "__contextual_datatable",
+    "__crossCluster",
+    "__crossDB",
+    "__executeAndCache",
+    "__id",
+    "__isFuzzy",
+    "__noWithSource",
+    "__packedColumn",
+    "__projectAway",
+    "__sourceColumnIndex",
+    "accumulate",
+    "and",
+    "anomalychart",
+    "areachart",
+    "as",
+    "asc",
+    "bagexpansion",
+    "barchart",
+    "between",
+    "bin_legacy",
+    "boolean",
+    "by",
+    "byte",
+    "cachingpolicy",
+    "callout",
+    "cancel",
+    "card",
+    "char",
+    "columnchart",
+    "contains",
+    "contains_cs",
+    "containscs",
+    "cycles",
+    "dataexport",
+    "datascope",
+    "datatable",
+    "date",
+    "datetime",
+    "decimal",
+    "decodeblocks",
+    "desc",
+    "double",
+    "dynamic",
+    "earliest",
+    "encodingpolicy",
+    "endswith",
+    "endswith_cs",
+    "expandoutput",
+    "extent_tags_retention",
+    "external_data",
+    "externaldata",
+    "find",
+    "first",
+    "flags",
+    "float",
+    "force_remote",
+    "harddelete",
+    "hardretention",
+    "has",
+    "has_all",
+    "has_any",
+    "has_cs",
+    "hasprefix",
+    "hasprefix_cs",
+    "hassuffix",
+    "hassuffix_cs",
+    "hotcache",
+    "in",
+    "int",
+    "int16",
+    "int32",
+    "int64",
+    "int8",
+    "invoke",
+    "isfuzzy",
+    "journal",
+    "kind",
+    "ladderchart",
+    "last",
+    "latest",
+    "like",
+    "likecs",
+    "linechart",
+    "long",
+    "materialize",
+    "mdm",
+    "missing",
+    "nooptimization",
+    "notcontains",
+    "notcontainscs",
+    "notlike",
+    "notlikecs",
+    "of",
+    "or",
+    "others",
+    "pathformat",
+    "piechart",
+    "pivotchart",
+    "print",
+    "project",
+    "queries",
+    "query_results",
+    "real",
+    "relaxed",
+    "restricted_view_access",
+    "row_level_security",
+    "rowstore",
+    "rowstore_references",
+    "rowstore_sealinfo",
+    "rowstorepolicy",
+    "rowstores",
+    "sample",
+    "scatterchart",
+    "seal",
+    "seals",
+    "search",
+    "set",
+    "shards",
+    "simple",
+    "softdelete",
+    "softretention",
+    "sql",
+    "stackedareachart",
+    "startswith",
+    "startswith_cs",
+    "statistics",
+    "storedqueryresultcontainers",
+    "string",
+    "tablepurge",
+    "time",
+    "timechart",
+    "timeline",
+    "timepivot",
+    "timespan",
+    "title",
+    "to",
+    "toscalar",
+    "totable",
+    "treemap",
+    "uint",
+    "uint16",
+    "uint32",
+    "uint64",
+    "uint8",
+    "ulong",
+    "union",
+    "uniqueid",
+    "unrestrictedviewers",
+    "verbose",
+    "viewers",
+    "views",
+    "where",
+    "with_itemindex",
+    "with_match_id",
+    "with_source",
+    "with_step_name",
+    "withsource",
+    "writeaheadlog",
 ];
 
 pub fn is_reserved(name: &str) -> bool {
     RESERVED.contains(&name)
 }
 
-const SOURCE_KEYWORDS: &[&str] = &["print", "datatable", "range", "union", "search", "externaldata", "find", "evaluate"];
+const SOURCE_KEYWORDS: &[&str] =
+    &["print", "datatable", "range", "union", "search", "externaldata", "find", "evaluate"];
 
 impl<'a> Parser<'a> {
     // ------------------------------------------------------------------ token helpers
@@ -446,7 +589,12 @@ impl<'a> Parser<'a> {
                     self.expect_punct("..")?;
                     let high = self.or()?;
                     self.expect_punct(")")?;
-                    return Ok(Expr::Between { expr: Box::new(left), low: Box::new(low), high: Box::new(high), negated });
+                    return Ok(Expr::Between {
+                        expr: Box::new(left),
+                        low: Box::new(low),
+                        high: Box::new(high),
+                        negated,
+                    });
                 }
                 _ => {}
             }
@@ -527,7 +675,9 @@ impl<'a> Parser<'a> {
             return Some((BinaryOp::MatchesRegex, 2));
         }
         let (word, neg) = match word.strip_prefix("not") {
-            Some(rest) if !negated && matches!(rest, "contains" | "containscs" | "like" | "likecs") => (rest.to_string(), true),
+            Some(rest) if !negated && matches!(rest, "contains" | "containscs" | "like" | "likecs") => {
+                (rest.to_string(), true)
+            }
             _ => (word, negated),
         };
         let op = STRING_OPS.iter().find(|(w, _)| *w == word).map(|(_, op)| *op)?;
@@ -1041,7 +1191,11 @@ impl<'a> Parser<'a> {
     }
 
     fn at_operator_end(&self) -> bool {
-        self.at_eof() || self.is_punct(0, "|") || self.is_punct(0, ")") || self.is_punct(0, ";") || self.is_punct(0, "}")
+        self.at_eof()
+            || self.is_punct(0, "|")
+            || self.is_punct(0, ")")
+            || self.is_punct(0, ";")
+            || self.is_punct(0, "}")
     }
 
     fn source_operator(&mut self) -> Result<Operator, ParseError> {
@@ -1129,7 +1283,10 @@ impl<'a> Parser<'a> {
                     }
                     on
                 } else if self.is_kw(0, "where") {
-                    return Err(ParseError { message: "join ... where is not supported".into(), span: self.token(0).span });
+                    return Err(ParseError {
+                        message: "join ... where is not supported".into(),
+                        span: self.token(0).span,
+                    });
                 } else {
                     Vec::new()
                 };
@@ -1288,12 +1445,19 @@ impl<'a> Parser<'a> {
                             self.expect_punct(")")?;
                         } else {
                             items.push(self.or()?);
-                            while self.is_punct(0, ",") && self.is_name_start(1) && !self.is_punct(if self.is_punct(1, "[") { 4 } else { 2 }, "=") {
+                            while self.is_punct(0, ",")
+                                && self.is_name_start(1)
+                                && !self.is_punct(if self.is_punct(1, "[") { 4 } else { 2 }, "=")
+                            {
                                 self.bump();
                                 items.push(Expr::Name(self.name()?));
                             }
                         }
-                        let value = if items.len() == 1 { items.pop().unwrap() } else { Expr::Call { name: "__list".into(), args: items.into_iter().map(Arg::positional).collect() } };
+                        let value = if items.len() == 1 {
+                            items.pop().unwrap()
+                        } else {
+                            Expr::Call { name: "__list".into(), args: items.into_iter().map(Arg::positional).collect() }
+                        };
                         props.push((name, value));
                         if !self.eat_punct(",") {
                             break;
@@ -1336,7 +1500,10 @@ impl<'a> Parser<'a> {
                 self.expect_kw("by")?;
                 let by = Expr::Name(self.name()?);
                 if self.is_punct(0, "{") {
-                    return Err(ParseError { message: "partition with a { subquery } is not supported".into(), span: self.token(0).span });
+                    return Err(ParseError {
+                        message: "partition with a { subquery } is not supported".into(),
+                        span: self.token(0).span,
+                    });
                 }
                 let body = self.sub_pipeline()?;
                 Operator::Partition { params, by, body }

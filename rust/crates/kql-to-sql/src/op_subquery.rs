@@ -75,7 +75,10 @@ pub(crate) fn mv_apply(
     let outer_sql = numbered.into_query().render();
 
     // the single outer row, as a FROM-less select over the lateral reference
-    let row_items: Vec<Item> = outer_cols.iter().map(|c| Item { sql: format!("{o}.{}", quote_ident(&c.name)), alias: c.name.clone() }).collect();
+    let row_items: Vec<Item> = outer_cols
+        .iter()
+        .map(|c| Item { sql: format!("{o}.{}", quote_ident(&c.name)), alias: c.name.clone() })
+        .collect();
     let row = Rel::from_select(Select { items: Some(row_items), ..Default::default() }, outer_cols.clone());
     // The sub-table is ordered by element position (make_list, top, row_number in the body see
     // the array order); without a user-visible item index, a hidden one carries that order.
@@ -96,7 +99,8 @@ pub(crate) fn mv_apply(
     expanded.order = vec![OrderSpec { col: index.clone(), desc: false, nulls_first: false }];
     let sub = run_body(ctx, expanded, body, env, "mv-apply", &o)?;
     let sub_index = sub.cols.iter().any(|c| c.name == index).then(|| index.clone());
-    let sub_cols: Vec<Column> = sub.cols.iter().filter(|c| user_index.is_some() || c.name != HIDDEN_INDEX).cloned().collect();
+    let sub_cols: Vec<Column> =
+        sub.cols.iter().filter(|c| user_index.is_some() || c.name != HIDDEN_INDEX).cloned().collect();
     let s = ctx.alias();
     let sub_sql = sub.into_query().render();
 
@@ -128,7 +132,14 @@ pub(crate) fn mv_apply(
 ///
 /// SQL: `SELECT s.* FROM (SELECT DISTINCT Col FROM T) AS pk CROSS JOIN LATERAL (<body over
 /// T WHERE Col = pk.Col>) AS s`.
-pub(crate) fn partition(ctx: &mut Ctx, rel: Rel, _params: &[OpParam], by: &Expr, body: &[Operator], env: &Env) -> Result<Rel> {
+pub(crate) fn partition(
+    ctx: &mut Ctx,
+    rel: Rel,
+    _params: &[OpParam],
+    by: &Expr,
+    body: &[Operator],
+    env: &Env,
+) -> Result<Rel> {
     let key = match by {
         Expr::Name(n) => n.clone(),
         Expr::Paren(x) => match &**x {
@@ -157,8 +168,10 @@ pub(crate) fn partition(ctx: &mut Ctx, rel: Rel, _params: &[OpParam], by: &Expr,
     let cols = sub.cols.clone();
     let s = ctx.alias();
     let sub_sql = sub.into_query().render();
-    let items = cols.iter().map(|c| Item { sql: format!("{s}.{}", quote_ident(&c.name)), alias: c.name.clone() }).collect();
-    let from = From::Raw(format!("(SELECT DISTINCT {qk} FROM {}) AS {pk} CROSS JOIN LATERAL ({sub_sql}) AS {s}", t.from));
+    let items =
+        cols.iter().map(|c| Item { sql: format!("{s}.{}", quote_ident(&c.name)), alias: c.name.clone() }).collect();
+    let from =
+        From::Raw(format!("(SELECT DISTINCT {qk} FROM {}) AS {pk} CROSS JOIN LATERAL ({sub_sql}) AS {s}", t.from));
     Ok(Rel::from_select(Select { items: Some(items), from, ..Default::default() }, cols))
 }
 
@@ -271,7 +284,8 @@ pub(crate) fn top_nested(ctx: &mut Ctx, rel: Rel, levels: &[TopNestedLevel], env
         let annotated = match &l.count {
             None => format!("SELECT *, {k} AS {}, false AS __o{i} FROM {rows} AS __src", p(i)),
             Some(n) => {
-                let part = if prefix.is_empty() { String::new() } else { format!("PARTITION BY {} ", prefix.join(", ")) };
+                let part =
+                    if prefix.is_empty() { String::new() } else { format!("PARTITION BY {} ", prefix.join(", ")) };
                 let dir = if l.desc { "DESC" } else { "ASC" };
                 let nulls = if l.nulls_first { "FIRST" } else { "LAST" };
                 let mut group: Vec<String> = prefix.clone();
@@ -297,7 +311,8 @@ pub(crate) fn top_nested(ctx: &mut Ctx, rel: Rel, levels: &[TopNestedLevel], env
         let tname = add_raw_cte(ctx, &format!("top_nested_{i}"), annotated, true);
         let mut group: Vec<String> = (0..=i).map(p).collect();
         group.push(format!("__o{i}"));
-        let level = format!("SELECT {}, {} AS __a{i} FROM {tname} GROUP BY {}", group.join(", "), l.agg.sql, group.join(", "));
+        let level =
+            format!("SELECT {}, {} AS __a{i} FROM {tname} GROUP BY {}", group.join(", "), l.agg.sql, group.join(", "));
         level_ctes.push(add_raw_cte(ctx, &format!("top_nested_level_{i}"), level, false));
         rows = format!("(SELECT * FROM {tname} WHERE NOT __o{i})");
     }
@@ -333,7 +348,14 @@ fn add_raw_cte(ctx: &mut Ctx, base: &str, sql: String, materialized: bool) -> St
 
 /// `top-hitters N of Key [by Weight]`: the N keys with the highest count (or sum of `Weight`).
 /// Kusto computes this approximately; we compute it exactly (ties broken by the larger key).
-pub(crate) fn top_hitters(ctx: &mut Ctx, rel: Rel, count: &Expr, of: &Expr, by: Option<&Expr>, env: &Env) -> Result<Rel> {
+pub(crate) fn top_hitters(
+    ctx: &mut Ctx,
+    rel: Rel,
+    count: &Expr,
+    of: &Expr,
+    by: Option<&Expr>,
+    env: &Env,
+) -> Result<Rel> {
     let mut rel = rel.passthrough(ctx);
     rel.order.clear();
     rel.sel.order_by.clear();
@@ -359,12 +381,18 @@ pub(crate) fn top_hitters(ctx: &mut Ctx, rel: Rel, count: &Expr, of: &Expr, by: 
     let mut names = UniqueNames::default();
     let key_name = names.unique(&key_name);
     let metric = names.unique(&metric);
-    let items = vec![Item { sql: crate::ops::output_sql(ctx, &key), alias: key_name.clone() }, Item { sql: weight.sql, alias: metric.clone() }];
+    let items = vec![
+        Item { sql: crate::ops::output_sql(ctx, &key), alias: key_name.clone() },
+        Item { sql: weight.sql, alias: metric.clone() },
+    ];
     let out_cols = vec![Column::new(key_name.clone(), key.ty), Column::new(metric.clone(), weight.ty)];
     let mut r = rel.project(ctx, items, out_cols);
     r.sel.group_by = vec!["1".into()];
     let mut r = r.wrap(ctx);
-    r.sel.order_by = vec![format!("{} DESC NULLS LAST", quote_ident(&metric)), format!("{} DESC NULLS LAST", quote_ident(&key_name))];
+    r.sel.order_by = vec![
+        format!("{} DESC NULLS LAST", quote_ident(&metric)),
+        format!("{} DESC NULLS LAST", quote_ident(&key_name)),
+    ];
     r.sel.limit = Some(match n.long_const() {
         Some(v) => v.max(0).to_string(),
         None => n.sql,
@@ -385,7 +413,11 @@ pub(crate) fn sample_distinct(ctx: &mut Ctx, rel: Rel, count: &Expr, of: &Expr, 
     }
     let t = ctx.expr(of, &Scope::rows(&rel.cols), env)?;
     let name = result_name(of, false).unwrap_or_else(|| "Column1".into());
-    let mut r = rel.project(ctx, vec![Item { sql: crate::ops::output_sql(ctx, &t), alias: name.clone() }], vec![Column::new(name, t.ty)]);
+    let mut r = rel.project(
+        ctx,
+        vec![Item { sql: crate::ops::output_sql(ctx, &t), alias: name.clone() }],
+        vec![Column::new(name, t.ty)],
+    );
     r.sel.distinct = true;
     let mut r = r.wrap(ctx);
     r.sel.order_by = vec![ctx.d.random()];
@@ -402,7 +434,12 @@ pub(crate) fn reduce(_ctx: &mut Ctx, _rel: Rel, _by: &Expr, _params: &[OpParam],
     err("the 'reduce' operator is not supported")
 }
 
-pub(crate) fn fork(_ctx: &mut Ctx, _rel: Rel, _branches: &[(Option<String>, Vec<Operator>)], _env: &Env) -> Result<Rel> {
+pub(crate) fn fork(
+    _ctx: &mut Ctx,
+    _rel: Rel,
+    _branches: &[(Option<String>, Vec<Operator>)],
+    _env: &Env,
+) -> Result<Rel> {
     err("the 'fork' operator returns several result sets, which a single SQL query cannot express")
 }
 
@@ -417,7 +454,12 @@ mod tests {
     fn catalog() -> Catalog {
         Catalog::new().with_table(
             "T",
-            vec![Column::new("cat", KqlType::String), Column::new("sub", KqlType::String), Column::new("v", KqlType::Long), Column::new("d", KqlType::Dynamic)],
+            vec![
+                Column::new("cat", KqlType::String),
+                Column::new("sub", KqlType::String),
+                Column::new("v", KqlType::Long),
+                Column::new("d", KqlType::Dynamic),
+            ],
         )
     }
 
@@ -440,8 +482,14 @@ mod tests {
 
     #[test]
     fn mv_apply_columns() {
-        assert_eq!(names("T | mv-apply x = d to typeof(long) on (summarize s = sum(x))"), vec!["cat:string", "sub:string", "v:long", "d:dynamic", "s:long"]);
-        assert_eq!(names("T | mv-apply with_itemindex=i d on (top 1 by i)"), vec!["cat:string", "sub:string", "v:long", "d:dynamic", "i:long"]);
+        assert_eq!(
+            names("T | mv-apply x = d to typeof(long) on (summarize s = sum(x))"),
+            vec!["cat:string", "sub:string", "v:long", "d:dynamic", "s:long"]
+        );
+        assert_eq!(
+            names("T | mv-apply with_itemindex=i d on (top 1 by i)"),
+            vec!["cat:string", "sub:string", "v:long", "d:dynamic", "i:long"]
+        );
     }
 
     #[test]

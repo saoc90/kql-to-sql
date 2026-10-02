@@ -15,7 +15,8 @@ use kql_to_sql::{Catalog, Column, Dialect, KqlType};
 const USAGE: &str = "usage: kql2sql [--dialect duckdb|postgres] [--table 'Name(col:type, ...)']... [--schema schema.json] [--columns] [QUERY]";
 
 fn parse_table(spec: &str) -> Result<(String, Vec<Column>), String> {
-    let (name, rest) = spec.split_once('(').ok_or_else(|| format!("bad --table '{spec}': expected Name(col:type, ...)"))?;
+    let (name, rest) =
+        spec.split_once('(').ok_or_else(|| format!("bad --table '{spec}': expected Name(col:type, ...)"))?;
     let body = rest.trim_end().strip_suffix(')').ok_or_else(|| format!("bad --table '{spec}': missing ')'"))?;
     let mut cols = Vec::new();
     for part in body.split(',').map(str::trim).filter(|p| !p.is_empty()) {
