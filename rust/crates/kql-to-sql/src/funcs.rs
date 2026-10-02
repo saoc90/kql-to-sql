@@ -128,16 +128,13 @@ impl Ctx<'_> {
                     let jt = d.json_type(&x.sql);
                     let sql = format!(
                         "CASE WHEN {x} IS NULL THEN 'null' ELSE CASE {jt} WHEN 'object' THEN 'dictionary' WHEN 'array' THEN 'array' WHEN 'varchar' THEN 'string' WHEN 'string' THEN 'string' \
-                         WHEN 'bigint' THEN 'long' WHEN 'ubigint' THEN 'long' WHEN 'number' THEN 'real' WHEN 'double' THEN 'real' WHEN 'boolean' THEN 'bool' WHEN 'null' THEN 'null' ELSE {jt} END END",
+                         WHEN 'bigint' THEN 'long' WHEN 'ubigint' THEN 'long' WHEN 'number' THEN 'double' WHEN 'double' THEN 'double' WHEN 'boolean' THEN 'bool' WHEN 'null' THEN 'null' ELSE {jt} END END",
                         x = x.sql
                     );
                     return Ok(mk(sql, String));
                 }
-                let tn = quote_str(x.ty.gettype_name());
-                if x.ty == String {
-                    return Ok(mk(tn, String));
-                }
-                Ok(mk(format!("CASE WHEN {} IS NULL THEN 'null' ELSE {tn} END", x.sql), String))
+                // static types report their name even for null values (gettype(toint("x")) == "int")
+                Ok(mk(quote_str(x.ty.gettype_name()), String))
             }
             // ---------------------------------------------------------- conditional
             "iff" | "iif" => {
@@ -198,7 +195,8 @@ impl Ctx<'_> {
             "not" => {
                 need(1, 1)?;
                 let b = self.to_bool(a[0].clone());
-                Ok(TExpr::derived(format!("(NOT {})", b.sql), Bool, &[&b]))
+                // not() of a comparison with a null operand is true in Kusto
+                Ok(TExpr::derived(format!("(NOT {})", b.bool_sql()), Bool, &[&b]))
             }
             // ---------------------------------------------------------- strings
             "strlen" => {
@@ -722,12 +720,15 @@ impl Ctx<'_> {
                 need(1, 64)?;
                 let sql = match d.kind() {
                     Dialect::DuckDb => {
+                        // only arrays concatenate; any other argument makes the result null
                         let lists: Vec<std::string::String> = a.iter().map(|t| format!("CAST({} AS JSON[])", t.sql)).collect();
-                        format!("to_json(list_concat({}))", lists.join(", ")).replace("list_concat(", if n == 1 { "(" } else { "list_concat(" })
+                        let concat = lists.iter().skip(1).fold(lists[0].clone(), |acc, l| format!("list_concat({acc}, {l})"));
+                        let checks: Vec<std::string::String> = a.iter().map(|t| format!("json_type({}) = 'ARRAY'", t.sql)).collect();
+                        format!("CASE WHEN {} THEN to_json({concat}) END", checks.join(" AND "))
                     }
                     Dialect::Postgres => a.iter().map(|t| t.sql.clone()).collect::<Vec<_>>().join(" || "),
                 };
-                Ok(mk(if n == 1 { a[0].sql.clone() } else { sql }, Dynamic))
+                Ok(mk(sql, Dynamic))
             }
             "array_slice" => {
                 need(3, 3)?;

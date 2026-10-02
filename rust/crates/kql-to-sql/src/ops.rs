@@ -157,6 +157,9 @@ pub(crate) fn extend(ctx: &mut Ctx, rel: Rel, items: &[NamedExpr], env: &Env, _s
 
 /// Constants in projections are cast to their Kusto type so the column type is exact.
 pub(crate) fn output_sql(ctx: &Ctx, t: &TExpr) -> String {
+    if t.cmp {
+        return t.bool_sql();
+    }
     match &t.konst {
         Some(Const::Long(_)) | Some(Const::Real(_)) | Some(Const::Bool(_)) if !t.sql.starts_with("CAST(") => ctx.d.cast(&t.sql, t.ty),
         Some(Const::TimeSpan(_)) => ctx.d.cast(&t.sql, KqlType::TimeSpan),

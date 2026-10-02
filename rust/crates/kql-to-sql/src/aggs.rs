@@ -418,7 +418,8 @@ fn make_list_sql(ctx: &Ctx, x: &TExpr, cond: Option<&str>, distinct: bool, with_
     let v = if x.ty == KqlType::Dynamic { x.sql.clone() } else { ctx.to_dynamic(x.clone()).sql };
     let order_by = if order.is_empty() { String::new() } else { format!(" ORDER BY {}", order.join(", ")) };
     let mut filters = Vec::new();
-    if !with_nulls {
+    // dynamic nulls are kept (Kusto keeps null elements of dynamic input)
+    if !with_nulls && x.ty != KqlType::Dynamic {
         filters.push(format!("{} IS NOT NULL", x.sql));
     }
     if let Some(c) = cond {

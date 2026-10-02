@@ -35,15 +35,18 @@ pub(crate) struct TExpr {
     pub agg: bool,
     /// Contains a window function (row_number, prev, ...).
     pub window: bool,
+    /// A comparison: Kusto defines it as false (never null) when an operand is null, while SQL
+    /// yields NULL. Consumers that can observe the difference (NOT, projections) coalesce.
+    pub cmp: bool,
 }
 
 impl TExpr {
     pub fn new(sql: impl Into<String>, ty: KqlType) -> TExpr {
-        TExpr { sql: sql.into(), ty, konst: None, agg: false, window: false }
+        TExpr { sql: sql.into(), ty, konst: None, agg: false, window: false, cmp: false }
     }
 
     pub fn konst(sql: impl Into<String>, ty: KqlType, c: Const) -> TExpr {
-        TExpr { sql: sql.into(), ty, konst: Some(c), agg: false, window: false }
+        TExpr { sql: sql.into(), ty, konst: Some(c), agg: false, window: false, cmp: false }
     }
 
     /// Derives a new expression from `parts`, inheriting their aggregate/window flags.
@@ -54,6 +57,22 @@ impl TExpr {
             konst: None,
             agg: parts.iter().any(|p| p.agg),
             window: parts.iter().any(|p| p.window),
+            cmp: false,
+        }
+    }
+
+    /// Marks a comparison result (see [`TExpr::cmp`]).
+    pub fn comparison(mut self) -> TExpr {
+        self.cmp = true;
+        self
+    }
+
+    /// The SQL of a boolean with Kusto's never-null comparison semantics.
+    pub fn bool_sql(&self) -> String {
+        if self.cmp {
+            format!("COALESCE({}, false)", self.sql)
+        } else {
+            self.sql.clone()
         }
     }
 
@@ -272,7 +291,9 @@ impl Ctx<'_> {
             BinaryOp::And | BinaryOp::Or => {
                 let (l, r) = (self.to_bool(l), self.to_bool(r));
                 let kw = if op == BinaryOp::And { "AND" } else { "OR" };
-                Ok(TExpr::derived(format!("({} {kw} {})", l.sql, r.sql), KqlType::Bool, &[&l, &r]))
+                let both = l.cmp && r.cmp;
+                let t = TExpr::derived(format!("({} {kw} {})", l.sql, r.sql), KqlType::Bool, &[&l, &r]);
+                Ok(if both { t.comparison() } else { t })
             }
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => self.arith(op, l, r),
             BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => self.compare(op, l, r),
@@ -283,7 +304,7 @@ impl Ctx<'_> {
             }
             BinaryOp::Str(sop, negated) => {
                 let t = self.string_op(sop, l, r)?;
-                Ok(if negated { TExpr::derived(format!("(NOT {})", t.sql), KqlType::Bool, &[&t]) } else { t })
+                Ok(if negated { TExpr::derived(format!("(NOT {})", t.bool_sql()), KqlType::Bool, &[&t]).comparison() } else { t })
             }
             BinaryOp::MatchesRegex => {
                 let (l, r) = (self.to_string(l), self.to_string(r));
@@ -337,7 +358,8 @@ impl Ctx<'_> {
                     let (ls, rs) = (self.d.cast(&l.sql, Real), self.d.cast(&r.sql, Real));
                     let sql = match op {
                         BinaryOp::Div => format!("({} / {})", ls, rs),
-                        BinaryOp::Mod => format!("fmod({ls}, {rs})"),
+                        // Kusto's % is Euclidean for reals too: the result has the divisor's... absolute sign
+                        BinaryOp::Mod => format!("fmod(fmod({ls}, {rs}) + abs({rs}), abs({rs}))"),
                         _ => format!("({} {sym} {})", ls, rs),
                     };
                     Ok(TExpr::derived(sql, if t == Decimal { Decimal } else { Real }, &parts))
@@ -421,8 +443,15 @@ impl Ctx<'_> {
             _ => return err(format!("cannot compare {} with {}", l.ty, r.ty)),
         };
         if op == BinaryOp::Ne {
-            // Kusto's != is true when exactly one side is null
-            return Ok(TExpr::derived(format!("({} IS DISTINCT FROM {})", l.sql, r.sql), Bool, &[&l, &r]));
+            // Kusto's != is true when exactly one side is null, and NaN != NaN
+            let mut sql = format!("({} IS DISTINCT FROM {})", l.sql, r.sql);
+            if l.ty == Real || r.ty == Real {
+                let nans: Vec<std::string::String> = [&l, &r].iter().filter(|t| t.ty == Real && t.konst.is_none()).map(|t| format!("isnan({})", t.sql)).collect();
+                if !nans.is_empty() {
+                    sql = format!("({sql} OR {})", nans.join(" OR "));
+                }
+            }
+            return Ok(TExpr::derived(sql, Bool, &[&l, &r]));
         }
         let mut sql = format!("({} {sym} {})", l.sql, r.sql);
         // NaN compares false with everything in Kusto; DuckDB orders NaN above all numbers.
@@ -438,7 +467,7 @@ impl Ctx<'_> {
                 sql = format!("({sql} AND {})", guards.join(" AND "));
             }
         }
-        Ok(TExpr::derived(sql, Bool, &[&l, &r]))
+        Ok(TExpr::derived(sql, Bool, &[&l, &r]).comparison())
     }
 
     fn string_op(&mut self, op: StringOp, l: TExpr, r: TExpr) -> Result<TExpr> {
@@ -570,8 +599,11 @@ impl Ctx<'_> {
                     let i = if x.ty == KqlType::String { self.to_string(i) } else { i };
                     vals.push(if ci { format!("lower({})", i.sql) } else { i.sql });
                 }
-                let not = if matches!(kind, InKind::NotIn | InKind::NotInCi) { "NOT " } else { "" };
-                Ok(TExpr::derived(format!("({lhs} {not}IN ({}))", vals.join(", ")), KqlType::Bool, &[&x]))
+                let t = TExpr::derived(format!("({lhs} IN ({}))", vals.join(", ")), KqlType::Bool, &[&x]).comparison();
+                if matches!(kind, InKind::NotIn | InKind::NotInCi) {
+                    return Ok(TExpr::derived(format!("(NOT {})", t.bool_sql()), KqlType::Bool, &[&t]));
+                }
+                Ok(t)
             }
         }
     }
@@ -770,15 +802,15 @@ impl Ctx<'_> {
                 }
             }
             (String, b) if b.is_integer() => {
-                let v = format!("trim({})", x.sql);
+                let v = format!("regexp_replace({}, '^\\s+|\\s+$', '', 'g')", x.sql);
                 let ok = d.regex_match(&v, "'^[+-]?([0-9]+|0[xX][0-9a-fA-F]+)$'");
                 format!("CASE WHEN {ok} THEN {} END", d.try_cast(&v, b))
             }
             (String, Real | Decimal) => {
-                let v = format!("trim({})", x.sql);
+                let v = format!("regexp_replace({}, '^\\s+|\\s+$', '', 'g')", x.sql);
                 let ok = d.regex_match(&v, r"'^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$'");
                 format!(
-                    "CASE WHEN {ok} THEN {} WHEN {v} IN ('nan', 'NaN') THEN {} WHEN {v} IN ('inf', '+inf', 'Infinity', '+Infinity', 'infinity') THEN {} WHEN {v} IN ('-inf', '-Infinity', '-infinity') THEN {} END",
+                    "CASE WHEN {ok} THEN {} WHEN {v} IN ('nan', 'NaN') THEN {} WHEN {v} IN ('inf', '+inf', 'Inf', '+Inf', 'Infinity', '+Infinity', 'infinity') THEN {} WHEN {v} IN ('-inf', '-Inf', '-Infinity', '-infinity') THEN {} END",
                     d.try_cast(&v, Real),
                     d.real_literal(f64::NAN),
                     d.real_literal(f64::INFINITY),
