@@ -137,6 +137,7 @@ impl Ctx<'_> {
             "iff" | "iif" => {
                 need(3, 3)?;
                 let c = self.to_bool(a[0].clone());
+                self.check_same_types(name, &a[1..])?;
                 let (t, f, ty) = self.unify2(a[1].clone(), a[2].clone())?;
                 Ok(TExpr::derived(format!("CASE WHEN {} THEN {} ELSE {} END", c.sql, t.sql, f.sql), ty, &[&c, &t, &f]))
             }
@@ -146,6 +147,7 @@ impl Ctx<'_> {
                 }
                 let mut vals: Vec<TExpr> = a.iter().skip(1).step_by(2).cloned().collect();
                 vals.push(a[n - 1].clone());
+                self.check_same_types(name, &vals)?;
                 let (vals, ty) = self.unify(vals)?;
                 let mut sql = std::string::String::from("CASE");
                 for i in 0..(n - 1) / 2 {
@@ -157,6 +159,7 @@ impl Ctx<'_> {
             }
             "coalesce" => {
                 need(1, 64)?;
+                self.check_same_types(name, &a)?;
                 let (vals, ty) = self.unify(a.clone())?;
                 if ty == String {
                     let items: Vec<std::string::String> = vals.iter().map(|v| format!("NULLIF({}, '')", v.sql)).collect();
@@ -329,6 +332,9 @@ impl Ctx<'_> {
                 let (re, text) = if n == 2 { (&a[0], &a[1]) } else { (&a[0], &a[2]) };
                 let r = re.str_const().ok_or_else(|| crate::Error::new("extract_all(): the regular expression must be a constant"))?;
                 let groups = crate::regex::capture_groups(r);
+                if groups == 0 {
+                    return err("extract_all(): the regular expression must have at least one capture group");
+                }
                 let re_sql = quote_str(&crate::regex::translate(r, d.kind()));
                 let x = s(self, text);
                 let sql = match d.kind() {
@@ -412,10 +418,10 @@ impl Ctx<'_> {
                 let x = self.numeric_arg(&a[0]);
                 Ok(TExpr::derived(format!("abs({})", x.sql), x.ty, &[&x]))
             }
-            "ceiling" | "floor" if !(name == "floor" && n == 2) => {
+            "ceiling" => {
                 need(1, 1)?;
                 let x = self.numeric_arg(&a[0]);
-                let f = if name == "ceiling" { "ceil" } else { "floor" };
+                let f = "ceil";
                 if x.ty.is_integer() {
                     return Ok(x);
                 }
@@ -484,6 +490,7 @@ impl Ctx<'_> {
                 Ok(mk(format!("{f}({})", vals.iter().map(|v| v.sql.clone()).collect::<Vec<_>>().join(", ")), ty))
             }
             "bin" | "floor" => {
+                // floor(x, size) is an alias of bin; the one-argument math floor does not exist
                 need(2, 2)?;
                 self.bin(&a[0], &a[1], None)
             }
@@ -794,6 +801,9 @@ impl Ctx<'_> {
                 let f = if name == "prev" { "LAG" } else { "LEAD" };
                 let off = if n >= 2 { d.cast(&a[1].sql, Long) } else { "1".into() };
                 let x = &a[0];
+                if n == 3 && a[2].konst.is_none() {
+                    return err(format!("{name}(): the default value must be a constant"));
+                }
                 let def = if n == 3 { self.convert(a[2].clone(), x.ty).sql } else if x.ty == String { "''".into() } else { "NULL".into() };
                 let mut t = mk(format!("{f}({}, CAST({off} AS INTEGER), {def}) OVER ({})", x.sql, over_clause(scope)), x.ty);
                 t.window = true;
@@ -826,6 +836,21 @@ impl Ctx<'_> {
                 }
             }
         }
+    }
+
+    /// `iff`/`case`/`coalesce` branches must have the same type (int and long mix; typed nulls
+    /// match anything).
+    fn check_same_types(&self, name: &str, vals: &[TExpr]) -> Result<()> {
+        let norm = |t: KqlType| if t == KqlType::Int { KqlType::Long } else { t };
+        let mut first: Option<KqlType> = None;
+        for v in vals.iter().filter(|v| !v.is_null_const()) {
+            match first {
+                None => first = Some(norm(v.ty)),
+                Some(t) if t == norm(v.ty) => {}
+                Some(t) => return err(format!("{name}(): all values must have the same type (found {t} and {})", v.ty)),
+            }
+        }
+        Ok(())
     }
 
     fn numeric_arg(&self, x: &TExpr) -> TExpr {

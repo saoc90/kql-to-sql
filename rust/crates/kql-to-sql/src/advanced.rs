@@ -43,7 +43,9 @@ pub(crate) fn mv_expand(ctx: &mut Ctx, rel: Rel, params: &[OpParam], items: &[Mv
     let mut cols1 = rel.cols.clone();
     for (i, it) in items.iter().enumerate() {
         let t = ctx.expr(&it.expr, &Scope::rows(&rel.cols), env)?;
-        let t = if t.ty == KqlType::Dynamic { t } else { ctx.to_dynamic(t) };
+        if t.ty != KqlType::Dynamic {
+            return err(format!("mv-expand requires a dynamic value, found {}", t.ty));
+        }
         let (name, replaces) = match &it.name {
             Some(n) => (n.clone(), rel.cols.iter().any(|c| c.name == *n)),
             None => match inner_identifier(&it.expr).or_else(|| result_name(&it.expr, false)) {

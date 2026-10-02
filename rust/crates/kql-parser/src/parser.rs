@@ -62,6 +62,31 @@ const STRING_OPS: &[(&str, StringOp)] = &[
     ("likecs", StringOp::LikeCs),
 ];
 
+/// Keywords that cannot be used as plain identifiers (Kusto.Language `SyntaxFacts` entries
+/// without `canBeIdentifier`); such names must be bracketed: `['first']`.
+const RESERVED: &[&str] = &[
+    "__contextual_datatable", "__crossCluster", "__crossDB", "__executeAndCache", "__id", "__isFuzzy", "__noWithSource", "__packedColumn", "__projectAway", "__sourceColumnIndex",
+    "accumulate", "and", "anomalychart", "areachart", "as", "asc", "bagexpansion", "barchart", "between", "bin_legacy",
+    "boolean", "by", "byte", "cachingpolicy", "callout", "cancel", "card", "char", "columnchart", "contains",
+    "contains_cs", "containscs", "cycles", "dataexport", "datascope", "datatable", "date", "datetime", "decimal", "decodeblocks",
+    "desc", "double", "dynamic", "earliest", "encodingpolicy", "endswith", "endswith_cs", "expandoutput", "extent_tags_retention", "external_data",
+    "externaldata", "find", "first", "flags", "float", "force_remote", "harddelete", "hardretention", "has", "has_all",
+    "has_any", "has_cs", "hasprefix", "hasprefix_cs", "hassuffix", "hassuffix_cs", "hotcache", "in", "int", "int16",
+    "int32", "int64", "int8", "invoke", "isfuzzy", "journal", "kind", "ladderchart", "last", "latest",
+    "like", "likecs", "linechart", "long", "materialize", "mdm", "missing", "nooptimization", "notcontains", "notcontainscs",
+    "notlike", "notlikecs", "of", "or", "others", "pathformat", "piechart", "pivotchart", "print", "project",
+    "queries", "query_results", "real", "relaxed", "restricted_view_access", "row_level_security", "rowstore", "rowstore_references", "rowstore_sealinfo", "rowstorepolicy",
+    "rowstores", "sample", "scatterchart", "seal", "seals", "search", "set", "shards", "simple", "softdelete",
+    "softretention", "sql", "stackedareachart", "startswith", "startswith_cs", "statistics", "storedqueryresultcontainers", "string", "tablepurge", "time",
+    "timechart", "timeline", "timepivot", "timespan", "title", "to", "toscalar", "totable", "treemap", "uint",
+    "uint16", "uint32", "uint64", "uint8", "ulong", "union", "uniqueid", "unrestrictedviewers", "verbose", "viewers",
+    "views", "where", "with_itemindex", "with_match_id", "with_source", "with_step_name", "withsource", "writeaheadlog",
+];
+
+pub fn is_reserved(name: &str) -> bool {
+    RESERVED.contains(&name)
+}
+
 const SOURCE_KEYWORDS: &[&str] = &["print", "datatable", "range", "union", "search", "externaldata", "find", "evaluate"];
 
 impl<'a> Parser<'a> {
@@ -191,6 +216,17 @@ impl<'a> Parser<'a> {
             }
             // Typed-literal keywords lexed as goo are also valid names when not followed by '('.
             _ => Err(self.unexpected("a name")),
+        }
+    }
+
+    /// Rejects reserved keywords used as plain identifiers.
+    fn check_identifier(&self, n: usize) -> Result<(), ParseError> {
+        match self.ident_at(n) {
+            Some(id) if is_reserved(id) => Err(ParseError {
+                message: format!("'{id}' is a keyword; use ['{id}'] to refer to a column with this name"),
+                span: self.token(n).span,
+            }),
+            _ => Ok(()),
         }
     }
 
@@ -532,7 +568,7 @@ impl<'a> Parser<'a> {
         // Fold negative numeric literals so `-5` is a literal (matters for int64 min and datatable).
         if op == UnaryOp::Neg {
             match &expr {
-                Expr::Literal(Literal::Long(v)) => return Ok(Expr::Literal(Literal::Long(-v))),
+                Expr::Literal(Literal::Long(v)) => return Ok(Expr::Literal(Literal::Long(v.wrapping_neg()))),
                 Expr::Literal(Literal::Real(v)) => return Ok(Expr::Literal(Literal::Real(-v))),
                 Expr::Literal(Literal::TimeSpan(v)) => return Ok(Expr::Literal(Literal::TimeSpan(-v))),
                 _ => {}
@@ -623,9 +659,12 @@ impl<'a> Parser<'a> {
                         self.bump();
                         return Ok(Expr::Literal(Literal::Bool(false)));
                     }
-                    "null" if !self.is_punct(1, "(") => {
+                    "typeof" if self.is_punct(1, "(") => {
                         self.bump();
-                        return Ok(Expr::Literal(Literal::Null(None)));
+                        self.bump();
+                        let t = self.type_name()?;
+                        self.expect_punct(")")?;
+                        return Ok(Expr::Call { name: "typeof".into(), args: vec![Arg::positional(Expr::Name(t))] });
                     }
                     "dynamic" if self.is_punct(1, "(") => {
                         self.bump();
@@ -649,6 +688,7 @@ impl<'a> Parser<'a> {
                     let args = self.args()?;
                     return Ok(Expr::Call { name, args });
                 }
+                self.check_identifier(0)?;
                 self.bump();
                 Ok(Expr::Name(id.clone()))
             }
@@ -823,6 +863,9 @@ impl<'a> Parser<'a> {
         if self.is_name_start(0) {
             let width = if self.is_punct(0, "[") { 3 } else { 1 };
             if self.is_punct(width, "=") {
+                if width == 1 {
+                    self.check_identifier(0)?;
+                }
                 let name = self.name()?;
                 self.bump();
                 let expr = self.or()?;

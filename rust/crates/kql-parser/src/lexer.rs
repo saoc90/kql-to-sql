@@ -230,8 +230,10 @@ impl<'a> Lexer<'a> {
         } else {
             match text.parse::<i64>() {
                 Ok(v) => Ok(Tok::Long(v)),
-                // Kusto turns out-of-range integer literals into reals.
-                Err(_) => Ok(Tok::Real(text.parse().map_err(|_| self.err("bad literal"))?)),
+                // `-9223372036854775808` is parsed as a negated literal, which then overflows; Kusto rejects it too
+                // the magnitude of i64::MIN, only valid when negated (`-9223372036854775808`)
+                Err(_) if text == "9223372036854775808" => Ok(Tok::Long(i64::MIN)),
+                Err(_) => Err(self.err(format!("integer literal '{text}' is out of range"))),
             }
         }
     }

@@ -422,6 +422,9 @@ fn datatable(ctx: &mut Ctx, columns: &[ast::ColumnDecl], values: &[Expr], env: &
     for chunk in values.chunks(cols.len()) {
         let mut row = Vec::new();
         for (v, c) in chunk.iter().zip(&cols) {
+            if !is_literal_value(v) {
+                return err("datatable values must be literals");
+            }
             let t = ctx.expr(v, &Scope::empty(), env)?;
             let t = coerce_value(ctx, t, c.ty)?;
             row.push(ctx.d.cast(&t.sql, c.ty));
@@ -429,6 +432,16 @@ fn datatable(ctx: &mut Ctx, columns: &[ast::ColumnDecl], values: &[Expr], env: &
         rows.push(row);
     }
     Ok(values_rel(ctx, &cols, rows))
+}
+
+/// Literal values allowed in `datatable`: literals, signed numeric literals, typed literals.
+fn is_literal_value(e: &Expr) -> bool {
+    match e {
+        Expr::Literal(_) => true,
+        Expr::Unary { expr, .. } => matches!(**expr, Expr::Literal(_)),
+        Expr::Paren(x) => is_literal_value(x),
+        _ => false,
+    }
 }
 
 /// Converts a literal to a declared column type (datatable, externaldata).
