@@ -8,6 +8,7 @@
 //! kql-oracle one --id <Id | source/Id>
 //! ```
 
+mod smoke;
 mod analyzer;
 mod compare;
 mod duck;
@@ -256,6 +257,7 @@ fn main() -> ExitCode {
         Some("run") => parse_run_args(&args[1..]).and_then(cmd_run),
         Some("one") => cmd_one(&args[1..]),
         Some("sql") => cmd_sql(&args[1..]),
+        Some("smoke") => smoke::cmd_smoke(&args[1..]),
         _ => Err(USAGE.to_string()),
     };
     match result {

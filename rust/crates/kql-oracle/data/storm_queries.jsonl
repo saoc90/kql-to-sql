@@ -1,0 +1,318 @@
+{"file": "DuckDbComplexQueryTests.cs", "kql": "datatable(Name:string, Score:long) [\n                'Alice', 95,\n                'Bob', 82,\n                'Charlie', 91,\n                'Diana', 78,\n                'Eve', 88\n            ]\n            | where Score >= 85\n            | project Name, Score\n            | sort by Score desc"}
+{"file": "DuckDbComplexQueryTests.cs", "kql": "datatable(EventType:string, RiskLevel:long) [\n                'Tornado', 5,\n                'Hurricane', 5,\n                'Flash Flood', 3,\n                'Hail', 2,\n                'Thunderstorm Wind', 1\n            ]\n            | join kind=inner (\n                Events\n                | summarize EventCount = count(), TotalInjuries = sum(Injuries) by EventType\n            ) on EventType\n            | extend WeightedRisk = RiskLevel * EventCount\n            | project EventType, RiskLevel, EventCount, TotalInjuries, WeightedRisk\n            | sort by WeightedRisk desc"}
+{"file": "DuckDbComplexQueryTests.cs", "kql": "let severity_lookup = datatable(EventType:string, SeverityWeight:long) [\n                'Tornado', 5,\n                'Hurricane', 5,\n                'Flash Flood', 3,\n                'Hail', 2,\n                'Thunderstorm Wind', 1\n            ];\n            let enriched = Events\n                | join kind=inner (severity_lookup) on EventType\n                | extend TotalDamage = DamageProperty + DamageCrops\n                | extend DamageCategory = case(\n                    TotalDamage >= 100000, 'Catastrophic',\n                    TotalDamage >= 10000,  'Severe',\n                    'Moderate');\n            enriched\n            | summarize\n                EventCount = count(),\n                TotalInjuries = sum(Injuries),\n                TotalDeaths = sum(Deaths),\n                AvgSeverity = avg(toreal(SeverityWeight)),\n                MaxDamage = max(TotalDamage),\n                CatastrophicCount = countif(DamageCategory == 'Catastrophic')\n              by State\n            | extend AvgSeverity = round(AvgSeverity, 2)\n            | extend CatastrophicPct = round(CatastrophicCount * 100.0 / EventCount, 1)\n            | extend RiskScore = round(AvgSeverity * EventCount + TotalInjuries * 2 + TotalDeaths * 10, 1)\n            | project State, EventCount, TotalInjuries, TotalDeaths, AvgSeverity, CatastrophicPct, RiskScore\n            | top 5 by RiskScore"}
+{"file": "DuckDbWasmIntegrationTests.cs", "kql": "StormEvents | where STATE == 'TEXAS' | project EVENT_TYPE"}
+{"file": "DuckDbWasmIntegrationTests.cs", "kql": "StormEvents | summarize count() by STATE"}
+{"file": "DuckDbWasmIntegrationTests.cs", "kql": "StormEvents | take 3"}
+{"file": "DuckDbWasmIntegrationTests.cs", "kql": "StormEvents | sort by INJURIES_DIRECT desc | project STATE, INJURIES_DIRECT"}
+{"file": "DuckDbWasmIntegrationTests.cs", "kql": "StormEvents | distinct STATE"}
+{"file": "DuckDbWasmIntegrationTests.cs", "kql": "StormEvents | where STATE == 'TEXAS' and INJURIES_DIRECT > 0 | project EVENT_TYPE"}
+{"file": "DuckDbWasmIntegrationTests.cs", "kql": "StormEvents | extend InjuredFlag = INJURIES_DIRECT > 0 | project STATE, InjuredFlag | take 1"}
+{"file": "DuckDbWasmIntegrationTests.cs", "kql": "StormEvents | count"}
+{"file": "PGliteIntegrationTests.cs", "kql": "StormEvents | where STATE contains 'tex' | project STATE"}
+{"file": "PGliteIntegrationTests.cs", "kql": "StormEvents | summarize damage = sum(toint(DAMAGE_PROPERTY)) by day = bin(todatetime(BEGIN_DATE_TIME), 1d)"}
+{"file": "CommentTests.cs", "kql": "StormEvents // table comment\n| where State == 'TEXAS' // filter comment\n| project EventType"}
+{"file": "CommentTests.cs", "kql": "StormEvents /* table comment */\n| where State == 'TEXAS' /* filter comment */\n| project EventType"}
+{"file": "ComplexQueryTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State contains \"enn\"\n| where event_count > 1\n| project State, event_count"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | extend data = parse_json(State)"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | extend data = todynamic(State)"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | extend parts = split(State, ',')"}
+{"file": "DuckDbDialectTests.cs", "kql": "print x = pack_array(1, 2, 3)"}
+{"file": "DuckDbDialectTests.cs", "kql": "print x = bag_pack('key', 'value')"}
+{"file": "DuckDbDialectTests.cs", "kql": "print x = rand()"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | extend d = format_datetime(StartTime, 'yyyy-MM-dd')"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | extend d = format_datetime(StartTime, 'yyyy-MM-dd HH:mm:ss')"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | extend d = format_datetime(StartTime, 'M/d/yyyy h:m:s tt')"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | extend d = dayofweek(StartTime)"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | extend d = startofday(StartTime)"}
+{"file": "DuckDbDialectTests.cs", "kql": "print x = min_of(1, 2, 3)"}
+{"file": "DuckDbDialectTests.cs", "kql": "print x = max_of(1, 2, 3)"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | summarize dcount(State)"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | summarize make_list(State)"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | summarize make_set(State)"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | summarize take_any(State)"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | summarize percentile(DamageProperty, 50)"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | project-away State"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | project-rename s = State"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | join (StormEvents) on State"}
+{"file": "DuckDbDialectTests.cs", "kql": "range x from 1 to 5 step 1"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | where State has 'tex'"}
+{"file": "DuckDbDialectTests.cs", "kql": "StormEvents | where State contains 'tex'"}
+{"file": "DuckDbDialectTests.cs", "kql": "print x = dynamic({'1': 'foo', '2': 'bar'})"}
+{"file": "DuckDbDialectTests.cs", "kql": "print x = dynamic({'a': 1h})"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend data = parse_json(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend data = todynamic(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend parts = split(STATE, ',')"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = log10(100)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend pos = indexof(STATE, 'X')"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend rn = row_number()"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend p = prev(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend n = next(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend d = dayofmonth(StartTime)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend d = dayofyear(StartTime)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend m = getmonth(StartTime)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend y = getyear(StartTime)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend m = monthofyear(StartTime)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend w = weekofyear(StartTime)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend h = hourofday(StartTime)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend m = minuteofhour(StartTime)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend s = secondofminute(StartTime)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = unixtime_seconds_todatetime(1672531200)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = unixtime_milliseconds_todatetime(1672531200000)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend b = base64_encode_tostring(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend b = base64_decode_tostring(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = translate('hello', 'aeiou', 'AEIOU')"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = strcmp('abc', 'def')"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend sz = string_size(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = repeat('abc', 3)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = unicode('A')"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = make_string(65)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend f = parse_path(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend b = to_utf8(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend h = hash_md5(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend h = hash_sha256(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend h = hash_sha1(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = binary_and(5, 3)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = binary_or(5, 3)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = binary_xor(5, 3)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = binary_not(5)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = binary_shift_left(1, 4)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = binary_shift_right(16, 2)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend t = gettype(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend parts = parse_csv(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | extend j = dynamic_to_json(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "print x = tohex(255)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | summarize dcount(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | summarize make_list(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | summarize make_set(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | summarize take_any(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | summarize percentile(DAMAGE_PROPERTY, 50)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | summarize count_distinct(STATE)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | summarize binary_all_and(INJURIES_DIRECT)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | where STATE has 'tex'"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | where STATE contains 'tex'"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | take 10 | extend test = StormSummary.TotalDamages"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | take 10 | extend test = StormSummary['TotalDamages']"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | take 10 | extend test = toint(StormSummary.TotalDamages)"}
+{"file": "PGliteDialectTests.cs", "kql": "StormEvents | take 10 | extend test = toint(StormSummary['TotalDamages'])"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize avg(InjuriesDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize sum(DeathsDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize avgif(InjuriesDirect, DeathsDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize binary_all_and(InjuriesDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize binary_all_or(InjuriesDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize binary_all_xor(InjuriesDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize buildschema(State)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize count_distinct(State)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize count_distinctif(State, InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize countif(InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize covariance(InjuriesDirect, DeathsDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize covarianceif(InjuriesDirect, DeathsDirect, InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize covariancep(InjuriesDirect, DeathsDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize covariancepif(InjuriesDirect, DeathsDirect, InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize dcountif(State, InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize hll(State)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize hll_if(State, InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize hll(State) | summarize hll_merge(hll_State)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize make_bag(State)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize make_bag_if(State, InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize make_list_if(State, InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize make_list_with_nulls(State)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize make_set_if(State, InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize maxif(InjuriesDirect, DeathsDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize minif(InjuriesDirect, DeathsDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize percentile(InjuriesDirect, 50)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize percentiles(InjuriesDirect, 5, 95)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize percentilew(InjuriesDirect, DeathsDirect, 50)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize percentilesw(InjuriesDirect, DeathsDirect, 5, 95)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize stdev(InjuriesDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize stdevif(InjuriesDirect, DeathsDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize stdevp(InjuriesDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize sumif(InjuriesDirect, DeathsDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize take_anyif(State, InjuriesDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize variance(InjuriesDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize varianceif(InjuriesDirect, DeathsDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize variancep(InjuriesDirect)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize variancepif(InjuriesDirect, DeathsDirect > 0)"}
+{"file": "AggregationFunctionTests.cs", "kql": "StormEvents | summarize {aggregate}"}
+{"file": "ScalarFunctionTests.cs", "kql": "StormEvents | take 1 | project original=State, lower=tolower(State), upper=toupper(State), len=strlen(State), sub=substring(State,0,3)"}
+{"file": "ScalarFunctionTests.cs", "kql": "StormEvents | project t=now() | take 1"}
+{"file": "ScalarFunctionTests.cs", "kql": "StormEvents | project t=ago(1d) | take 1"}
+{"file": "ScalarFunctionTests.cs", "kql": "StormEvents | project r=iif(1==1, 'yes', 'no') | take 1"}
+{"file": "ScalarFunctionTests.cs", "kql": "StormEvents | project r=case(2==1, 'a', 2==2, 'b', 'c') | take 1"}
+{"file": "TabularUserFunctionTests.cs", "kql": "let f = (t:(*)) { t | project Value=1 }; datatable(X:int)[1,2] | invoke f()"}
+{"file": "TabularUserFunctionTests.cs", "kql": "let f = (t:(*), col:string) { t | extend _c = column_ifexists(col, '') | where _c != '' };\ndatatable(X:int)[1]\n| invoke f('X')"}
+{"file": "TabularUserFunctionTests.cs", "kql": "let f = (tbl:(*)) { let ex = tbl | project X; ex | count }; datatable(X:int)[1,2,3] | invoke f()"}
+{"file": "ArgMaxOperatorTests.cs", "kql": "datatable(Name:string, Ts:datetime, Value:long)"}
+{"file": "ArgMaxOperatorTests.cs", "kql": "StormEvents | summarize arg_max(EndTime, EventType) by State | sort by State"}
+{"file": "ArgMaxOperatorTests.cs", "kql": "StormEvents | summarize arg_max(EndTime, TopEvent = EventType) by State"}
+{"file": "ArgMaxOperatorTests.cs", "kql": "StormEvents | summarize MaxT = arg_max(EndTime, EventType) by State"}
+{"file": "ArgMaxOperatorTests.cs", "kql": "StormEvents | summarize arg_max(EndTime, *) by State | project State, EventType, EndTime | where State == 'ALABAMA'"}
+{"file": "ArgMinOperatorTests.cs", "kql": "StormEvents | summarize arg_min(EndTime, EventType) by State | sort by State"}
+{"file": "ArgMinOperatorTests.cs", "kql": "StormEvents | summarize arg_min(EndTime, *) by State | project State, EventType, EndTime | where State == 'ALABAMA'"}
+{"file": "BetweenOperatorTests.cs", "kql": "StormEvents | where InjuriesDirect between (5 .. 50) | summarize cnt=count()"}
+{"file": "BetweenOperatorTests.cs", "kql": "StormEvents | where InjuriesDirect !between (5 .. 50) | summarize cnt=count()"}
+{"file": "BinOperatorTests.cs", "kql": "StormEvents | summarize cnt=count() by bin(InjuriesDirect, 10) | sort by InjuriesDirect asc | take 5"}
+{"file": "BinOperatorTests.cs", "kql": "StormEvents | summarize cnt=count() by bin(InjuriesDirect, 5) | sort by InjuriesDirect asc | take 5"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | summarize n = count() by State | sort by n desc"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | sort by State"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | sort by State asc"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | sort by State desc"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | summarize count() by EventType | order by c = count_ | render columnchart"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | extend diff = InjuriesDirect - InjuriesIndirect"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | extend doubled = InjuriesDirect * 2"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | extend halved = InjuriesDirect / 2"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | extend remainder = InjuriesDirect % 2"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | extend result = iff(InjuriesDirect > 0, 'Yes', 'No')"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | extend result = iif(InjuriesDirect > 0, 'Yes', 'No')"}
+{"file": "BugFixTests.cs", "kql": "StormEvents | where bool(true)"}
+{"file": "BugFixTests.cs", "kql": "datatable(b:bool)[ bool(null), true, false ] | where isnull(b)"}
+{"file": "BugFixTests.cs", "kql": "print x = 1 | extend y = x + 1 | extend x = y * 10 | extend z = x + y | project x, y, z"}
+{"file": "BugFixTests.cs", "kql": "print d = todatetime(0)"}
+{"file": "BugFixTests.cs", "kql": "print t = make_timespan(25, 70)"}
+{"file": "BugFixTests.cs", "kql": "print t = make_timespan(2, 30)"}
+{"file": "BugFixTests.cs", "kql": "print i = array_index_of(dynamic([1,2,3]), 99)"}
+{"file": "BugFixTests.cs", "kql": "print last = dynamic([10,20,30])[-1]"}
+{"file": "BugFixTests.cs", "kql": "print p = split('key=val', '=', 1)"}
+{"file": "BugFixTests.cs", "kql": "print p = split('key=val', '=', 5)"}
+{"file": "BugFixTests.cs", "kql": "datatable(sub:string, v:long)[ 'x',10, 'y',20 ] | top-nested of sub by Sub=sum(v)"}
+{"file": "CombinedCteTests.cs", "kql": "let ExpensiveData = materialize(StormEvents | where State == \"TEXAS\" | summarize count() by EventType);\nlet SimpleView = StormEvents | project State, EventType;\nExpensiveData | where count_ > 5"}
+{"file": "CombinedCteTests.cs", "kql": "let TexasEvents = StormEvents | where State == \"TEXAS\";\nlet TexasCount = TexasEvents | summarize count() by EventType;\nTexasCount | where count_ > 10"}
+{"file": "ContainsOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State contains_cs \"AS\"\n| count"}
+{"file": "ContainsOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !contains \"ALABAMA\"\n| project State"}
+{"file": "ContainsOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !contains_cs \"AS\"\n| project State"}
+{"file": "CountOperatorTests.cs", "kql": "StormEvents | where State == 'TEXAS' | count"}
+{"file": "CountOperatorTests.cs", "kql": "StormEvents | where State == 'NOTAState' | count"}
+{"file": "DataTableOperatorTests.cs", "kql": "datatable(Name:string, Age:int) ['Alice', 25, 'Bob', 30]"}
+{"file": "DataTableOperatorTests.cs", "kql": "datatable(Name:string, Age:int) ['Alice', 25, 'Bob', 30] | where Age > 25"}
+{"file": "DataTableOperatorTests.cs", "kql": "datatable(Name:string, Active:bool) ['Alice', true, 'Bob', false]"}
+{"file": "DataTableOperatorTests.cs", "kql": "datatable(x:long) [1, 2, 3]"}
+{"file": "DataTableOperatorTests.cs", "kql": "datatable(Score:real) [1.5, 2.7, 3.14]"}
+{"file": "DataTableOperatorTests.cs", "kql": "datatable(Name:string, Age:int) ['Alice', 25, 'Bob', 30] | project Name"}
+{"file": "DataTableOperatorTests.cs", "kql": "datatable(Name:string, Age:int) ['Alice', 25, 'Bob', 30] | count"}
+{"file": "DatetimeFunctionTests.cs", "kql": "StormEvents | extend d=datetime('2024-09-12 20:23:44') | take 1 | project d"}
+{"file": "DatetimeFunctionTests.cs", "kql": "StormEvents | extend d=datetime(0001) | take 1 | project d"}
+{"file": "DatetimeFunctionTests.cs", "kql": "StormEvents | extend d=datetime(2026-04) | take 1 | project d"}
+{"file": "DatetimeFunctionTests.cs", "kql": "StormEvents | extend d=unixtime_seconds_todatetime(1779991350) | take 1 | project d"}
+{"file": "DatetimeFunctionTests.cs", "kql": "StormEvents | extend d=unixtime_milliseconds_todatetime(1700000000000) | take 1 | project d"}
+{"file": "DatetimeFunctionTests.cs", "kql": "StormEvents | extend d=unixtime_microseconds_todatetime(1700000000000000) | take 1 | project d"}
+{"file": "DatetimeFunctionTests.cs", "kql": "StormEvents | extend d=unixtime_nanoseconds_todatetime(1700000000000000000) | take 1 | project d"}
+{"file": "DatetimeFunctionTests.cs", "kql": "datatable(T:datetime)[datetime('2024-09-12 20:23:44')] | extend b = bin(T, 1h) | project b"}
+{"file": "DistinctOperatorTests.cs", "kql": "StormEvents | distinct State"}
+{"file": "DistinctOperatorTests.cs", "kql": "StormEvents | distinct State, EventType"}
+{"file": "DivideVarcharTests.cs", "kql": "let Step = 1h; let Window = 2h; T | summarize OnTime = countif(v > 0) * Step by x | extend TotalTime = Window | extend Ratio = OnTime / TotalTime"}
+{"file": "DynamicAccessTests.cs", "kql": "StormEvents\n| extend Metadata = bag_pack('state', State, 'injuries', InjuriesDirect)\n| extend StateFromMetadata = Metadata['state'], InjuriesFromMetadata = Metadata.injuries\n| project StateFromMetadata, InjuriesFromMetadata\n| take 3"}
+{"file": "EndsWithOperatorTests.cs", "kql": "StormEvents\n| summarize Events=count() by State\n| where State endswith \"sas\"\n| where Events > 10\n| project State, Events"}
+{"file": "EndsWithOperatorTests.cs", "kql": "StormEvents\n| summarize Events = count() by State\n| where State endswith_cs \"NA\""}
+{"file": "EndsWithOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !endswith \"A\"\n| project State"}
+{"file": "EndsWithOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !endswith_cs \"a\"\n| project State"}
+{"file": "EvaluateOperatorTests.cs", "kql": "datatable(d:dynamic)[dynamic({\"a\":1,\"b\":2})] | evaluate bag_unpack(d)"}
+{"file": "EvaluateOperatorTests.cs", "kql": "datatable(D:string, N:string, V:long)[]\n| evaluate pivot(N, sum(V), D)\n| extend Cleaning = column_ifexists('Cleaning', long(0)), Production = column_ifexists('Production', long(0))"}
+{"file": "EvaluateOperatorTests.cs", "kql": "datatable(D:string, N:string, V:long)[] | evaluate pivot(N, sum(V), D)"}
+{"file": "EvaluateOperatorTests.cs", "kql": "datatable(D:string, N:string, V:real)[]\n| evaluate pivot(N, take_any(V))\n| extend Foo = toreal(Foo), Bar = toreal(Bar)"}
+{"file": "ExtendOperatorTests.cs", "kql": "StormEvents | extend TotalInjuries = InjuriesDirect + InjuriesIndirect | sort by TotalInjuries desc | take 1 | project State, EventType, TotalInjuries"}
+{"file": "ExtendOperatorTests.cs", "kql": "StormEvents | extend Injuries = InjuriesDirect + InjuriesIndirect | extend InjuriesPlusOne = Injuries + 1 | take 1 | project Injuries, InjuriesPlusOne"}
+{"file": "ExtendOperatorTests.cs", "kql": "StormEvents | extend X = InjuriesDirect | extend X = X + 100 | project State, X | take 3"}
+{"file": "ExtendOperatorTests.cs", "kql": "StormEvents | extend Val = toint(InjuriesDirect) | extend Val = binary_and(Val, 255) | extend Val = Val + 1 | project State, Val | take 3"}
+{"file": "ExtendOperatorTests.cs", "kql": "StormEvents | extend A = 1 | extend B = A + 1 | project A, B | take 1"}
+{"file": "HasAllOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State has_all ('NEW', 'MEXICO')\n| project State, event_count"}
+{"file": "HasAnyOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State has_any ('NEW', 'TEXAS')\n| project State, event_count"}
+{"file": "HasOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State has \"New\"\n| where event_count > 1\n| project State, event_count"}
+{"file": "HasOperatorTests.cs", "kql": "StormEvents | where State has_cs 'new'"}
+{"file": "HasOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !has \"New\"\n| project State"}
+{"file": "HasOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !has_cs \"New\"\n| project State"}
+{"file": "HasPrefixOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State hasprefix \"New\"\n| where event_count > 1\n| project State, event_count"}
+{"file": "HasPrefixOperatorTests.cs", "kql": "StormEvents | where State hasprefix_cs 'new'"}
+{"file": "HasPrefixOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !hasprefix \"New\"\n| project State"}
+{"file": "HasPrefixOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !hasprefix_cs \"New\"\n| project State"}
+{"file": "HasSuffixOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State hassuffix \"A\"\n| project State, event_count"}
+{"file": "HasSuffixOperatorTests.cs", "kql": "StormEvents | where State hassuffix_cs 'a'"}
+{"file": "HasSuffixOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !hassuffix \"A\"\n| project State"}
+{"file": "HasSuffixOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !hassuffix_cs \"a\"\n| project State"}
+{"file": "IifStringColumnCastTests.cs", "kql": "StormEvents | extend x = iif(State == 'X', 'foo', InjuriesDirect)"}
+{"file": "IifStringColumnCastTests.cs", "kql": "StormEvents | extend x = iif(State == 'X', 'foo', InjuriesDirect) | take 1"}
+{"file": "InOperatorTests.cs", "kql": "StormEvents | where State in~ ('FLORIDA','georgia','NEW YORK') | count"}
+{"file": "InOperatorTests.cs", "kql": "StormEvents | where State in ('texas') | count"}
+{"file": "InOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !in ('TEXAS','KANSAS')\n| project State"}
+{"file": "InOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !in~ ('texas','kansas')\n| project State"}
+{"file": "JoinOperatorTests.cs", "kql": "let A = X | project Key, Value; let B = Y | project Key, Value; A | join B on Key"}
+{"file": "JoinOperatorTests.cs", "kql": "let A = X | project Key, LeftOnly; let B = Y | project Key, RightOnly; A | join B on Key"}
+{"file": "JoinOperatorTests.cs", "kql": "let A = MyTable | project Key, Value; A | join MyTable on Key"}
+{"file": "JoinOperatorTests.cs", "kql": "let Left = Telemetry | where Timestamp > ago(1h); Left | join Telemetry on DeviceId"}
+{"file": "JoinOperatorTests.cs", "kql": "let GetItems = (p:string) { X | project Key, Value };"}
+{"file": "JoinOperatorTests.cs", "kql": "let A = X | project Key, Value;"}
+{"file": "JoinOperatorTests.cs", "kql": "let B = view() { X | summarize arg_max(Timestamp, V=Energy) by jobIdent | project-away Timestamp | extend key=1 };"}
+{"file": "JoinOperatorTests.cs", "kql": "let L=datatable(k:long,v:long)[1,10,2,20,3,30]; let R=datatable(k:long,v:long)[1,100,2,200]; L | join kind=leftouter R on k"}
+{"file": "JoinOperatorTests.cs", "kql": "let L=datatable(k:long,lv:string)[1,\"a\",2,\"b\",3,\"c\"]; let R=datatable(k:long,rv:string)[2,\"x\",4,\"y\"]; L | join kind=fullouter R on k"}
+{"file": "JoinOperatorTests.cs", "kql": "let L=datatable(k:long,v:long)[1,10,long(null),20]; let R=datatable(k:long,w:long)[long(null),200,3,300]; L | join kind=inner R on k"}
+{"file": "LookupOperatorTests.cs", "kql": "let L=datatable(k:long,lv:string)[1,\"a\",2,\"b\"]; let R=datatable(k:long,rv:string,rn:long)[1,\"x\",100]; L | lookup R on k"}
+{"file": "MaterializeAndViewDemoTests.cs", "kql": "let ExpensiveComputation = materialize(\n    StormEvents \n    | where State == \"TEXAS\"\n    | summarize TotalEvents=count(), AvgDamage=avg(DamageProperty) by EventType\n);\nExpensiveComputation | where TotalEvents > 100"}
+{"file": "MaterializeAndViewDemoTests.cs", "kql": "let TexasEvents = StormEvents | where State == \"TEXAS\" | project EventType, DamageProperty;\nlet HighDamageEvents = TexasEvents | where DamageProperty > 1000000;\nHighDamageEvents | summarize count() by EventType"}
+{"file": "MaterializeOperatorTests.cs", "kql": "let MaterializedData = materialize(StormEvents | where State == 'TEXAS' | summarize cnt=count() by EventType);\nMaterializedData | top 5 by cnt"}
+{"file": "MaterializeOperatorTests.cs", "kql": "let MaterializedData = materialize(StormEvents | summarize cnt=count() by State);\nMaterializedData | where cnt > 5"}
+{"file": "MaterializeOperatorTests.cs", "kql": "let ExpensiveData = materialize(StormEvents | summarize TotalEvents=count() by State);\nExpensiveData | where TotalEvents > 10 | top 3 by TotalEvents"}
+{"file": "MvExpandOperatorTests.cs", "kql": "range x from 1 to 1 step 1 | extend arr=pack_array(1,2,3) | mv-expand arr"}
+{"file": "MvExpandOperatorTests.cs", "kql": "datatable(Value:string) [ \"[1,2,3]\" ] | mv-expand parse_json(tostring(Value))"}
+{"file": "MvExpandOperatorTests.cs", "kql": "datatable(X:string) [ \"[1,2,3]\" ] | mv-expand parse_json(X)"}
+{"file": "MvExpandOperatorTests.cs", "kql": "datatable(bag:string) [ '{\"a\":1}' ] | mv-expand bag=parse_json(bag)"}
+{"file": "PrintOperatorTests.cs", "kql": "print x=1+1, y=2"}
+{"file": "ProjectAwayOperatorTests.cs", "kql": "StormEvents | project-away EpisodeId, EventId | take 1"}
+{"file": "ProjectAwayOperatorTests.cs", "kql": "StormEvents | project-away State | take 1"}
+{"file": "ProjectKeepOperatorTests.cs", "kql": "StormEvents | project-keep State, EventType | take 1"}
+{"file": "ProjectKeepOperatorTests.cs", "kql": "StormEvents | project-keep State | take 1"}
+{"file": "ProjectRenameOperatorTests.cs", "kql": "StormEvents | project-rename StateName = State | take 1"}
+{"file": "ProjectRenameOperatorTests.cs", "kql": "StormEvents | project-rename S=State, E=EventType | take 1"}
+{"file": "ProjectReorderOperatorTests.cs", "kql": "StormEvents | project-reorder EventType, State | take 1"}
+{"file": "QuickViewFunctionTest.cs", "kql": "let T_view = view () { StormEvents | where State == 'TEXAS' };\nT_view | top 5 by EventType"}
+{"file": "RangeOperatorTests.cs", "kql": "range x from 0 to 1000000000000 step 3600000"}
+{"file": "RangeOperatorTests.cs", "kql": "range x from 1 to 5 step 1 | where x > 3"}
+{"file": "ScalarLetTests.cs", "kql": "let getfirstkey = (T: datetime) { datetime(0001) + 1s };\nlet Anchor = getfirstkey(datetime(2026-04-12));\nStormEvents | where StartTime >= Anchor | take 1 | project StartTime"}
+{"file": "ScalarLetTests.cs", "kql": "let halve = (x: real) { x / 2.0 };\nlet v = halve(10.0);\nStormEvents | where InjuriesIndirect > v | take 1 | project InjuriesIndirect"}
+{"file": "ScanOperatorTests.cs", "kql": "range x from 1 to 5 step 1\n            | scan declare (cum:long=0) with (\n                step s1: true => cum = x + s1.cum;\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "datatable (Ts: long, Event: string) [\n                0, 'A', 1, '', 2, 'B', 3, '', 4, '', 6, 'C'\n            ]\n            | sort by Ts asc\n            | scan declare (Event_filled: string='') with (\n                step s1: true => Event_filled = iff(isempty(Event), s1.Event_filled, Event);\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "datatable (Ts: long, V: string) [\n                0, '1', 1, '', 2, '2', 3, ''\n            ]\n            | sort by Ts asc\n            | scan declare (V_filled: int=int(null)) with (\n                step s1: true => V_filled = iff(isempty(V), s1.V_filled, toint(V));\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "range x from 1 to 5 step 1\n            | scan declare (cum:long=0) with (\n                step s1: true => cum = iff(s1.cum >= 10, x, x + s1.cum);\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "range x from 1 to 3 step 1\n            | scan declare (cum_x:long=0, cum_sq:long=0) with (\n                step s1: true => cum_x = x + s1.cum_x, cum_sq = (x * x) + s1.cum_sq;\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "range x from 1 to 5 step 1\n            | scan with (\n                step s1: x == 1;\n                step s2: x > s1.x;\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "datatable(t:long, v:long)[1,5, 2,0, 3,0, 4,7, 5,0]\n            | sort by t asc\n            | scan declare (cum:long=0) with (\n                step s: true => cum = cum + v;\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "datatable(t:long, v:long)[1,5, 2,3, 3,99, 4,7]\n            | sort by t asc\n            | scan declare (mx:long=0) with (\n                step s: true => mx = iff(v > mx, v, mx);\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "datatable(t:long, v:real)[1,1.0, 2,2.0, 3,3.0, 4,4.0]\n            | sort by t asc\n            | scan declare (ema:real=0.0) with (\n                step s: true => ema = 0.5*v + 0.5*ema;\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "datatable(t:long, v:long)[1,5, 2,3, 3,99, 4,7]\n            | sort by t asc\n            | scan declare (mx:long=0) with (\n                step s: true => mx = iff(v > s.mx, v, s.mx);\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "datatable(t:long, v:real)[1,1.0, 2,2.0, 3,3.0, 4,4.0]\n            | sort by t asc\n            | scan declare (ema:real=0.0) with (\n                step s: true => ema = 0.5*v + 0.5*s.ema;\n            )"}
+{"file": "ScanOperatorTests.cs", "kql": "datatable(t:long, v:long)[1,5, 2,0, 3,0, 4,7, 5,0]\n            | sort by t asc\n            | scan declare (cum:long=0) with (\n                step s: true => cum = s.cum + v;\n            )"}
+{"file": "StartsWithOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State startswith \"Lo\"\n| where event_count > 10\n| project State, event_count"}
+{"file": "StartsWithOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State startswith_cs \"I\"\n| where event_count > 3\n| project State, event_count"}
+{"file": "StartsWithOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !startswith \"AL\"\n| project State"}
+{"file": "StartsWithOperatorTests.cs", "kql": "StormEvents\n| summarize event_count=count() by State\n| where State !startswith_cs \"al\"\n| project State"}
+{"file": "SummarizeOperatorTests.cs", "kql": "StormEvents | summarize cnt=count() by State | sort by cnt desc"}
+{"file": "SummarizeOperatorTests.cs", "kql": "StormEvents | summarize MaxInj=max(InjuriesDirect), MinInj=min(InjuriesDirect)"}
+{"file": "TopOperatorTests.cs", "kql": "StormEvents | top 1 by InjuriesDirect"}
+{"file": "TopOperatorTests.cs", "kql": "StormEvents | top 1 by EventId asc"}
+{"file": "TypeCastFunctionTests.cs", "kql": "StormEvents\n| take 1\n| extend year_str=tostring(EpisodeId)\n| project toint(year_str)"}
+{"file": "TypeCastFunctionTests.cs", "kql": "StormEvents\n| take 1\n| extend year_str=tostring(EpisodeId)\n| project tolong(year_str)"}
+{"file": "TypeCastFunctionTests.cs", "kql": "StormEvents\n| take 1\n| extend year_str=tostring(EpisodeId)\n| project todouble(year_str)"}
+{"file": "TypeCastFunctionTests.cs", "kql": "StormEvents\n| take 1\n| project tobool('1')"}
+{"file": "TypeCastFunctionTests.cs", "kql": "StormEvents\n| take 1\n| project todatetime('1950-01-03 00:00:00')"}
+{"file": "TypeCastFunctionTests.cs", "kql": "StormEvents | take 1 | project d = todatetime('{value}')"}
+{"file": "TypeCastFunctionTests.cs", "kql": "StormEvents | take 1 | project d = todatetime('not a date')"}
+{"file": "TypeCastFunctionTests.cs", "kql": "StormEvents\n| take 1\n| project tostring(EpisodeId)"}
+{"file": "TypeCastFunctionTests.cs", "kql": "print bool(true)"}
+{"file": "TypeCastFunctionTests.cs", "kql": "print bool(false)"}
+{"file": "TypeCastFunctionTests.cs", "kql": "print bool(0)"}
+{"file": "TypeCastFunctionTests.cs", "kql": "print bool(1)"}
+{"file": "UnionOperatorTests.cs", "kql": "StormEvents | where State == \"ALABAMA\" | take 1 | union (StormEvents | where State == \"TEXAS\" | take 1)"}
+{"file": "UnionOperatorTests.cs", "kql": "let A=datatable(x:long,y:string)[1,\"a\",2,\"b\"]; let B=datatable(x:long,y:string)[3,\"c\"]; A | union withsource=Src B"}
+{"file": "UnionOperatorTests.cs", "kql": "let A=datatable(x:long,y:string)[1,\"a\",2,\"b\"]; let B=datatable(x:long,z:string)[3,\"c\"]; A | union B"}
+{"file": "ViewFunctionDeclarationTests.cs", "kql": "let MaterializedData = materialize(StormEvents | where State == 'TEXAS' | summarize cnt=count() by EventType);\nlet ViewData = view () { StormEvents | where State == 'CALIFORNIA' };\nMaterializedData | top 5 by cnt"}
+{"file": "ViewFunctionDeclarationTests.cs", "kql": "let SimpleView = view () { StormEvents };\nSimpleView | top 3 by EventType"}
+{"file": "ViewOperatorTests.cs", "kql": "let ViewData = StormEvents | where State == \"TEXAS\";\nViewData | summarize count() by EventType"}
+{"file": "ViewOperatorTests.cs", "kql": "let ViewData = StormEvents | project State, EventType;\nViewData | where State == \"FLORIDA\""}
+{"file": "ViewParsingDebugTests.cs", "kql": "let T_view = view () { StormEvents | where State == 'TEXAS' };"}
+{"file": "WhereOperatorTests.cs", "kql": "StormEvents | sort by State asc | where prev(State) != State | project State"}
+{"file": "WhereOperatorTests.cs", "kql": "StormEvents | where State == 'TEXAS' | project EventType"}
+{"file": "WhereOperatorTests.cs", "kql": "StormEvents | where State == 'KANSAS' and InjuriesDirect > 0 | project EventType"}
+{"file": "WhereOperatorTests.cs", "kql": "StormEvents | where State != 'TEXAS' | project State"}
+{"file": "WhereOperatorTests.cs", "kql": "StormEvents | where State =~ 'texas' | project State"}
+{"file": "WhereOperatorTests.cs", "kql": "StormEvents | where State !~ 'texas' | project State"}
+{"file": "WhereOperatorTests.cs", "kql": "StormEvents | where InjuriesDirect >= 1 | project InjuriesDirect"}
+{"file": "WhereOperatorTests.cs", "kql": "StormEvents | where InjuriesDirect <= 0 | project InjuriesDirect"}
+{"file": "WhereOperatorTests.cs", "kql": "StormEvents | where InjuriesDirect < 1 | project InjuriesDirect"}
