@@ -229,7 +229,20 @@ export async function uploadFileToDatabase() {
     throw new Error('File upload not yet implemented for PGlite backend');
 }
 
+// True once PGlite has been started (by a query or warmUp); schema lookups for the editor
+// skip PGlite before that, so the demo does not download and boot Postgres unless it is used.
+export function isStarted() {
+    return initPromise !== null || pg !== undefined;
+}
+
+// Starts PGlite in the background (e.g. when the PGlite backend is selected).
+export function warmUp() {
+    return init();
+}
+
 globalThis.PGliteInterop = {
+    isStarted,
+    warmUp,
     queryJson,
     getAvailableTables,
     getDatabaseSchema,
