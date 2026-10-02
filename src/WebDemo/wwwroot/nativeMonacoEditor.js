@@ -204,7 +204,10 @@ window.nativeMonacoEditor = {
 
         // --- PGlite tables ---
         try {
-            if (typeof window.PGliteInterop !== 'undefined' && window.PGliteInterop.getDatabaseSchema) {
+            // Only when PGlite is already running: asking it for its schema would otherwise
+            // download and boot Postgres (and reload StormEvents) on every page load.
+            if (typeof window.PGliteInterop !== 'undefined' && window.PGliteInterop.getDatabaseSchema
+                && window.PGliteInterop.isStarted?.()) {
                 const pgSchema = await window.PGliteInterop.getDatabaseSchema();
                 if (pgSchema?.database?.tables?.length > 0) {
                     for (const table of pgSchema.database.tables) {

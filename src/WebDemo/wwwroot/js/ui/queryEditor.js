@@ -46,7 +46,12 @@ export async function initQueryEditor() {
     const backendSelect = document.getElementById('backend-select');
     if (backendSelect) {
         backendSelect.value = selectedBackend;
-        backendSelect.addEventListener('change', (e) => { selectedBackend = e.target.value; debouncedSave(); });
+        backendSelect.addEventListener('change', (e) => {
+            selectedBackend = e.target.value;
+            debouncedSave();
+            if (selectedBackend === 'pglite') warmUpPglite();
+        });
+        if (selectedBackend === 'pglite') warmUpPglite();
     }
 
     // Buttons
@@ -123,6 +128,14 @@ async function onModeChanged(newMode) {
             console.warn('[QueryEditor] Schema refresh failed:', err);
         }
     }
+}
+
+// PGlite is started on demand (it is a ~13 MB download plus loading StormEvents): when the PGlite
+// backend is chosen, start it in the background and add its tables to the editor schema.
+function warmUpPglite() {
+    window.PGliteInterop?.warmUp?.()
+        .then(() => window.refreshEditorSchema?.())
+        .catch(err => console.warn('[QueryEditor] PGlite start failed:', err));
 }
 
 function getDefaultQuery() {
