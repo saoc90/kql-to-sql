@@ -161,6 +161,8 @@ pub(crate) struct Ctx<'a> {
     pub ctes: Vec<(String, String, bool)>,
     /// Names bound by the `as` operator (visible to the rest of the query).
     pub as_names: Vec<(String, TableRef)>,
+    /// Chart instructions from `| render`.
+    pub render: Option<crate::RenderInfo>,
     cte_names: HashSet<String>,
     next_alias: usize,
     depth: usize,
@@ -170,7 +172,7 @@ const MAX_DEPTH: usize = 64;
 
 impl<'a> Ctx<'a> {
     pub fn new(d: &'static dyn SqlDialect, catalog: &'a Catalog) -> Ctx<'a> {
-        Ctx { d, catalog, ctes: Vec::new(), as_names: Vec::new(), cte_names: HashSet::new(), next_alias: 0, depth: 0 }
+        Ctx { d, catalog, ctes: Vec::new(), as_names: Vec::new(), render: None, cte_names: HashSet::new(), next_alias: 0, depth: 0 }
     }
 
     pub fn alias(&mut self) -> String {

@@ -53,7 +53,10 @@ pub(crate) fn apply(ctx: &mut Ctx, rel: Rel, op: &Operator, env: &Env) -> Result
             Ok(r)
         }
         Operator::GetSchema => getschema(ctx, &rel),
-        Operator::Render { .. } => Ok(rel),
+        Operator::Render { chart, props } => {
+            ctx.render = Some(render_info(chart, props)?);
+            Ok(rel)
+        }
         Operator::MvExpand { params, items, limit } => crate::advanced::mv_expand(ctx, rel, params, items, limit.as_ref(), env),
         Operator::Parse { params, expr, parts, filter } => crate::advanced::parse(ctx, rel, params, expr, parts, *filter, env),
         other => crate::advanced::apply_advanced(ctx, rel, other, env),
@@ -495,4 +498,54 @@ fn range(ctx: &mut Ctx, name: &str, from: &Expr, to: &Expr, step: &Expr, env: &E
 pub(crate) fn select_from_query(ctx: &mut Ctx, q: Query, items: Vec<Item>) -> Select {
     let alias = ctx.alias();
     Select { items: Some(items), from: From::Query(Box::new(q), alias), ..Default::default() }
+}
+
+fn render_info(chart: &str, props: &[(String, Expr)]) -> Result<crate::RenderInfo> {
+    use ast::Literal;
+    let mut r = crate::RenderInfo { visualization: chart.to_string(), ..Default::default() };
+    let text = |e: &Expr| -> Option<String> {
+        match e {
+            Expr::Name(n) => Some(n.clone()),
+            Expr::Literal(Literal::String(s)) => Some(s.clone()),
+            Expr::Literal(Literal::Long(v)) => Some(v.to_string()),
+            Expr::Literal(Literal::Real(v)) => Some(v.to_string()),
+            Expr::Literal(Literal::Bool(b)) => Some(b.to_string()),
+            Expr::Unary { op: ast::UnaryOp::Neg, expr } => match &**expr {
+                Expr::Literal(Literal::Long(v)) => Some((-v).to_string()),
+                Expr::Literal(Literal::Real(v)) => Some((-v).to_string()),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+    let list = |e: &Expr| -> Vec<String> {
+        match e {
+            Expr::Call { name, args } if name == "__list" => args.iter().filter_map(|a| text(&a.expr)).collect(),
+            Expr::Paren(x) => vec![text(x).unwrap_or_default()],
+            _ => text(e).into_iter().collect(),
+        }
+    };
+    for (k, v) in props {
+        match k.to_ascii_lowercase().as_str() {
+            "title" => r.title = text(v),
+            "xcolumn" => r.x_column = text(v),
+            "series" => r.series = list(v),
+            "ycolumns" => r.y_columns = list(v),
+            "anomalycolumns" => r.anomaly_columns = list(v),
+            "xtitle" => r.x_title = text(v),
+            "ytitle" => r.y_title = text(v),
+            "xaxis" => r.x_axis = text(v),
+            "yaxis" => r.y_axis = text(v),
+            "legend" => r.legend = text(v),
+            "ysplit" => r.y_split = text(v),
+            "accumulate" => r.accumulate = text(v).is_some_and(|t| t == "true"),
+            "kind" => r.kind = text(v),
+            "ymin" => r.ymin = text(v),
+            "ymax" => r.ymax = text(v),
+            "xmin" => r.xmin = text(v),
+            "xmax" => r.xmax = text(v),
+            other => return err(format!("render: unknown property '{other}'")),
+        }
+    }
+    Ok(r)
 }

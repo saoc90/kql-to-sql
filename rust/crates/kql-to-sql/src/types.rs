@@ -20,6 +20,28 @@ impl KqlType {
         })
     }
 
+    /// Maps a DuckDB/PostgreSQL column type (as reported by `DESCRIBE` or `information_schema`)
+    /// to the Kusto type the translator should treat it as.
+    pub fn from_sql_type(sql_type: &str) -> Option<KqlType> {
+        let t = sql_type.trim().to_ascii_uppercase();
+        let base = t.split(['(', ' ']).next().unwrap_or("");
+        Some(match base {
+            "BOOLEAN" | "BOOL" => KqlType::Bool,
+            "TINYINT" | "SMALLINT" | "INTEGER" | "INT" | "INT1" | "INT2" | "INT4" | "UTINYINT" | "USMALLINT" | "SERIAL" => KqlType::Int,
+            "BIGINT" | "INT8" | "UINTEGER" | "UBIGINT" | "HUGEINT" | "UHUGEINT" | "BIGSERIAL" | "LONG" => KqlType::Long,
+            "DOUBLE" | "FLOAT" | "FLOAT4" | "FLOAT8" | "REAL" => KqlType::Real,
+            "DECIMAL" | "NUMERIC" => KqlType::Decimal,
+            "VARCHAR" | "TEXT" | "STRING" | "CHAR" | "BPCHAR" | "NAME" | "ENUM" => KqlType::String,
+            "TIMESTAMP" | "TIMESTAMPTZ" | "DATETIME" | "DATE" | "TIMESTAMP_S" | "TIMESTAMP_MS" | "TIMESTAMP_NS" => KqlType::DateTime,
+            "INTERVAL" => KqlType::TimeSpan,
+            "UUID" => KqlType::Guid,
+            "JSON" | "JSONB" | "STRUCT" | "MAP" | "LIST" => KqlType::Dynamic,
+            _ if t.ends_with("[]") => KqlType::Dynamic,
+            _ if t.starts_with("TIMESTAMP") => KqlType::DateTime,
+            _ => return None,
+        })
+    }
+
     pub fn is_numeric(self) -> bool {
         matches!(self, KqlType::Int | KqlType::Long | KqlType::Real | KqlType::Decimal)
     }

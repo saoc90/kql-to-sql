@@ -1275,7 +1275,25 @@ impl<'a> Parser<'a> {
                     loop {
                         let name = self.name()?;
                         self.expect_punct("=")?;
-                        let value = self.or()?;
+                        // list values: `ycolumns=a, b` or `ycolumns=(a, b)`
+                        let mut items = Vec::new();
+                        if self.is_punct(0, "(") {
+                            self.bump();
+                            loop {
+                                items.push(Expr::Name(self.name()?));
+                                if !self.eat_punct(",") {
+                                    break;
+                                }
+                            }
+                            self.expect_punct(")")?;
+                        } else {
+                            items.push(self.or()?);
+                            while self.is_punct(0, ",") && self.is_name_start(1) && !self.is_punct(if self.is_punct(1, "[") { 4 } else { 2 }, "=") {
+                                self.bump();
+                                items.push(Expr::Name(self.name()?));
+                            }
+                        }
+                        let value = if items.len() == 1 { items.pop().unwrap() } else { Expr::Call { name: "__list".into(), args: items.into_iter().map(Arg::positional).collect() } };
                         props.push((name, value));
                         if !self.eat_punct(",") {
                             break;

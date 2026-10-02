@@ -49,6 +49,14 @@ const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "au
 /// Parses the text of a Kusto `datetime(...)` literal into microseconds since the epoch.
 pub fn parse_datetime(text: &str) -> Option<i64> {
     let t = text.trim();
+    let t = t.strip_prefix('\'').and_then(|x| x.strip_suffix('\'')).or_else(|| t.strip_prefix('"').and_then(|x| x.strip_suffix('"'))).unwrap_or(t).trim();
+    // yyyy and yyyy-MM
+    if t.len() == 4 && t.bytes().all(|b| b.is_ascii_digit()) {
+        return make_us(t.parse().ok()?, 1, 1, 0, 0, 0, 0);
+    }
+    if t.len() == 7 && t.as_bytes()[4] == b'-' && t[..4].bytes().all(|b| b.is_ascii_digit()) && t[5..].bytes().all(|b| b.is_ascii_digit()) {
+        return make_us(t[..4].parse().ok()?, t[5..].parse().ok()?, 1, 0, 0, 0, 0);
+    }
     if t.is_empty() {
         return None;
     }

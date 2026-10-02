@@ -143,6 +143,25 @@ fn multi_column_aggregate(ctx: &mut Ctx, ne: &NamedExpr, cols: &[Column], keys: 
             }
             Ok(Some(rename(out)))
         }
+        "percentilesw" => {
+            if args.len() < 3 {
+                return err("percentilesw() requires at least three arguments");
+            }
+            let x = ctx.expr(&args[0].expr, &scope, env)?;
+            let w = ctx.expr(&args[1].expr, &scope, env)?;
+            let xname = result_name(&args[0].expr, false).unwrap_or_default();
+            let mut out = Vec::new();
+            for a in &args[2..] {
+                let p = ctx.expr(&a.expr, &Scope::empty(), env)?;
+                let pv = match p.konst {
+                    Some(Const::Long(v)) => v as f64,
+                    Some(Const::Real(v)) => v,
+                    _ => return err("percentilesw(): percentiles must be constants"),
+                };
+                out.push((format!("percentile_{xname}_{}", format_percentile(pv)), TExpr::new(weighted_percentile_sql(ctx, &x.sql, &w.sql, pv)?, x.ty)));
+            }
+            Ok(Some(rename(out)))
+        }
         "percentiles" | "percentiles_array" if lname == "percentiles" => {
             if args.len() < 2 {
                 return err("percentiles() requires at least two arguments");
@@ -258,8 +277,7 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: 
             let filter = if n == 2 { format!(" FILTER (WHERE {})", pred(ctx, &a[1])) } else { String::new() };
             let ty = promoted(x.ty);
             let zero = if ty == KqlType::TimeSpan || ty.is_integer() { "0".to_string() } else { d.real_literal(0.0) };
-            let inner = if ty.is_integer() { d.cast(&x.sql, KqlType::Long) } else { x.sql.clone() };
-            let s = format!("SUM({inner}){filter}");
+            let s = format!("SUM({}){filter}", x.sql);
             let s = if ty.is_integer() || ty == KqlType::TimeSpan { d.cast(&s, KqlType::Long) } else { s };
             (format!("COALESCE({s}, {zero})"), ty)
         }
@@ -330,6 +348,26 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: 
             let x = num(&a[0]);
             (format!("COALESCE({f}(CAST({} AS {real})){filter}, {})", x.sql, d.real_literal(0.0)), KqlType::Real)
         }
+        "covariance" | "covariancep" | "covarianceif" | "covariancepif" => {
+            let f = if lname.starts_with("covariancep") { "covar_pop" } else { "covar_samp" };
+            let filter = if lname.ends_with("if") { format!(" FILTER (WHERE {})", pred(ctx, &a[2])) } else { String::new() };
+            let (x, y) = (num(&a[0]), num(&a[1]));
+            (format!("COALESCE({f}(CAST({} AS {real}), CAST({} AS {real})){filter}, {})", x.sql, y.sql, d.real_literal(0.0)), KqlType::Real)
+        }
+        "variancepif" | "stdevpif" => {
+            let f = if lname.starts_with("variance") { "var_pop" } else { "stddev_pop" };
+            let x = num(&a[0]);
+            (format!("COALESCE({f}(CAST({} AS {real})) FILTER (WHERE {}), {})", x.sql, pred(ctx, &a[1]), d.real_literal(0.0)), KqlType::Real)
+        }
+        "percentilew" => {
+            need(3, 3)?;
+            let p = match a[2].konst {
+                Some(Const::Long(v)) => v as f64,
+                Some(Const::Real(v)) => v,
+                _ => return err("percentilew(): the percentile must be a constant"),
+            };
+            (weighted_percentile_sql(ctx, &a[0].sql, &a[1].sql, p)?, a[0].ty)
+        }
         "binary_all_and" | "binary_all_or" | "binary_all_xor" => {
             let f = match lname.as_str() {
                 "binary_all_and" => "bit_and",
@@ -338,7 +376,14 @@ pub(crate) fn call(ctx: &mut Ctx, name: &str, args: &[Arg], scope: &Scope, env: 
             };
             (format!("{f}({})", d.cast(&a[0].sql, KqlType::Long)), KqlType::Long)
         }
-        "hll" | "hll_if" | "hll_merge" | "tdigest" | "tdigest_merge" | "merge_tdigest" => {
+        // hll sketches are represented exactly, as the set of distinct values; dcount_hll()
+        // counts them and hll_merge() unions them
+        "hll" | "hll_if" => {
+            let cond = if lname == "hll_if" { Some(pred(ctx, &a[1])) } else { None };
+            (make_list_sql(ctx, &a[0], cond.as_deref(), true, false, None, &[]), KqlType::Dynamic)
+        }
+        "hll_merge" => (make_list_sql(ctx, &a[0], None, true, false, None, &[]), KqlType::Dynamic),
+        "tdigest" | "tdigest_merge" | "merge_tdigest" => {
             return err(format!("{name}() is not supported"));
         }
         _ => return err(format!("unsupported aggregate function '{name}'")),
@@ -401,5 +446,16 @@ fn make_list_sql(ctx: &Ctx, x: &TExpr, cond: Option<&str>, distinct: bool, with_
             let ob = if distinct { String::new() } else { order_by };
             format!("COALESCE(jsonb_agg({dis}{v}{ob}){filter}, CAST('[]' AS jsonb))")
         }
+    }
+}
+
+/// Weighted nearest-rank percentile: the smallest value whose cumulative weight reaches p% of the
+/// total weight.
+fn weighted_percentile_sql(ctx: &Ctx, x: &str, w: &str, p: f64) -> Result<String> {
+    match ctx.d.kind() {
+        Dialect::DuckDb => Ok(format!(
+            "list_extract(list_filter(list_transform(list_sort(list([{x}, {w}]) FILTER (WHERE {x} IS NOT NULL)), (e, i) -> [e[1], list_sum(list_transform(list_slice(list_sort(list([{x}, {w}]) FILTER (WHERE {x} IS NOT NULL)), 1, i), z -> z[2]))]), e -> e[2] >= {p} / 100.0 * sum({w}) FILTER (WHERE {x} IS NOT NULL)), 1)[1]"
+        )),
+        Dialect::Postgres => err("weighted percentiles are not supported for PostgreSQL yet"),
     }
 }

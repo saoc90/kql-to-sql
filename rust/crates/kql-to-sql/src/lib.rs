@@ -117,10 +117,36 @@ pub enum Dialect {
     Postgres,
 }
 
+/// Chart instructions from a `| render` operator (the fields of Kusto's "Visualization"
+/// result annotation). Rendering never changes the SQL.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RenderInfo {
+    pub visualization: String,
+    pub title: Option<String>,
+    pub x_column: Option<String>,
+    pub series: Vec<String>,
+    pub y_columns: Vec<String>,
+    pub anomaly_columns: Vec<String>,
+    pub x_title: Option<String>,
+    pub y_title: Option<String>,
+    pub x_axis: Option<String>,
+    pub y_axis: Option<String>,
+    pub legend: Option<String>,
+    pub y_split: Option<String>,
+    pub accumulate: bool,
+    pub kind: Option<String>,
+    pub ymin: Option<String>,
+    pub ymax: Option<String>,
+    pub xmin: Option<String>,
+    pub xmax: Option<String>,
+}
+
 /// The result of translating one KQL query.
 #[derive(Debug, Clone)]
 pub struct Translation {
     pub sql: String,
+    /// Set when the query ends with `| render`.
+    pub render: Option<RenderInfo>,
     /// Output schema, with Kusto types. Timespan columns are emitted as SQL INTERVAL,
     /// dynamic columns as JSON.
     pub columns: Vec<Column>,
@@ -217,5 +243,5 @@ fn finish(ctx: &mut binder::Ctx, rel: binder::Rel) -> Translation {
             .collect();
         format!("WITH {} {body}", ctes.join(", "))
     };
-    Translation { sql, columns }
+    Translation { sql, columns, render: ctx.render.take() }
 }

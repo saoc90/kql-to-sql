@@ -637,6 +637,7 @@ name = "kql-cli"
 version = "0.1.0"
 dependencies = [
  "kql-to-sql",
+ "serde_json",
 ]
 
 [[package]]
@@ -663,6 +664,16 @@ version = "0.1.0"
 dependencies = [
  "kql-parser",
  "serde_json",
+]
+
+[[package]]
+name = "kql-wasm"
+version = "0.1.0"
+dependencies = [
+ "kql-parser",
+ "kql-to-sql",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]

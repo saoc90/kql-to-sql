@@ -111,7 +111,13 @@ impl Ctx<'_> {
                 let x = &a[0];
                 Ok(match x.ty {
                     Dynamic => x.clone(),
-                    String => mk(format!("CASE WHEN {0} = '' THEN NULL ELSE COALESCE({1}, {2}) END", x.sql, d.try_cast(&x.sql, Dynamic), d.to_json(&x.sql)), Dynamic),
+                    String => {
+                        let parse = match d.kind() {
+                            Dialect::DuckDb => format!("CASE WHEN json_valid({0}) THEN CAST({0} AS JSON) ELSE to_json({0}) END", x.sql),
+                            Dialect::Postgres => format!("COALESCE({}, {})", d.try_cast(&x.sql, Dynamic), d.to_json(&x.sql)),
+                        };
+                        mk(format!("CASE WHEN {} = '' THEN NULL ELSE {parse} END", x.sql), Dynamic)
+                    }
                     _ => self.to_dynamic(x.clone()),
                 })
             }
@@ -674,6 +680,11 @@ impl Ctx<'_> {
                 need(1, 1)?;
                 Ok(mk(d.json_array_length(&a[0].sql), Long))
             }
+            "dcount_hll" => {
+                // hll sketches are exact sets (see aggs.rs)
+                need(1, 1)?;
+                Ok(mk(format!("COALESCE({}, 0)", d.json_array_length(&a[0].sql)), Long))
+            }
             "pack_array" => {
                 let items: Vec<std::string::String> = a.iter().map(|t| self.to_dynamic(t.clone()).sql).collect();
                 Ok(mk(d.json_array(&items), Dynamic))
@@ -889,16 +900,21 @@ impl Ctx<'_> {
         let parts = [x, size];
         match (x.ty, size.ty) {
             (DateTime, TimeSpan) => {
-                let step = format!("CAST(trunc({} / 10) AS BIGINT)", size.sql);
-                let base = match at {
-                    Some(a) => d.epoch_us(&self.convert(a.clone(), DateTime).sql),
-                    // Kusto bins datetimes from 0001-01-01 (tick 0)
-                    None => "(-62135596800000000)".into(),
+                let step = match size.konst {
+                    Some(Const::TimeSpan(t)) if t >= 10 => (t / 10).to_string(),
+                    _ => format!("CAST(trunc({} / 10) AS BIGINT)", size.sql),
                 };
-                // exact integer floor division (doubles lose precision on microsecond counts)
-                let off = format!("({} - {base})", d.epoch_us(&x.sql));
                 let idiv = if d.kind() == Dialect::Postgres { "/" } else { "//" };
-                let us = format!("(({off} - ((({off} % {step}) + {step}) % {step})) {idiv} {step} * {step} + {base})");
+                let us = match at {
+                    // Kusto bins datetimes from 0001-01-01 (tick 0); offsets from it are never
+                    // negative, so integer division is floor division
+                    None => format!("(({} + 62135596800000000) {idiv} {step} * {step} - 62135596800000000)", d.epoch_us(&x.sql)),
+                    Some(a) => {
+                        let base = d.epoch_us(&self.convert(a.clone(), DateTime).sql);
+                        let off = format!("({} - {base})", d.epoch_us(&x.sql));
+                        format!("(({off} - ((({off} % {step}) + {step}) % {step})) {idiv} {step} * {step} + {base})")
+                    }
+                };
                 Ok(TExpr::derived(d.ts_from_us(&us), DateTime, &parts))
             }
             (TimeSpan, TimeSpan) => {

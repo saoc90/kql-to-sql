@@ -236,11 +236,18 @@ struct RunArgs {
     compare_csharp: bool,
     record_sql: bool,
     out: Option<PathBuf>,
+    /// Fail (exit 1) if fewer records match Kusto.
+    min_match: Option<usize>,
+    /// Fail (exit 1) if more records produce invalid SQL.
+    max_sql_errors: Option<usize>,
 }
 
 const USAGE: &str = "usage:
   kql-oracle run [--in <file-or-dir>]... [--filter <substr of Id/Family/source>] [--verbose]
                  [--failures-only] [--compare-csharp] [--record-sql] [--out <file.jsonl>]
+                 [--min-match <n>] [--max-sql-errors <n>]   (CI gates: exit 1 when violated)
+  kql-oracle smoke [--queries <file.jsonl>] [--csv <StormEvents.csv.gz>] [--verbose]
+  kql-oracle sql \"<SQL>\"
   kql-oracle one --kql \"<KQL>\"
   kql-oracle one --id <Id | source/Id> [--in <file-or-dir>]...
 
@@ -287,6 +294,8 @@ fn parse_run_args(args: &[String]) -> Result<RunArgs, String> {
         let mut value = || it.next().cloned().ok_or_else(|| format!("{a} needs a value\n{USAGE}"));
         match a.as_str() {
             "--in" => out.inputs.push(PathBuf::from(value()?)),
+            "--min-match" => out.min_match = Some(value()?.parse().map_err(|_| "--min-match needs a number".to_string())?),
+            "--max-sql-errors" => out.max_sql_errors = Some(value()?.parse().map_err(|_| "--max-sql-errors needs a number".to_string())?),
             "--filter" => out.filter = Some(value()?),
             "--out" => out.out = Some(PathBuf::from(value()?)),
             "--verbose" | "-v" => out.verbose = true,
@@ -374,6 +383,18 @@ fn cmd_run(args: RunArgs) -> Result<(), String> {
     println!(
         "\nvs C#: kept {kept}/{csharp_matches} C# matches, regressions {regressions}, improvements {improvements}"
     );
+    let count = |o: Outcome| totals.iter().filter(|(x, _)| *x == o).map(|(_, n)| *n).sum::<usize>();
+    let (matches, sql_errors) = (count(Outcome::Match), count(Outcome::SqlExecError));
+    if let Some(min) = args.min_match {
+        if matches < min {
+            return Err(format!("gate failed: {matches} matches < --min-match {min}"));
+        }
+    }
+    if let Some(max) = args.max_sql_errors {
+        if sql_errors > max {
+            return Err(format!("gate failed: {sql_errors} invalid-SQL results > --max-sql-errors {max}"));
+        }
+    }
     Ok(())
 }
 
